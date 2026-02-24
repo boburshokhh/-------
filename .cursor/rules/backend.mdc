@@ -1,0 +1,36 @@
+---
+description: Правила и паттерны для разработки backend части (Node.js, Express, SQLite)
+globs: backend/**/*.js
+alwaysApply: false
+---
+
+# Backend Rules (Express + SQLite)
+
+## Express Паттерны
+
+- **Обработка ошибок**: Никогда не отправляйте ответы с ошибками напрямую из роутов (через `res.status(500).send(...)`).
+  - Всегда передавайте ошибку в `next(error)`.
+  - Централизованный обработчик находится в `backend/middleware/errorHandler.js`.
+  - Присваивайте ошибкам кастомные типы (например, `err.type = 'LLM_ERROR'`), чтобы `errorHandler` мог отдать правильный статус и JSON.
+
+- **Формат ответов API**:
+  - Успешный ответ всегда возвращает JSON объект.
+  - Ошибки всегда возвращают объект `{ "error": "Краткое описание", "details": "Детали (опционально)" }`.
+
+## SQLite (`better-sqlite3`) Паттерны
+
+- **Prepared Statements**: ВСЕГДА используйте параметризованные запросы (`db.prepare('... WHERE id = ?').get(id)`).
+- Никакой конкатенации строк при формировании SQL (защита от SQL Injection).
+
+```javascript
+// ❌ ПЛОХО
+const result = db.exec(`DELETE FROM tests WHERE id = ${req.params.id}`);
+
+// ✅ ХОРОШО
+const result = db.prepare('DELETE FROM tests WHERE id = ?').run(req.params.id);
+```
+
+## LLM Интеграция
+- Вся работа с LLM изолирована в `backend/services/generator.js`.
+- Запросы к Gemini делаются через `ai.models.generateContent()`.
+- Ожидается строгий JSON в формате массива. Обязательно используйте `responseMimeType: "application/json"`.

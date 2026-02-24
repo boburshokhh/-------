@@ -1,0 +1,39 @@
+---
+description: Правила разработки Frontend SPA (Vanilla JS)
+globs: frontend/**/*.{html,js,css}
+alwaysApply: false
+---
+
+# Frontend Rules (Vanilla JS)
+
+## Архитектура
+- Приложение работает как SPA (Single Page Application) без фреймворков.
+- Роутинг основан на hash (`#/tests`, `#/quiz/1`). Логика роутинга находится в `App.router()`.
+
+## API Взаимодействие
+- Вся работа с сетью инкапсулирована в `frontend/js/api.js` (объект `API`).
+- Не пишите вызовы `fetch()` напрямую в компонентах (Upload, Quiz, Results). Вызывайте методы объекта `API`.
+
+```javascript
+// ❌ ПЛОХО (в quiz.js)
+const response = await fetch('/api/tests/' + id);
+
+// ✅ ХОРОШО (в quiz.js)
+this.testData = await API.getTest(id);
+```
+
+## Безопасность (XSS)
+- Никогда не вставляйте пользовательский или LLM-контент напрямую через `.innerHTML` без эскейпинга.
+- Используйте метод `this.escapeHtml(text)` (присутствует в `quiz.js` и `results.js`) перед рендерингом строк.
+
+```javascript
+// ❌ ПЛОХО
+container.innerHTML = `<h3>${test.title}</h3>`;
+
+// ✅ ХОРОШО
+container.innerHTML = `<h3>${this.escapeHtml(test.title)}</h3>`;
+```
+
+## Управление состоянием (UI)
+- Состояние (показ лоадеров, переключение страниц) управляется через CSS классы (обычно добавление/удаление класса `.active`).
+- Глобальные всплывающие уведомления вызываются через `App.toast('Сообщение', 'success' | 'error' | 'info')`.

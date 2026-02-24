@@ -1,0 +1,25 @@
+# Git и локальные артефакты
+.git
+.gitignore
+.cursor
+*.log
+
+# Секреты (передаются через env при запуске)
+.env
+.env.*
+!.env.example
+
+# Локальные данные
+*.db
+backend/uploads
+backend/data.db
+
+# Зависимости (собираются в образе)
+backend/node_modules
+node_modules
+
+# Документация и планы (не нужны в образе)
+docs
+.cursor
+plans
+*.plan.md
