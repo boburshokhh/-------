@@ -1,6 +1,9 @@
 # AI Test Generator — деплой на Ubuntu (nginx + app + volume)
 # Запуск: docker compose up -d
 # Остановка: docker compose down
+#
+# Порты: единственный хост-порт — HOST_PORT из .env (по умолчанию 80).
+# На сервере заняты: 3000, 8000, 5432, 6379, 9000, 9001 — их не используем.
 
 services:
   # Приложение (Node.js + OCR)
@@ -34,7 +37,7 @@ services:
     container_name: ai-testgen-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "${HOST_PORT:-80}:80"
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
