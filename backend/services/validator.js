@@ -48,7 +48,9 @@ function validateSingleQuestion(q) {
     const result = {
         type: q.type,
         question: q.question.trim(),
-        explanation: (q.explanation || '').trim()
+        explanation: (q.explanation || '').trim(),
+        // Сохраняем ссылки на источники, если переданы (RAG citations)
+        sources: Array.isArray(q.sources) ? q.sources : [],
     };
 
     switch (q.type) {

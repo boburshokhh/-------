@@ -8,6 +8,7 @@ const db = require('../db/database');
 const { parseDocument } = require('../services/parser');
 const { generateTest } = require('../services/generator');
 const { countTokens } = require('../services/chunker');
+const { indexDocument } = require('../services/indexer');
 
 const router = express.Router();
 
@@ -77,10 +78,15 @@ router.post('/', upload.single('file'), async (req, res, next) => {
 
         console.log(`[UPLOAD] Документ #${documentId}: ${text.length} символов, ${countTokens(text)} токенов`);
 
-        // 4. Генерация теста через LLM
-        const testData = await generateTest(text, file.originalname);
+        // 4. Индексация документа (чанки + эмбеддинги + summary → SQLite)
+        console.log(`[UPLOAD] Индексация документа #${documentId}...`);
+        const indexedChunks = await indexDocument(documentId, text);
+        console.log(`[UPLOAD] Индекс готов: ${indexedChunks.length} чанков`);
 
-        // 5. Сохранение теста в БД
+        // 5. Генерация теста через LLM + RAG
+        const testData = await generateTest(text, file.originalname, indexedChunks);
+
+        // 6. Сохранение теста в БД
         const testInsert = db.prepare(`
       INSERT INTO tests (document_id, title, questions_json, total_questions)
       VALUES (?, ?, ?, ?)
