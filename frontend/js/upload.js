@@ -6,6 +6,8 @@ const Upload = {
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
 
+        this.loadModelSelector();
+
         // Click to upload
         dropZone.addEventListener('click', () => fileInput.click());
 
@@ -37,6 +39,35 @@ const Upload = {
         });
     },
 
+    async loadModelSelector() {
+        const select = document.getElementById('model-select');
+        if (!select) return;
+        try {
+            const { models, defaultModel } = await API.getModels();
+            select.innerHTML = '';
+            if (!models || models.length === 0) {
+                select.innerHTML = '<option value="">По умолчанию</option>';
+                return;
+            }
+            models.forEach((m) => {
+                const opt = document.createElement('option');
+                opt.value = m.id;
+                opt.textContent = m.label;
+                if (m.id === defaultModel) opt.selected = true;
+                select.appendChild(opt);
+            });
+        } catch {
+            select.innerHTML = '<option value="">По умолчанию</option>';
+        }
+    },
+
+    getSelectedModelId() {
+        const select = document.getElementById('model-select');
+        if (!select) return null;
+        const v = select.value;
+        return v || null;
+    },
+
     async handleFile(file) {
         // Валидация на клиенте
         const allowedTypes = [
@@ -61,7 +92,8 @@ const Upload = {
             // Обновляем прогресс
             this.updateProgress('Обработка документа и генерация теста...', 'ИИ анализирует текст, это может занять 1–2 минуты', 30);
 
-            const result = await API.upload(file);
+            const modelId = this.getSelectedModelId();
+            const result = await API.upload(file, modelId);
 
             this.updateProgress('Тест готов!', `${result.totalQuestions} вопросов создано`, 100);
 

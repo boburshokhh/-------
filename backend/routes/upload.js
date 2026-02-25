@@ -84,7 +84,14 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         console.log(`[UPLOAD] Индекс готов: ${indexedChunks.length} чанков`);
 
         // 5. Генерация теста через LLM + RAG
-        const testData = await generateTest(text, file.originalname, indexedChunks);
+        const modelId = req.body.model && typeof req.body.model === 'string' ? req.body.model.trim() : null;
+        const allowedIds = (config.LLM_MODELS || []).map(m => m.id);
+        const model = (modelId && allowedIds.includes(modelId)) ? modelId : config.LLM_MODEL;
+        if (modelId && model !== modelId) {
+            console.warn(`[UPLOAD] Неизвестная модель "${modelId}", использована ${model}`);
+        }
+        console.log(`[UPLOAD] Генерация теста с моделью: ${model}`);
+        const testData = await generateTest(text, file.originalname, indexedChunks, null, { model });
 
         // 6. Сохранение теста в БД
         const testInsert = db.prepare(`

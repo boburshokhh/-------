@@ -189,6 +189,43 @@ body::before {
   margin-top: 8px;
 }
 
+/* ============ Model selector ============ */
+.model-selector-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.model-selector-label {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.model-select {
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 0.95rem;
+  min-width: 220px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.model-select:hover {
+  border-color: var(--border-hover);
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
 /* ============ Upload Area ============ */
 .upload-area {
   max-width: 600px;

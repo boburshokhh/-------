@@ -51,6 +51,14 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+// Список моделей для переключателя
+app.get('/api/models', (req, res) => {
+    res.json({
+        models: config.LLM_MODELS || [],
+        defaultModel: config.LLM_MODEL
+    });
+});
+
 // Serve frontend static files
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 

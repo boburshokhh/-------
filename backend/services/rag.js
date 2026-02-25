@@ -184,9 +184,11 @@ async function hybridRetrieve(query, indexedChunks, k, opts = {}) {
 /**
  * Извлекает ключевые темы из ПОЛНОГО текста документа
  * (не только начало — делаем репрезентативную выборку)
+ * @param {string} [model] - ID модели (если не передан — config.LLM_MODEL)
  */
-async function extractThemes(fullText, numThemes = null) {
+async function extractThemes(fullText, numThemes = null, model = null) {
     const target = numThemes || Math.min(8, Math.max(5, Math.floor(fullText.length / 3000)));
+    const llmModel = model || config.LLM_MODEL;
 
     // Берём начало, середину и конец документа для покрытия всего материала
     const third = Math.floor(fullText.length / 3);
@@ -199,7 +201,7 @@ async function extractThemes(fullText, numThemes = null) {
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const response = await ai.models.generateContent({
-                model: config.LLM_MODEL,
+                model: llmModel,
                 contents: `Проанализируй следующие фрагменты учебного материала (начало, середина, конец документа) и выдели из них ${target} ключевых тем или концепций, которые РАВНОМЕРНО ОХВАТЫВАЮТ весь материал. Каждая тема должна быть конкретной и достаточно специфичной, чтобы по ней можно было задать 2–5 проверочных вопросов.\n\nФрагменты:\n${sample}\n\nВерни JSON массив строк (названия тем). Никакого другого текста.`,
                 config: {
                     temperature: 0.2,
@@ -234,12 +236,14 @@ async function extractThemes(fullText, numThemes = null) {
  * @param {string[]} themes
  * @param {number}   targetMin
  * @param {number}   targetMax
+ * @param {string}   [model] - ID модели (если не передан — config.LLM_MODEL)
  * @returns {Promise<Array<{theme, intent, type}>>}
  */
-async function buildQuestionBlueprint(themes, targetMin, targetMax) {
+async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null) {
     const totalIntents = Math.round((targetMin + targetMax) / 2);
     const intentsPerTheme = Math.max(2, Math.round(totalIntents / themes.length));
     const expectedCount = themes.length * intentsPerTheme;
+    const llmModel = model || config.LLM_MODEL;
 
     const TYPES = ['multiple_choice', 'multiple_choice', 'true_false', 'open_ended'];
 
@@ -247,7 +251,7 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax) {
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const response = await ai.models.generateContent({
-                model: config.LLM_MODEL,
+                model: llmModel,
                 contents: `Ты создаёшь план проверочного теста. Для каждой из ${themes.length} тем придумай ровно ${intentsPerTheme} конкретных «намерений вопроса» (question intent) — короткое описание того, ЧТО именно нужно проверить (1–2 предложения). Также назначь тип вопроса для каждого intent (распределяй равномерно: multiple_choice чаще остальных).\n\nТемы:\n${themes.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\nВерни JSON массив ровно из ${expectedCount} объектов (ни больше, ни меньше):\n[\n  {"theme": "...", "intent": "...", "type": "multiple_choice|true_false|open_ended"},\n  ...\n]\nНикакого другого текста.`,
                 config: {
                     temperature: 0.3,

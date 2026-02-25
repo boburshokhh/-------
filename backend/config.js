@@ -18,7 +18,13 @@ module.exports = {
   MAX_PAGES: 30,
   QUESTIONS_PER_CHUNK: parseInt(process.env.QUESTIONS_PER_CHUNK, 10) || 4,
   CHAR_LENGTH_PER_QUESTION: parseInt(process.env.CHAR_LENGTH_PER_QUESTION, 10) || 2000,
-  LLM_MODEL: 'gemini-2.5-flash',
+  LLM_MODEL: process.env.LLM_MODEL || 'gemini-2.5-flash',
+  LLM_MODELS: [
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (быстрая)' },
+    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+    { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+  ],
   LLM_MAX_RETRIES: 3,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || 'gemini-embedding-001',
   // RAG настройки

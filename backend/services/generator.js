@@ -52,9 +52,11 @@ function sleep(ms) {
 
 /**
  * Генерирует один вопрос по intent + evidence с retry
+ * @param {string} [model] - ID модели (если не передан — config.LLM_MODEL)
  */
-async function generateSingleQuestion(intent, evidenceText, questionType, chunkIds, retries = null) {
+async function generateSingleQuestion(intent, evidenceText, questionType, chunkIds, retries = null, model = null) {
     retries = retries || config.LLM_MAX_RETRIES;
+    const llmModel = model || config.LLM_MODEL;
     let lastError;
 
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -62,7 +64,7 @@ async function generateSingleQuestion(intent, evidenceText, questionType, chunkI
             const userPrompt = `Намерение вопроса: "${intent.intent}"\nТема: "${intent.theme}"\n\nEvidence (источники):\n${evidenceText}`;
 
             const response = await ai.models.generateContent({
-                model: config.LLM_MODEL,
+                model: llmModel,
                 contents: userPrompt,
                 config: {
                     systemInstruction: getSystemPrompt(questionType),
@@ -103,12 +105,14 @@ async function generateSingleQuestion(intent, evidenceText, questionType, chunkI
 /**
  * Проверяет, подтверждается ли ответ evidence (anti-hallucination)
  * Дешёвый вызов с temperature=0
+ * @param {string} [model] - ID модели (если не передан — config.LLM_MODEL)
  */
-async function checkGrounding(question, evidenceText) {
+async function checkGrounding(question, evidenceText, model = null) {
+    const llmModel = model || config.LLM_MODEL;
     try {
         const prompt = `Вопрос: ${question.question}\nОтвет: ${JSON.stringify(question.correct_answer)}\nОбъяснение: ${question.explanation}\n\nEvidence:\n${evidenceText}`;
         const response = await ai.models.generateContent({
-            model: config.LLM_MODEL,
+            model: llmModel,
             contents: prompt,
             config: {
                 systemInstruction: GROUNDING_SYSTEM,
@@ -232,10 +236,12 @@ function computeTargetQuestionCount(fullText, indexedChunks) {
  * @param {string}   docName        - Имя файла
  * @param {Array}    indexedChunks  - Проиндексированные чанки (из indexer.js)
  * @param {function} onProgress     - Коллбэк прогресса (currentStep, totalSteps)
+ * @param {object}   [opts]         - Опции: { model } — ID модели для генерации
  * @returns {Promise<{title, questions}>}
  */
-async function generateTest(fullText, docName, indexedChunks, onProgress) {
+async function generateTest(fullText, docName, indexedChunks, onProgress, opts = {}) {
     const startTime = Date.now();
+    const model = opts.model || config.LLM_MODEL;
 
     // Fallback: если индекс не передан — используем старый путь через chunkText
     if (!indexedChunks || indexedChunks.length === 0) {
@@ -257,18 +263,18 @@ async function generateTest(fullText, docName, indexedChunks, onProgress) {
     const logReason = baseFromChunks > 0
         ? `по чанкам: ${indexedChunks.length} × ${config.QUESTIONS_PER_CHUNK} = ${baseFromChunks} → ${targetCount}`
         : `по тексту: ${fullText.length} / ${config.CHAR_LENGTH_PER_QUESTION} → ${targetCount}`;
-    console.log(`[GENERATOR] Цель: ${targetMin}–${targetMax} вопросов, выбран ${targetCount} (${logReason}), чанков: ${indexedChunks.length}`);
+    console.log(`[GENERATOR] Цель: ${targetMin}–${targetMax} вопросов, выбран ${targetCount} (${logReason}), чанков: ${indexedChunks.length}, модель: ${model}`);
 
     // Шаг 1: Извлечение тем
     if (onProgress) onProgress(1, 6);
     console.log('[GENERATOR] Извлечение тем...');
-    const themes = await rag.extractThemes(fullText);
+    const themes = await rag.extractThemes(fullText, null, model);
     console.log(`[GENERATOR] Темы (${themes.length}):`, themes);
 
     // Шаг 2: Blueprint — план вопросов
     if (onProgress) onProgress(2, 6);
     console.log('[GENERATOR] Построение blueprint...');
-    const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount);
+    const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
     console.log(`[GENERATOR] Blueprint: ${blueprint.length} intent-ов`);
 
     // Шаг 3: Retrieval + compression + генерация по каждому intent
@@ -294,12 +300,12 @@ async function generateTest(fullText, docName, indexedChunks, onProgress) {
         const chunkIds = relevantChunks.map(c => c.id);
 
         // Генерация одного вопроса
-        const question = await generateSingleQuestion(intent, evidenceText, intent.type, chunkIds);
+        const question = await generateSingleQuestion(intent, evidenceText, intent.type, chunkIds, null, model);
 
         if (question) {
             // Проверка groundedness
             if (enableGrounding) {
-                const grounded = await checkGrounding(question, evidenceText);
+                const grounded = await checkGrounding(question, evidenceText, model);
                 if (!grounded) {
                     console.warn(`[GENERATOR] Intent ${i + 1}: вопрос не прошёл groundedness, пропускаем`);
                     await sleep(300);

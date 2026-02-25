@@ -4,9 +4,10 @@
 const API = {
     BASE: '/api',
 
-    async upload(file) {
+    async upload(file, modelId = null) {
         const formData = new FormData();
         formData.append('file', file);
+        if (modelId) formData.append('model', modelId);
 
         const response = await fetch(`${this.BASE}/upload`, {
             method: 'POST',
@@ -15,6 +16,13 @@ const API = {
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.details || data.error || 'Ошибка загрузки');
+        return data;
+    },
+
+    async getModels() {
+        const response = await fetch(`${this.BASE}/models`);
+        const data = await response.json();
+        if (!response.ok) return { models: [], defaultModel: '' };
         return data;
     },
 
