@@ -206,6 +206,26 @@ function levenshteinSimilarity(a, b) {
 // ─── Главная функция ───────────────────────────────────────────────────────
 
 /**
+ * Вычисляет целевое число вопросов по размеру документа (чанки или длина текста),
+ * ограниченное TARGET_QUESTIONS_MIN/MAX.
+ *
+ * @param {string} fullText
+ * @param {Array}  indexedChunks
+ * @returns {number}
+ */
+function computeTargetQuestionCount(fullText, indexedChunks) {
+    const targetMin = config.TARGET_QUESTIONS_MIN || 20;
+    const targetMax = config.TARGET_QUESTIONS_MAX || 30;
+    let baseTarget;
+    if (indexedChunks && indexedChunks.length > 0) {
+        baseTarget = indexedChunks.length * (config.QUESTIONS_PER_CHUNK || 4);
+    } else {
+        baseTarget = Math.round(fullText.length / (config.CHAR_LENGTH_PER_QUESTION || 2000));
+    }
+    return Math.min(targetMax, Math.max(targetMin, baseTarget));
+}
+
+/**
  * Генерирует тест из полного текста документа с полноценным RAG-пайплайном.
  *
  * @param {string}   fullText       - Текст документа
@@ -232,8 +252,12 @@ async function generateTest(fullText, docName, indexedChunks, onProgress) {
 
     const targetMin = config.TARGET_QUESTIONS_MIN || 20;
     const targetMax = config.TARGET_QUESTIONS_MAX || 30;
-
-    console.log(`[GENERATOR] Цель: ${targetMin}–${targetMax} вопросов из ${indexedChunks.length} чанков`);
+    const targetCount = computeTargetQuestionCount(fullText, indexedChunks);
+    const baseFromChunks = indexedChunks.length * (config.QUESTIONS_PER_CHUNK || 4);
+    const logReason = baseFromChunks > 0
+        ? `по чанкам: ${indexedChunks.length} × ${config.QUESTIONS_PER_CHUNK} = ${baseFromChunks} → ${targetCount}`
+        : `по тексту: ${fullText.length} / ${config.CHAR_LENGTH_PER_QUESTION} → ${targetCount}`;
+    console.log(`[GENERATOR] Цель: ${targetMin}–${targetMax} вопросов, выбран ${targetCount} (${logReason}), чанков: ${indexedChunks.length}`);
 
     // Шаг 1: Извлечение тем
     if (onProgress) onProgress(1, 6);
@@ -244,7 +268,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress) {
     // Шаг 2: Blueprint — план вопросов
     if (onProgress) onProgress(2, 6);
     console.log('[GENERATOR] Построение blueprint...');
-    const blueprint = await rag.buildQuestionBlueprint(themes, targetMin, targetMax);
+    const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount);
     console.log(`[GENERATOR] Blueprint: ${blueprint.length} intent-ов`);
 
     // Шаг 3: Retrieval + compression + генерация по каждому intent

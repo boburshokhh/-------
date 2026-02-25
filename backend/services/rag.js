@@ -239,6 +239,7 @@ async function extractThemes(fullText, numThemes = null) {
 async function buildQuestionBlueprint(themes, targetMin, targetMax) {
     const totalIntents = Math.round((targetMin + targetMax) / 2);
     const intentsPerTheme = Math.max(2, Math.round(totalIntents / themes.length));
+    const expectedCount = themes.length * intentsPerTheme;
 
     const TYPES = ['multiple_choice', 'multiple_choice', 'true_false', 'open_ended'];
 
@@ -247,7 +248,7 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax) {
         try {
             const response = await ai.models.generateContent({
                 model: config.LLM_MODEL,
-                contents: `Ты создаёшь план проверочного теста. Для каждой из ${themes.length} тем придумай ровно ${intentsPerTheme} конкретных «намерений вопроса» (question intent) — короткое описание того, ЧТО именно нужно проверить (1–2 предложения). Также назначь тип вопроса для каждого intent (распределяй равномерно: multiple_choice чаще остальных).\n\nТемы:\n${themes.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\nВерни JSON массив объектов:\n[\n  {"theme": "...", "intent": "...", "type": "multiple_choice|true_false|open_ended"},\n  ...\n]\nНикакого другого текста.`,
+                contents: `Ты создаёшь план проверочного теста. Для каждой из ${themes.length} тем придумай ровно ${intentsPerTheme} конкретных «намерений вопроса» (question intent) — короткое описание того, ЧТО именно нужно проверить (1–2 предложения). Также назначь тип вопроса для каждого intent (распределяй равномерно: multiple_choice чаще остальных).\n\nТемы:\n${themes.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\nВерни JSON массив ровно из ${expectedCount} объектов (ни больше, ни меньше):\n[\n  {"theme": "...", "intent": "...", "type": "multiple_choice|true_false|open_ended"},\n  ...\n]\nНикакого другого текста.`,
                 config: {
                     temperature: 0.3,
                     responseMimeType: 'application/json',
@@ -258,7 +259,13 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax) {
             const list = Array.isArray(parsed) ? parsed
                 : (parsed.intents && Array.isArray(parsed.intents) ? parsed.intents : null);
 
-            if (list && list.length > 0) return list;
+            if (list && list.length > 0) {
+                if (list.length < expectedCount) {
+                    console.warn(`[RAG] buildBlueprint: LLM вернул ${list.length} intents, ожидалось ${expectedCount}, попытка ${attempt}/3`);
+                    throw new Error(`Слишком мало intents: ${list.length} < ${expectedCount}`);
+                }
+                return list;
+            }
             throw new Error('Пустой blueprint');
         } catch (err) {
             lastError = err;
