@@ -7,6 +7,9 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+// Trust proxy (nginx/reverse proxy) — обязательно до rate limit, иначе X-Forwarded-For вызовет ValidationError
+app.set('trust proxy', 1);
+
 // Security headers
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
