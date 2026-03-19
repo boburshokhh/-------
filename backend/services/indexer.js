@@ -141,8 +141,8 @@ async function indexDocument(documentId, fullText) {
 
     // Стейтменты для вставки
     const insertChunk = db.prepare(`
-        INSERT INTO document_chunks (document_id, chunk_index, text, token_count, content_hash)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO document_chunks (document_id, chunk_index, text, token_count, content_hash, page, section, heading)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertEmbedding = db.prepare(`
         INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding_model, embedding, dims)
@@ -187,7 +187,12 @@ async function indexDocument(documentId, fullText) {
     const insertedChunks = [];
     const insertAllChunks = db.transaction(() => {
         for (const c of newChunks) {
-            const result = insertChunk.run(documentId, c.index, c.text, c.tokens, c.content_hash);
+            const result = insertChunk.run(
+                documentId, c.index, c.text, c.tokens, c.content_hash,
+                c.page    ?? null,
+                c.section ?? null,
+                c.heading ?? null,
+            );
             insertedChunks.push({ ...c, id: result.lastInsertRowid });
         }
     });
@@ -247,6 +252,9 @@ function loadIndexedChunks(documentId) {
             dc.text,
             dc.token_count,
             dc.content_hash,
+            dc.page,
+            dc.section,
+            dc.heading,
             ce.embedding,
             ce.embedding_model,
             cs.summary_text
@@ -259,14 +267,17 @@ function loadIndexedChunks(documentId) {
     `).all(config.EMBEDDING_MODEL || 'text-embedding-004', documentId);
 
     return rows.map(row => ({
-        id: Number(row.id),
-        document_id: Number(row.document_id),
-        chunk_index: row.chunk_index,
-        text: row.text,
-        token_count: row.token_count,
+        id:           Number(row.id),
+        document_id:  Number(row.document_id),
+        chunk_index:  row.chunk_index,
+        text:         row.text,
+        token_count:  row.token_count,
         content_hash: row.content_hash,
-        embedding: row.embedding ? JSON.parse(row.embedding) : null,
-        summary: row.summary_text ? JSON.parse(row.summary_text) : [],
+        page:         row.page    ?? null,
+        section:      row.section ?? null,
+        heading:      row.heading ?? null,
+        embedding:    row.embedding    ? JSON.parse(row.embedding)    : null,
+        summary:      row.summary_text ? JSON.parse(row.summary_text) : [],
     }));
 }
 

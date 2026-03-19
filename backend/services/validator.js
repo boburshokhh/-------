@@ -1,8 +1,17 @@
 /**
  * Валидация структуры JSON вопросов от LLM.
+ * Формат: только multiple_choice с Bloom's Taxonomy difficulty.
  */
 
-const VALID_TYPES = ['multiple_choice', 'true_false', 'open_ended'];
+const VALID_TYPES = ['multiple_choice'];
+const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
+
+// Маппинг старых уровней сложности → Bloom taxonomy
+const DIFFICULTY_MAPPING = {
+    easy: 'remember',
+    medium: 'understand',
+    hard: 'analyze',
+};
 
 /**
  * Валидирует и очищает массив вопросов от LLM.
@@ -18,6 +27,9 @@ function validateQuestions(questions) {
 
     for (const q of questions) {
         try {
+            // Пропускаем soft-skip объекты от LLM
+            if (q && q.skipped === true) continue;
+
             const validated = validateSingleQuestion(q);
             if (validated) valid.push(validated);
         } catch (e) {
@@ -37,56 +49,47 @@ function validateSingleQuestion(q) {
         throw new Error('Вопрос не является объектом');
     }
 
-    if (!q.type || !VALID_TYPES.includes(q.type)) {
-        throw new Error(`Неизвестный тип вопроса: ${q.type}`);
-    }
+    // Принудительно ставим multiple_choice если type отсутствует или неизвестен
+    const type = q.type && VALID_TYPES.includes(q.type) ? q.type : 'multiple_choice';
 
     if (!q.question || typeof q.question !== 'string' || q.question.length < 5) {
         throw new Error('Некорректный текст вопроса');
     }
 
+    // Нормализуем difficulty: поддерживаем и старые (easy/medium/hard) и новые (Bloom) уровни
+    let difficulty = q.difficulty;
+    if (DIFFICULTY_MAPPING[difficulty]) {
+        difficulty = DIFFICULTY_MAPPING[difficulty];
+    }
+    if (!BLOOM_LEVELS.includes(difficulty)) {
+        difficulty = 'understand'; // безопасный дефолт
+    }
+
     const result = {
-        type: q.type,
+        type,
         question: q.question.trim(),
         explanation: (q.explanation || '').trim(),
-        // Сохраняем ссылки на источники, если переданы (RAG citations)
+        hint: (q.hint || '').trim(),
+        difficulty,
+        sourceChunkId: q.sourceChunkId != null ? q.sourceChunkId : null,
         sources: Array.isArray(q.sources) ? q.sources : [],
     };
 
-    switch (q.type) {
-        case 'multiple_choice':
-            if (!Array.isArray(q.options) || q.options.length !== 4) {
-                throw new Error('multiple_choice должен содержать ровно 4 варианта');
-            }
-            result.options = q.options.map(o => String(o).trim());
-            if (typeof q.correct_answer !== 'number' || q.correct_answer < 0 || q.correct_answer > 3) {
-                throw new Error('correct_answer для multiple_choice должен быть числом 0-3');
-            }
-            result.correct_answer = q.correct_answer;
-            break;
-
-        case 'true_false':
-            if (typeof q.correct_answer !== 'boolean') {
-                // Попробуем преобразовать строки "true"/"false"
-                if (q.correct_answer === 'true' || q.correct_answer === 'True') {
-                    result.correct_answer = true;
-                } else if (q.correct_answer === 'false' || q.correct_answer === 'False') {
-                    result.correct_answer = false;
-                } else {
-                    throw new Error('correct_answer для true_false должен быть boolean');
-                }
-            } else {
-                result.correct_answer = q.correct_answer;
-            }
-            break;
-
-        case 'open_ended':
-            if (!q.correct_answer || typeof q.correct_answer !== 'string') {
-                throw new Error('correct_answer для open_ended должен быть строкой');
-            }
-            result.correct_answer = q.correct_answer.trim();
-            break;
+    // ─── Валидация multiple_choice ────────────────────────────────────────
+    if (!Array.isArray(q.options) || q.options.length !== 4) {
+        throw new Error('multiple_choice должен содержать ровно 4 варианта');
     }
+    result.options = q.options.map(o => String(o).trim());
+
+    // Поддерживаем оба формата: correctIndex (новый) и correct_answer (старый)
+    let correctIdx = q.correctIndex != null ? q.correctIndex : q.correct_answer;
+
+    if (typeof correctIdx !== 'number' || correctIdx < 0 || correctIdx > 3) {
+        throw new Error('correctIndex должен быть числом 0-3');
+    }
+
+    result.correctIndex = correctIdx;
+    result.correct_answer = correctIdx; // backward compatibility
 
     return result;
 }
@@ -105,7 +108,7 @@ function extractJSON(text) {
         .trim();
 
     // Пытаемся найти JSON массив или объект
-    const jsonMatch = cleaned.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+    const jsonMatch = cleaned.match(/([\s\S]*]|{[\s\S]*})/);
     if (jsonMatch) {
         cleaned = jsonMatch[1];
     }
@@ -122,4 +125,4 @@ function extractJSON(text) {
     }
 }
 
-module.exports = { validateQuestions, extractJSON };
+module.exports = { validateQuestions, extractJSON, BLOOM_LEVELS };

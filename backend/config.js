@@ -30,15 +30,18 @@ module.exports = {
   // RAG настройки
   TARGET_QUESTIONS_MIN: parseInt(process.env.TARGET_QUESTIONS_MIN) || 20,
   TARGET_QUESTIONS_MAX: parseInt(process.env.TARGET_QUESTIONS_MAX) || 30,
-  RAG_TOP_K: parseInt(process.env.RAG_TOP_K) || 3,
+  RAG_TOP_K: parseInt(process.env.RAG_TOP_K) || 5,
   RETRIEVAL_TOP_N: parseInt(process.env.RETRIEVAL_TOP_N) || 12,
   RAG_THRESHOLD: parseFloat(process.env.RAG_THRESHOLD) || 0.0,
   MMR_LAMBDA: parseFloat(process.env.MMR_LAMBDA) || 0.65,
   EMBED_BATCH_SIZE: parseInt(process.env.EMBED_BATCH_SIZE) || 5,
   EMBED_CONCURRENCY: parseInt(process.env.EMBED_CONCURRENCY) || 2,
+  LLM_BATCH_SIZE: parseInt(process.env.LLM_BATCH_SIZE) || 4,
+  BACKFILL_MAX_ROUNDS: parseInt(process.env.BACKFILL_MAX_ROUNDS) || 3,
   ENABLE_GROUNDING: process.env.ENABLE_GROUNDING !== 'false',
   DEDUP_THRESHOLD: parseFloat(process.env.DEDUP_THRESHOLD) || 0.88,
   ENABLE_PDF_OCR: process.env.ENABLE_PDF_OCR !== 'false',
   MAX_OCR_PAGES: parseInt(process.env.MAX_OCR_PAGES, 10) || 10,
-  MIN_TEXT_LENGTH: parseInt(process.env.MIN_TEXT_LENGTH, 10) || 50
+  MIN_TEXT_LENGTH: parseInt(process.env.MIN_TEXT_LENGTH, 10) || 50,
+  EVIDENCE_MIN_CHARS: parseInt(process.env.EVIDENCE_MIN_CHARS, 10) || 80
 };

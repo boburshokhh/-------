@@ -179,30 +179,105 @@ async function hybridRetrieve(query, indexedChunks, k, opts = {}) {
     return selected;
 }
 
-// ─── Извлечение тем ────────────────────────────────────────────────────────
+// ─── Извлечение тем (через summaries чанков) ──────────────────────────────
 
 /**
- * Извлекает ключевые темы из ПОЛНОГО текста документа
- * (не только начало — делаем репрезентативную выборку)
- * @param {string} [model] - ID модели (если не передан — config.LLM_MODEL)
+ * Пытается определить заголовок раздела из первых строк чанка.
+ * Ищет строки, похожие на заголовок: короткие, без завершающей пунктуации,
+ * написанные заглавными буквами или начинающиеся с номера/ключевого слова.
  */
-async function extractThemes(fullText, numThemes = null, model = null) {
-    const target = numThemes || Math.min(8, Math.max(5, Math.floor(fullText.length / 3000)));
-    const llmModel = model || config.LLM_MODEL;
+function detectSectionHint(text) {
+    const lines = text.split('\n').slice(0, 6);
+    for (const line of lines) {
+        const t = line.trim();
+        if (t.length < 4 || t.length > 90) continue;
+        if (/[.,:;]$/.test(t)) continue;
+        if (
+            t === t.toUpperCase() ||
+            /^[0-9]+[.\s]/.test(t) ||
+            /^(Глава|Раздел|Тема|Chapter|Section|Part|Unit)\b/i.test(t)
+        ) return t;
+    }
+    return null;
+}
 
-    // Берём начало, середину и конец документа для покрытия всего материала
-    const third = Math.floor(fullText.length / 3);
-    const sampleStart = fullText.slice(0, 3000);
-    const sampleMid = fullText.slice(third, third + 3000);
-    const sampleEnd = fullText.slice(-3000);
-    const sample = `${sampleStart}\n...\n${sampleMid}\n...\n${sampleEnd}`;
+/**
+ * Строит текстовый дайджест из summaries всех чанков.
+ * Если у чанка нет summary — берём начало его текста.
+ * Включает подсказку о разделе (если удалось определить).
+ *
+ * @param {Array}  indexedChunks
+ * @param {string} fullText       - Fallback если indexedChunks пуст
+ * @param {number} maxTotalChars  - Лимит символов на весь дайджест
+ */
+function buildSummaryDigest(indexedChunks, fullText, maxTotalChars = 14000) {
+    if (!indexedChunks || indexedChunks.length === 0) {
+        const third = Math.floor(fullText.length / 3);
+        return [
+            fullText.slice(0, 3000),
+            '...',
+            fullText.slice(third, third + 3000),
+            '...',
+            fullText.slice(-3000),
+        ].join('\n');
+    }
+
+    const blocks = [];
+    let totalChars = 0;
+
+    for (const chunk of indexedChunks) {
+        const hasSummary = Array.isArray(chunk.summary) && chunk.summary.length > 0;
+        const sectionHint = detectSectionHint(chunk.text);
+        const header = sectionHint
+            ? `=== Чанк ${chunk.chunk_index + 1} [${sectionHint}] ===`
+            : `=== Чанк ${chunk.chunk_index + 1} ===`;
+
+        let content;
+        if (hasSummary) {
+            content = chunk.summary.map(f => `• ${f}`).join('\n');
+        } else {
+            content = chunk.text.slice(0, 400);
+        }
+
+        const block = `${header}\n${content}`;
+        if (totalChars + block.length > maxTotalChars) break;
+        blocks.push(block);
+        totalChars += block.length;
+    }
+
+    return blocks.join('\n\n');
+}
+
+/**
+ * Оценивает целевое число тем по размеру документа.
+ */
+function estimateThemeCount(indexedChunks, fullText) {
+    if (indexedChunks && indexedChunks.length > 0) {
+        return Math.min(14, Math.max(5, Math.ceil(indexedChunks.length / 2)));
+    }
+    return Math.min(8, Math.max(5, Math.floor(fullText.length / 3000)));
+}
+
+/**
+ * Извлекает rich-темы документа на основе summaries ВСЕХ чанков.
+ * Каждая тема содержит: topic, section, importance, suggestedCount, difficultyCandidates.
+ *
+ * @param {Array}  indexedChunks - Проиндексированные чанки (с полем summary)
+ * @param {string} fullText      - Полный текст (fallback если нет чанков)
+ * @param {string} [model]
+ * @returns {Promise<Array<{topic,section,importance,suggestedCount,difficultyCandidates}>>}
+ */
+async function extractThemes(indexedChunks, fullText, model = null) {
+    const llmModel = model || config.LLM_MODEL;
+    const digest = buildSummaryDigest(indexedChunks, fullText);
+    const targetThemes = estimateThemeCount(indexedChunks, fullText);
 
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const response = await ai.models.generateContent({
                 model: llmModel,
-                contents: `Проанализируй следующие фрагменты учебного материала (начало, середина, конец документа) и выдели из них ${target} ключевых тем или концепций, которые РАВНОМЕРНО ОХВАТЫВАЮТ весь материал. Каждая тема должна быть конкретной и достаточно специфичной, чтобы по ней можно было задать 2–5 проверочных вопросов.\n\nФрагменты:\n${sample}\n\nВерни JSON массив строк (названия тем). Никакого другого текста.`,
+                contents: `Ты анализируешь учебный материал. На основе фактов из ВСЕХ чанков документа выдели ровно ${targetThemes} ключевых тем, охватывающих документ РАВНОМЕРНО — не только самые заметные части.\n\nДля каждой темы укажи:\n- topic: конкретное название темы\n- section: название раздела или главы (выводи из заголовка чанка, иначе "Раздел N")\n- importance: важность 1–3 (3 = самая важная)\n- suggestedCount: рекомендуемое число вопросов (2–5)\n- difficultyCandidates: массив из 1–3 значений Bloom Taxonomy: "remember", "understand", "apply", "analyze"\n  - remember: факты, определения, даты\n  - understand: объяснение процессов, концепций\n  - apply: применение знаний к ситуациям\n  - analyze: сравнение, причинно-следственные связи\n\nМатериал (факты по чанкам):\n${digest}\n\nВерни JSON массив из ${targetThemes} объектов. Никакого другого текста:\n[{"topic":"...","section":"...","importance":2,"suggestedCount":3,"difficultyCandidates":["understand","apply"]},...]`,
                 config: {
                     temperature: 0.2,
                     responseMimeType: 'application/json',
@@ -210,11 +285,33 @@ async function extractThemes(fullText, numThemes = null, model = null) {
             });
 
             const parsed = extractJSON(response.text);
-            // Принимаем массив или объект {themes:[...]}
             let themes = Array.isArray(parsed) ? parsed
                 : (parsed.themes && Array.isArray(parsed.themes) ? parsed.themes : null);
 
-            if (themes && themes.length > 0) return themes;
+            // Bloom taxonomy levels + backward compat mapping
+            const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
+            const OLD_TO_BLOOM = { easy: 'remember', medium: 'understand', hard: 'analyze' };
+
+            if (themes && themes.length > 0) {
+                themes = themes.map((t, i) => {
+                    let candidates = Array.isArray(t.difficultyCandidates) && t.difficultyCandidates.length > 0
+                        ? t.difficultyCandidates
+                        : ['understand'];
+                    // Маппинг старых значений к Bloom
+                    candidates = candidates.map(d => OLD_TO_BLOOM[d] || d).filter(d => BLOOM_LEVELS.includes(d));
+                    if (candidates.length === 0) candidates = ['understand'];
+
+                    return {
+                        topic: (t.topic || t.name || String(t)).trim(),
+                        section: (t.section || `Раздел ${i + 1}`).trim(),
+                        importance: Math.min(3, Math.max(1, Number(t.importance) || 2)),
+                        suggestedCount: Math.min(5, Math.max(2, Number(t.suggestedCount) || 3)),
+                        difficultyCandidates: candidates,
+                    };
+                });
+                console.log(`[RAG] extractThemes: ${themes.length} тем из ${indexedChunks ? indexedChunks.length : 0} чанков (Bloom taxonomy)`);
+                return themes;
+            }
             throw new Error('Пустой список тем');
         } catch (err) {
             lastError = err;
@@ -224,35 +321,75 @@ async function extractThemes(fullText, numThemes = null, model = null) {
     }
 
     console.error('[RAG] extractThemes не удался:', lastError.message);
-    return ['Основные концепции документа'];
+    return [{ topic: 'Основные концепции документа', section: 'Документ', importance: 2, suggestedCount: 3, difficultyCandidates: ['understand'] }];
 }
 
 // ─── Blueprint (планировщик вопросов) ─────────────────────────────────────
 
 /**
- * Для каждой темы создаёт список question intents (подтем) + тип вопроса.
- * Масштабирует общее количество intents под TARGET_QUESTIONS_MIN/MAX.
+ * Пропорционально распределяет целевое число intents по темам
+ * с учётом importance и suggestedCount каждой темы.
  *
- * @param {string[]} themes
- * @param {number}   targetMin
- * @param {number}   targetMax
- * @param {string}   [model] - ID модели (если не передан — config.LLM_MODEL)
- * @returns {Promise<Array<{theme, intent, type}>>}
+ * @param {Array}  richThemes  - Массив rich-тем
+ * @param {number} totalTarget - Общее желаемое число intents
+ * @returns {number[]}         - Число intents для каждой темы
+ */
+function computeIntentsPerTheme(richThemes, totalTarget) {
+    const weights = richThemes.map(t => (t.importance || 2) * (t.suggestedCount || 3));
+    const totalWeight = weights.reduce((s, w) => s + w, 0);
+
+    const counts = weights.map(w => Math.max(2, Math.round((w / totalWeight) * totalTarget)));
+
+    // Корректируем сумму до totalTarget
+    let diff = counts.reduce((s, n) => s + n, 0) - totalTarget;
+    let idx = 0;
+    while (diff > 0) {
+        if (counts[idx % counts.length] > 2) { counts[idx % counts.length]--; diff--; }
+        idx++;
+    }
+    idx = 0;
+    while (diff < 0) {
+        counts[idx % counts.length]++;
+        diff++;
+        idx++;
+    }
+
+    return counts;
+}
+
+/**
+ * Для каждой темы создаёт список question intents (только multiple_choice).
+ * Принимает как rich-объекты ({topic,section,...}), так и строки (fallback).
+ *
+ * @param {Array}  themes     - Rich-темы или строки
+ * @param {number} targetMin
+ * @param {number} targetMax
+ * @param {string} [model]
+ * @returns {Promise<Array<{theme,section,intent,type}>>}
  */
 async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null) {
-    const totalIntents = Math.round((targetMin + targetMax) / 2);
-    const intentsPerTheme = Math.max(2, Math.round(totalIntents / themes.length));
-    const expectedCount = themes.length * intentsPerTheme;
     const llmModel = model || config.LLM_MODEL;
 
-    const TYPES = ['multiple_choice', 'multiple_choice', 'true_false', 'open_ended'];
+    // Нормализуем: принимаем строки (старый формат) и rich-объекты
+    const richThemes = themes.map(t => typeof t === 'string'
+        ? { topic: t, section: 'Документ', importance: 2, suggestedCount: 3, difficultyCandidates: ['understand'] }
+        : t
+    );
+
+    const totalTarget = Math.round((targetMin + targetMax) / 2);
+    const perTheme = computeIntentsPerTheme(richThemes, totalTarget);
+    const expectedCount = perTheme.reduce((s, n) => s + n, 0);
+
+    const themesForPrompt = richThemes.map((t, i) =>
+        `${i + 1}. [${t.section}] ${t.topic} → ${perTheme[i]} вопросов`
+    ).join('\n');
 
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const response = await ai.models.generateContent({
                 model: llmModel,
-                contents: `Ты создаёшь план проверочного теста. Для каждой из ${themes.length} тем придумай ровно ${intentsPerTheme} конкретных «намерений вопроса» (question intent) — короткое описание того, ЧТО именно нужно проверить (1–2 предложения). Также назначь тип вопроса для каждого intent (распределяй равномерно: multiple_choice чаще остальных).\n\nТемы:\n${themes.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\nВерни JSON массив ровно из ${expectedCount} объектов (ни больше, ни меньше):\n[\n  {"theme": "...", "intent": "...", "type": "multiple_choice|true_false|open_ended"},\n  ...\n]\nНикакого другого текста.`,
+                contents: `Ты создаёшь план проверочного теста. Все вопросы — формата multiple_choice (4 варианта, 1 правильный).\n\nДля каждой темы придумай РОВНО указанное число конкретных «намерений вопроса» (question intent) — что именно нужно проверить (1–2 предложения).\n\nТемы (формат: N. [Раздел] Тема → кол-во вопросов):\n${themesForPrompt}\n\nВерни JSON массив ровно из ${expectedCount} объектов:\n[\n  {"theme":"...","section":"...","intent":"...","type":"multiple_choice"},\n  ...\n]\nНикакого другого текста.`,
                 config: {
                     temperature: 0.3,
                     responseMimeType: 'application/json',
@@ -264,11 +401,14 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
                 : (parsed.intents && Array.isArray(parsed.intents) ? parsed.intents : null);
 
             if (list && list.length > 0) {
-                if (list.length < expectedCount) {
-                    console.warn(`[RAG] buildBlueprint: LLM вернул ${list.length} intents, ожидалось ${expectedCount}, попытка ${attempt}/3`);
-                    throw new Error(`Слишком мало intents: ${list.length} < ${expectedCount}`);
+                // Принудительно ставим type = multiple_choice для всех
+                const normalized = list.map(item => ({ ...item, type: 'multiple_choice' }));
+
+                if (normalized.length < Math.floor(expectedCount * 0.8)) {
+                    console.warn(`[RAG] buildBlueprint: LLM вернул ${normalized.length} intents, ожидалось ${expectedCount}, попытка ${attempt}/3`);
+                    throw new Error(`Слишком мало intents: ${normalized.length} < ${expectedCount}`);
                 }
-                return list;
+                return normalized;
             }
             throw new Error('Пустой blueprint');
         } catch (err) {
@@ -278,89 +418,142 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
         }
     }
 
-    // Fallback: генерируем blueprint вручную
+    // Fallback: генерируем вручную (только multiple_choice)
     console.error('[RAG] buildBlueprint не удался, используем fallback');
     const fallback = [];
-    for (const theme of themes) {
-        for (let i = 0; i < intentsPerTheme; i++) {
+    for (let ti = 0; ti < richThemes.length; ti++) {
+        const t = richThemes[ti];
+        for (let i = 0; i < perTheme[ti]; i++) {
             fallback.push({
-                theme,
-                intent: `Проверить понимание: ${theme}`,
-                type: TYPES[fallback.length % TYPES.length],
+                theme: t.topic,
+                section: t.section,
+                intent: `Проверить понимание: ${t.topic}`,
+                type: 'multiple_choice',
             });
         }
     }
     return fallback;
 }
 
-// ─── Evidence packet (контекстная компрессия) ──────────────────────────────
+// ─── Evidence packet ───────────────────────────────────────────────────────
 
 /**
- * Формирует evidence packet из retrieved чанков:
- * - Использует pre-computed summary (факты) если есть
- * - Иначе fallback на краткое сырое начало чанка
+ * Формирует evidence packets из retrieved чанков.
+ * Каждый пакет содержит: chunk_id, facts (summary), text, page, section.
  *
- * @param {Array}  chunks         - Чанки из retrieval (с полем summary)
- * @param {string} intent         - Текст intent (для фокусировки)
- * @returns {Array<{chunk_id, facts, quote}>}
+ * @param {Array}  chunks       - Чанки из retrieval
+ * @param {string} _intent      - Зарезервировано (не используется)
+ * @param {object} opts
+ * @param {number} opts.maxTextChars - Лимит символов текста чанка (default 800)
+ * @returns {Array<{chunk_id, facts, text, page, section}>}
  */
-function buildEvidencePackets(chunks, intent) {
+function buildEvidencePackets(chunks, _intent, opts = {}) {
+    const { maxTextChars = 800 } = opts;
+
     return chunks.map(chunk => {
         const facts = Array.isArray(chunk.summary) && chunk.summary.length > 0
             ? chunk.summary
             : [];
 
-        // Короткая цитата — до 300 символов из наиболее релевантной части
-        const quote = extractShortQuote(chunk.text, intent, 300);
+        const text = chunk.text.length > maxTextChars
+            ? chunk.text.slice(0, maxTextChars) + '…'
+            : chunk.text;
 
         return {
             chunk_id: chunk.id,
             facts,
-            quote,
+            text,
+            page: chunk.page ?? null,
+            section: chunk.section ?? null,
         };
     });
 }
 
 /**
- * Извлекает короткую цитату из текста, содержащую слова intent
- */
-function extractShortQuote(text, query, maxLen = 300) {
-    const words = query.toLowerCase().split(/\W+/).filter(w => w.length > 3);
-    const sentences = text.split(/[.!?]\s+/);
-    let bestSentence = '';
-    let bestScore = -1;
-
-    for (const sentence of sentences) {
-        const lower = sentence.toLowerCase();
-        let score = 0;
-        for (const w of words) {
-            if (lower.includes(w)) score++;
-        }
-        if (score > bestScore) {
-            bestScore = score;
-            bestSentence = sentence.trim();
-        }
-    }
-
-    if (!bestSentence) {
-        bestSentence = text.slice(0, maxLen);
-    }
-
-    return bestSentence.length > maxLen
-        ? bestSentence.slice(0, maxLen) + '...'
-        : bestSentence;
-}
-
-/**
- * Форматирует evidence packets в текст для промпта — минимальные токены
+ * Форматирует evidence packets в текст для промпта.
+ * Включает факты (summary), полный текст чанка, страницу и раздел.
  */
 function formatEvidenceForPrompt(packets) {
     return packets.map((p, i) => {
-        const factsStr = p.facts.length > 0
-            ? p.facts.map(f => `  • ${f}`).join('\n')
-            : `  • ${p.quote}`;
-        return `[Источник ${i + 1}, chunk_id=${p.chunk_id}]\n${factsStr}`;
+        const metaParts = [`chunk_id=${p.chunk_id}`];
+        if (p.page != null) metaParts.push(`стр. ${p.page}`);
+        if (p.section) metaParts.push(`раздел: "${p.section}"`);
+
+        const parts = [`[Источник ${i + 1}, ${metaParts.join(' | ')}]`];
+
+        if (p.facts.length > 0) {
+            parts.push(`Факты:\n${p.facts.map(f => `  • ${f}`).join('\n')}`);
+        }
+
+        parts.push(`Текст:\n${p.text}`);
+
+        return parts.join('\n');
     }).join('\n\n');
+}
+
+// ─── Coverage map ──────────────────────────────────────────────────────────
+
+/**
+ * Создаёт карту покрытия: показывает, какие чанки и разделы уже задействованы.
+ *
+ * @param {Array} indexedChunks
+ * @returns {{ totalChunks, usedChunkIds: Set, bySection: object }}
+ */
+function buildCoverageMap(indexedChunks) {
+    const map = {
+        totalChunks: indexedChunks.length,
+        usedChunkIds: new Set(),
+        bySection: {},
+    };
+
+    for (const chunk of indexedChunks) {
+        const sec = chunk.section || 'Документ';
+        if (!map.bySection[sec]) {
+            map.bySection[sec] = { chunkIds: [], usedIds: new Set() };
+        }
+        map.bySection[sec].chunkIds.push(chunk.id);
+    }
+
+    return map;
+}
+
+/**
+ * Помечает chunk IDs как использованные в карте покрытия.
+ *
+ * @param {object}   coverageMap - Объект, созданный buildCoverageMap
+ * @param {number[]} chunkIds    - ID чанков, задействованных в последнем retrieval
+ */
+function updateCoverageMap(coverageMap, chunkIds) {
+    for (const id of chunkIds) {
+        coverageMap.usedChunkIds.add(id);
+        for (const data of Object.values(coverageMap.bySection)) {
+            if (data.chunkIds.includes(id)) {
+                data.usedIds.add(id);
+                break;
+            }
+        }
+    }
+}
+
+/**
+ * Возвращает строку-отчёт о покрытии документа.
+ *
+ * @param {object} coverageMap
+ * @returns {string}
+ */
+function formatCoverageReport(coverageMap) {
+    const used = coverageMap.usedChunkIds.size;
+    const total = coverageMap.totalChunks;
+    const pct = total > 0 ? Math.round(used / total * 100) : 0;
+
+    const sections = Object.entries(coverageMap.bySection).map(([sec, data]) => {
+        const sp = data.chunkIds.length > 0
+            ? Math.round(data.usedIds.size / data.chunkIds.length * 100)
+            : 0;
+        return `"${sec}": ${data.usedIds.size}/${data.chunkIds.length} (${sp}%)`;
+    }).join(', ');
+
+    return `${used}/${total} чанков (${pct}%) | ${sections}`;
 }
 
 module.exports = {
@@ -369,6 +562,9 @@ module.exports = {
     buildQuestionBlueprint,
     buildEvidencePackets,
     formatEvidenceForPrompt,
+    buildCoverageMap,
+    updateCoverageMap,
+    formatCoverageReport,
     cosineSimilarity,
     getQueryEmbedding,
 };

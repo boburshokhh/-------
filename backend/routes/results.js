@@ -37,7 +37,7 @@ router.post('/', (req, res) => {
         if (userAnswer) {
             switch (question.type) {
                 case 'multiple_choice':
-                    isCorrect = userAnswer.answer === question.correct_answer;
+                    isCorrect = userAnswer.answer === (question.correctIndex ?? question.correct_answer);
                     break;
                 case 'true_false':
                     isCorrect = userAnswer.answer === question.correct_answer;
@@ -54,7 +54,7 @@ router.post('/', (req, res) => {
         detailedAnswers.push({
             questionId: question.id,
             userAnswer: userAnswer ? userAnswer.answer : null,
-            correctAnswer: question.correct_answer,
+            correctAnswer: question.correctIndex ?? question.correct_answer,
             isCorrect,
             explanation: question.explanation
         });

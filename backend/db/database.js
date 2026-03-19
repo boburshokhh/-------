@@ -76,4 +76,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_summaries_chunk_id ON chunk_summaries(chunk_id);
 `);
 
+// Schema migration: добавляем поля section-aware chunking если их ещё нет
+// (try/catch потому что SQLite не поддерживает ADD COLUMN IF NOT EXISTS)
+try { db.exec(`ALTER TABLE document_chunks ADD COLUMN page    INTEGER DEFAULT NULL`); } catch (_) {}
+try { db.exec(`ALTER TABLE document_chunks ADD COLUMN section TEXT    DEFAULT NULL`); } catch (_) {}
+try { db.exec(`ALTER TABLE document_chunks ADD COLUMN heading TEXT    DEFAULT NULL`); } catch (_) {}
+
 module.exports = db;
