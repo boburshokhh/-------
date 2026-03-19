@@ -54,6 +54,11 @@ const App = {
                 }
                 break;
 
+            case 'logs':
+                this.showPage('page-logs', 'logs');
+                Logs.init();
+                break;
+
             default:
                 this.showPage('page-upload', 'upload');
         }
@@ -65,6 +70,11 @@ const App = {
 
         const navLink = document.querySelector(`.nav-link[data-page="${navKey}"]`);
         if (navLink) navLink.classList.add('active');
+
+        // Чтобы не опрашивать логи в фоне, если пользователь ушел со страницы.
+        if (navKey !== 'logs' && typeof Logs !== 'undefined' && Logs && typeof Logs.setAuto === 'function') {
+            Logs.setAuto(false);
+        }
     },
 
     toast(message, type = 'info') {

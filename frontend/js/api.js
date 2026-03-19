@@ -73,6 +73,13 @@ const API = {
         return data;
     },
 
+    async getLogs(limit = 200) {
+        const response = await fetch(`${this.BASE}/logs?limit=${encodeURIComponent(limit)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.details || data.error || 'Ошибка получения логов');
+        return data;
+    },
+
     async healthCheck() {
         const response = await fetch(`${this.BASE}/health`);
         return response.json();

@@ -4,8 +4,12 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const errorHandler = require('./middleware/errorHandler');
+const logCollector = require('./services/logCollector');
 
 const app = express();
+
+// Патчим console и копим лог-строки в памяти, чтобы потом показать их во фронте.
+logCollector.init();
 
 // Trust proxy (nginx/reverse proxy) — обязательно до rate limit, иначе X-Forwarded-For вызовет ValidationError
 app.set('trust proxy', 1);
@@ -41,6 +45,7 @@ const uploadLimiter = rateLimit({
 app.use('/api/upload', uploadLimiter, require('./routes/upload'));
 app.use('/api/tests', apiLimiter, require('./routes/tests'));
 app.use('/api/results', apiLimiter, require('./routes/results'));
+app.use('/api/logs', require('./routes/logs'));
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -995,3 +995,73 @@ body::before {
     font-size: 1.5rem;
   }
 }
+
+/* ============ Logs ============ */
+.logs-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin: 16px 0 12px;
+}
+
+.logs-auto {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  user-select: none;
+}
+
+.logs-container {
+  background: rgba(17, 24, 39, 0.55);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  max-height: 62vh;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.log-line {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 8px;
+}
+
+.log-ts {
+  color: var(--text-muted);
+  min-width: 180px;
+}
+
+.log-level {
+  font-weight: 800;
+  min-width: 70px;
+  text-transform: uppercase;
+}
+
+.log-msg {
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.log-info {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
+.log-warn {
+  background: rgba(245, 158, 11, 0.10);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.log-error {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+}
