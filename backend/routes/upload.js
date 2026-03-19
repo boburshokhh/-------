@@ -12,6 +12,32 @@ const { indexDocument } = require('../services/indexer');
 
 const router = express.Router();
 
+function normalizeFilenameEncoding(name) {
+    // Иногда браузер/промежуточный слой может передать имя файла так,
+    // что кириллица оказывается "битой" (типичный артефакт: Ð...).
+    // Пробуем восстановить вариант latin1->utf8 и выбираем более "разумный".
+    if (typeof name !== 'string' || name.length === 0) return name;
+
+    const original = name;
+    let latin1Decoded = null;
+    try {
+        latin1Decoded = Buffer.from(name, 'latin1').toString('utf8');
+    } catch {
+        latin1Decoded = null;
+    }
+
+    const score = (s) => {
+        if (typeof s !== 'string' || s.length === 0) return -Infinity;
+        const repl = (s.match(/�/g) || []).length;
+        const cyr = (s.match(/[А-Яа-яЁё]/g) || []).length;
+        // Чем больше кириллицы и меньше replacement-character — тем лучше.
+        return cyr * 10 - repl * 25;
+    };
+
+    if (!latin1Decoded) return original;
+    return score(latin1Decoded) > score(original) ? latin1Decoded : original;
+}
+
 // Настройка multer
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -54,10 +80,14 @@ router.post('/', upload.single('file'), async (req, res, next) => {
     }
 
     const filePath = file.path;
+    const safeOriginalName = normalizeFilenameEncoding(file.originalname);
+    if (safeOriginalName !== file.originalname) {
+        console.warn(`[UPLOAD] Нормализовано имя файла: "${file.originalname}" -> "${safeOriginalName}"`);
+    }
 
     try {
         // 1. Парсинг документа
-        console.log(`[UPLOAD] Обработка файла: ${file.originalname}`);
+        console.log(`[UPLOAD] Обработка файла: ${safeOriginalName}`);
         const { text, pageCount } = await parseDocument(filePath, file.mimetype);
 
         // 2. Проверка лимита страниц
@@ -73,7 +103,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
       INSERT INTO documents (filename, original_name, page_count, text_length)
       VALUES (?, ?, ?, ?)
     `);
-        const docResult = docInsert.run(file.filename, file.originalname, pageCount, text.length);
+        const docResult = docInsert.run(file.filename, safeOriginalName, pageCount, text.length);
         const documentId = docResult.lastInsertRowid;
 
         console.log(`[UPLOAD] Документ #${documentId}: ${text.length} символов, ${countTokens(text)} токенов`);
@@ -91,7 +121,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
             console.warn(`[UPLOAD] Неизвестная модель "${modelId}", использована ${model}`);
         }
         console.log(`[UPLOAD] Генерация теста с моделью: ${model}`);
-        const testData = await generateTest(text, file.originalname, indexedChunks, null, { model });
+        const testData = await generateTest(text, safeOriginalName, indexedChunks, null, { model });
 
         // 6. Сохранение теста в БД
         const testInsert = db.prepare(`
@@ -112,7 +142,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
             totalQuestions: testData.questions.length,
             documentInfo: {
                 id: Number(documentId),
-                name: file.originalname,
+                name: safeOriginalName,
                 pages: pageCount,
                 textLength: text.length
             }
