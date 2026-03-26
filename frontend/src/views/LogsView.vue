@@ -7,7 +7,6 @@ import { RefreshCw } from 'lucide-vue-next'
 
 const logs = ref<any[]>([])
 const autoRefresh = ref(true)
-const scrollAreaRef = ref<any>(null)
 let timer: any = null
 
 const loadLogs = async () => {

@@ -142,7 +142,7 @@ const getQuestionTypeLabel = (type: string) => {
             >
               <div class="w-6 h-6 shrink-0 rounded-full border flex items-center justify-center text-sm font-medium mt-0.5"
                    :class="answers[currentQuestion.id] === i ? 'border-blue-600 bg-blue-600 text-white' : 'border-neutral-300 text-neutral-500'">
-                {{ String.fromCharCode(65 + i) }}
+                {{ String.fromCharCode(65 + Number(i)) }}
               </div>
               <span class="text-base">{{ opt }}</span>
             </button>

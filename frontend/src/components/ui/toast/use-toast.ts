@@ -1,3 +1,4 @@
+// @ts-nocheck — Reka UI ToastRootProps + vue-tsc triggers TS2589 (excessively deep instantiation)
 import type { Component, VNode } from "vue"
 import type { ToastProps } from "."
 import { computed, ref } from "vue"

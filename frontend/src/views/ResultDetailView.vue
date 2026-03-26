@@ -103,7 +103,7 @@ const getQuestion = (questionId: number) => {
               :class="answer.isCorrect ? 'border-l-green-500' : 'border-l-red-500'">
           <CardContent class="p-6">
             <div class="flex items-center justify-between mb-3 text-sm text-neutral-500 font-medium">
-              <span>Вопрос {{ i + 1 }}</span>
+              <span>Вопрос {{ Number(i) + 1 }}</span>
               <span>{{ getQuestionTypeLabel(getQuestion(answer.questionId).type) }}</span>
             </div>
             <p class="text-lg font-medium mb-6 leading-relaxed">{{ getQuestion(answer.questionId).question }}</p>
