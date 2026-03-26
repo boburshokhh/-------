@@ -35,13 +35,23 @@ AI Test Generator — это веб-приложение для автомати
    MAX_OCR_PAGES=10
    ```
    Для отключения OCR по отсканированным PDF задайте `ENABLE_PDF_OCR=false`. Лимит страниц для OCR задаётся через `MAX_OCR_PAGES` (по умолчанию 10).
-3. Запустите сервер из папки `backend`:
+2. Запустите frontend и backend параллельно (в разных терминалах):
+   
+   **Frontend:**
    ```bash
-   npm run dev    # для режима разработки с перезапуском
-   # ИЛИ
-   npm start      # для обычного запуска
+   cd frontend
+   npm install
+   npm run dev
    ```
-4. Откройте браузер по адресу `http://localhost:3000`.
+
+   **Backend:**
+   ```bash
+   cd backend
+   npm install
+   npm run dev
+   ```
+
+4. Откройте браузер по адресу `http://localhost:5173`.
 
 ## Деплой на Ubuntu (Docker)
 

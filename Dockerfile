@@ -15,9 +15,14 @@ WORKDIR /app
 COPY backend/package.json backend/package-lock.json* ./backend/
 RUN cd backend && npm ci --omit=dev
 
-# Код backend и статика frontend
-COPY backend ./backend
+# Сборка frontend
+COPY frontend/package.json frontend/package-lock.json* ./frontend/
+RUN cd frontend && npm ci
 COPY frontend ./frontend
+RUN cd frontend && npm run build
+
+# Код backend (статика frontend/dist уже собрана)
+COPY backend ./backend
 
 WORKDIR /app/backend
 

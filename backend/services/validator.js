@@ -101,16 +101,28 @@ function validateSingleQuestion(q) {
  * @returns {object|Array}
  */
 function extractJSON(text) {
+    if (text == null) {
+        throw new Error('Пустой ответ от LLM при извлечении JSON');
+    }
+
     // Убираем markdown code blocks
-    let cleaned = text
+    let cleaned = String(text)
         .replace(/```json\s*/gi, '')
         .replace(/```\s*/g, '')
         .trim();
 
-    // Пытаемся найти JSON массив или объект
-    const jsonMatch = cleaned.match(/([\s\S]*]|{[\s\S]*})/);
-    if (jsonMatch) {
-        cleaned = jsonMatch[1];
+    // Пытаемся оставить в строке только JSON-фрагмент.
+    // Причина: иногда LLM возвращает "почти JSON", обрамленный лишним текстом.
+    const firstObj = cleaned.indexOf('{');
+    const firstArr = cleaned.indexOf('[');
+    const first = [firstObj, firstArr].filter(i => i >= 0).sort((a, b) => a - b)[0];
+
+    const lastObj = cleaned.lastIndexOf('}');
+    const lastArr = cleaned.lastIndexOf(']');
+    const last = Math.max(lastObj, lastArr);
+
+    if (first != null && first >= 0 && last != null && last >= 0 && last > first) {
+        cleaned = cleaned.slice(first, last + 1);
     }
 
     // Убираем trailing commas перед ] и }
@@ -121,6 +133,19 @@ function extractJSON(text) {
     try {
         return JSON.parse(cleaned);
     } catch (e) {
+        // Логируем кусок ответа, чтобы можно было увидеть "что именно вернуло LLM".
+        const posMatch = String(e && e.message ? e.message : '').match(/position (\d+)/i);
+        const pos = posMatch ? parseInt(posMatch[1], 10) : null;
+        let snippet = cleaned;
+        if (pos != null && Number.isFinite(pos)) {
+            const start = Math.max(0, pos - 140);
+            const end = Math.min(cleaned.length, pos + 200);
+            snippet = cleaned.slice(start, end);
+        } else {
+            snippet = cleaned.slice(0, 420);
+        }
+
+        console.warn(`[VALIDATOR] JSON.parse не удался. Сниппет: ${snippet}`);
         throw new Error(`Не удалось распарсить JSON ответ LLM: ${e.message}`);
     }
 }
