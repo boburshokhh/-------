@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { API } from '@/lib/api'
+import { randomUUID } from '@/lib/randomUUID'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -127,7 +128,7 @@ const processFile = async (file: File) => {
     return
   }
 
-  const jobId = crypto.randomUUID()
+  const jobId = randomUUID()
   isUploading.value = true
   progressTitle.value = 'Запуск…'
   progressDetail.value = `${file.name} (${formatSize(file.size)})`
