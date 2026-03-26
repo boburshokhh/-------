@@ -34,6 +34,15 @@
     "testId": 1,
     "title": "Тест по документу: Имя_файла",
     "totalQuestions": 15,
+    "generationMetrics": {
+      "trace_id": "uuid",
+      "final_question_count": 15,
+      "final_quality_score": 0.75,
+      "grounded_question_rate": 0.82,
+      "retrieval_hit_rate": 0.91,
+      "dedup_loss_ratio": 0.12,
+      "schema_version": 1
+    },
     "documentInfo": {
       "id": 1,
       "name": "Имя_файла.pdf",
@@ -44,7 +53,9 @@
   }
   ```
 
-На сервере прогресс дублируется в логах строками **`[PROGRESS]`** (JSON: `phase`, `stage`, `percent`, `detail`).
+Поле **`generationMetrics`** — структурированные метрики пайплайна генерации (observability): бюджет, retrieval, grounding, dedup, длительность; сохраняется в БД в колонке `tests.generation_metrics_json` и возвращается в **GET** `/api/tests/:id` как **`generationMetrics`**.
+
+На сервере прогресс дублируется в логах строками **`[PROGRESS]`** (JSON: `phase`, `stage`, `percent`, `detail`). Дополнительно пишутся **структурированные JSON-логи** (одна строка на событие) с полями `trace_id`, `event`, `reason_code`, `metrics` — удобно для Loki/Datadog.
 
 ---
 
@@ -112,9 +123,12 @@
     "totalQuestions": 1,
     "documentName": "История.pdf",
     "pageCount": 5,
+    "generationMetrics": null,
     "createdAt": "2026-02-24 10:00:00"
   }
   ```
+
+Поле **`generationMetrics`** — объект метрик генерации (если тест создан версией backend с observability) или `null` для старых записей.
 
 ---
 

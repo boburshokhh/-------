@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/observability-log.json",
+  "title": "Structured observability log line",
+  "type": "object",
+  "required": ["ts", "level", "service", "event"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "level": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
+    "service": { "type": "string", "const": "ai-test-generator" },
+    "trace_id": { "type": ["string", "null"] },
+    "document_id": { "type": ["integer", "null"] },
+    "test_id": { "type": ["integer", "null"] },
+    "phase": { "type": ["string", "null"] },
+    "event": { "type": "string" },
+    "reason_code": { "type": ["string", "null"] },
+    "metrics": { "type": "object", "additionalProperties": true },
+    "metadata": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

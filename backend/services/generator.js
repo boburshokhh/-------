@@ -761,6 +761,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     let workingQuestions = [...initialDedup];
     let backfillRoundsUsed = 0;
     let backfillQuestionsAdded = 0;
+    let backfillGroundedAccepted = 0;
 
     for (let round = 1; round <= maxBackfillRounds && workingQuestions.length < targetMin; round++) {
         backfillRoundsUsed = round;
@@ -838,6 +839,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
                     }
                 }
                 newRawQuestions.push(question);
+                backfillGroundedAccepted++;
             }
 
             if (bs + batchSize < backfillWithDiff.length) await sleep(1200);
@@ -915,7 +917,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         atomicFactsExtracted,
         retrievalPassed: statsRetrievalPassed,
         retrievalSkipped: statsSkippedEvidence,
-        groundingAccepted: groundedPreDedup,
+        groundingAccepted: groundedPreDedup + backfillGroundedAccepted,
         groundingFailed: statsGroundingFailed,
         batchValidated: statsValidated,
         llmSkipped: statsSkippedLLM,
