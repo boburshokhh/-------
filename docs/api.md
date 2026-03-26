@@ -23,13 +23,14 @@
 **POST** `/api/upload`
 
 Загружает файл (PDF или DOCX), извлекает текст, разбивает его на чанки и использует LLM для генерации теста.
-- **Headers**: `Content-Type: multipart/form-data`
-- **Body**: поле `file` (файл документа).
+- **Headers**: `Content-Type: multipart/form-data`; опционально **`X-Job-Id`** — UUID задачи для опроса прогресса (**GET** `/api/jobs/:jobId`) во время длительной обработки.
+- **Body**: поле `file` (файл документа); опционально `model` — идентификатор модели из конфигурации.
 - **Ограничения**: макс. размер 10 МБ, макс. 30 страниц (для PDF).
 - **Ответ (201 Created)**:
   ```json
   {
     "success": true,
+    "jobId": "uuid",
     "testId": 1,
     "title": "Тест по документу: Имя_файла",
     "totalQuestions": 15,
@@ -37,10 +38,33 @@
       "id": 1,
       "name": "Имя_файла.pdf",
       "pages": 12,
-      "textLength": 45000
+      "textLength": 45000,
+      "extractionQuality": 0.95
     }
   }
   ```
+
+На сервере прогресс дублируется в логах строками **`[PROGRESS]`** (JSON: `phase`, `stage`, `percent`, `detail`).
+
+---
+
+### 2a. Прогресс задачи загрузки
+**GET** `/api/jobs/:jobId`
+
+Возвращает последнее известное состояние обработки для `jobId`, переданного в **`X-Job-Id`** при **POST** `/api/upload`.
+- **Ответ (200 OK)**:
+  ```json
+  {
+    "ok": true,
+    "jobId": "uuid",
+    "phase": "generate",
+    "stage": "llm_batch",
+    "percent": 62,
+    "detail": "Генерация вопросов: пакет 2/5 (накоплено 12)",
+    "updatedAt": 1711536000000
+  }
+  ```
+- **404**: задача не найдена (истёк TTL или неверный id).
 
 ---
 

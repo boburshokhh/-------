@@ -112,9 +112,14 @@ const formatDate = (dateStr: string) => {
         </CardHeader>
         <CardContent class="mt-auto">
           <div class="text-sm text-neutral-500 space-y-1 mb-6">
-            <div class="flex items-center gap-2">
-              <FileText class="w-4 h-4" />
+            <div class="flex items-center gap-2 flex-wrap">
+              <FileText class="w-4 h-4 shrink-0" />
               <span class="truncate">{{ test.document_name || 'Документ' }}</span>
+              <Badge
+                v-if="test.low_text_quality === 1"
+                variant="outline"
+                class="text-amber-800 border-amber-300 bg-amber-50 text-xs font-normal"
+              >Низкое качество текста</Badge>
             </div>
             <div class="flex items-center gap-2">
               <Clock class="w-4 h-4" />

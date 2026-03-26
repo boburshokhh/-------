@@ -9,36 +9,12 @@ const { parseDocument } = require('../services/parser');
 const { generateTest } = require('../services/generator');
 const { countTokens } = require('../services/chunker');
 const { indexDocument } = require('../services/indexer');
+const jobProgress = require('../services/jobProgress');
+const { normalizeDisplayFilename, resolveStorageExtension } = require('../utils/filename');
+const { logStructured } = require('../utils/observability');
 
 const router = express.Router();
 
-function normalizeFilenameEncoding(name) {
-    // Иногда браузер/промежуточный слой может передать имя файла так,
-    // что кириллица оказывается "битой" (типичный артефакт: Ð...).
-    // Пробуем восстановить вариант latin1->utf8 и выбираем более "разумный".
-    if (typeof name !== 'string' || name.length === 0) return name;
-
-    const original = name;
-    let latin1Decoded = null;
-    try {
-        latin1Decoded = Buffer.from(name, 'latin1').toString('utf8');
-    } catch {
-        latin1Decoded = null;
-    }
-
-    const score = (s) => {
-        if (typeof s !== 'string' || s.length === 0) return -Infinity;
-        const repl = (s.match(/�/g) || []).length;
-        const cyr = (s.match(/[А-Яа-яЁё]/g) || []).length;
-        // Чем больше кириллицы и меньше replacement-character — тем лучше.
-        return cyr * 10 - repl * 25;
-    };
-
-    if (!latin1Decoded) return original;
-    return score(latin1Decoded) > score(original) ? latin1Decoded : original;
-}
-
-// Настройка multer
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         if (!fs.existsSync(config.UPLOAD_DIR)) {
@@ -47,9 +23,15 @@ const storage = multer.diskStorage({
         cb(null, config.UPLOAD_DIR);
     },
     filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
+        const ext = resolveStorageExtension(file.originalname, file.mimetype);
+        if (!ext) {
+            const err = new Error('Недопустимое расширение файла');
+            err.type = 'INVALID_FILE_TYPE';
+            cb(err);
+            return;
+        }
         cb(null, `${uuidv4()}${ext}`);
-    }
+    },
 });
 
 const fileFilter = (req, file, cb) => {
@@ -65,7 +47,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
     storage,
     fileFilter,
-    limits: { fileSize: config.MAX_FILE_SIZE_MB * 1024 * 1024 }
+    limits: { fileSize: config.MAX_FILE_SIZE_MB * 1024 * 1024 },
 });
 
 /**
@@ -80,78 +62,184 @@ router.post('/', upload.single('file'), async (req, res, next) => {
     }
 
     const filePath = file.path;
-    const safeOriginalName = normalizeFilenameEncoding(file.originalname);
-    if (safeOriginalName !== file.originalname) {
-        console.warn(`[UPLOAD] Нормализовано имя файла: "${file.originalname}" -> "${safeOriginalName}"`);
+    const originalNameRaw = typeof file.originalname === 'string' ? file.originalname : '';
+    const displayName = normalizeDisplayFilename(originalNameRaw);
+
+    if (displayName !== originalNameRaw) {
+        console.warn(`[UPLOAD] Имя файла нормализовано: raw="${originalNameRaw}" → display="${displayName}"`);
     }
 
-    try {
-        // 1. Парсинг документа
-        console.log(`[UPLOAD] Обработка файла: ${safeOriginalName}`);
-        const { text, pageCount } = await parseDocument(filePath, file.mimetype);
+    const jobId = (typeof req.get === 'function' && req.get('X-Job-Id') && String(req.get('X-Job-Id')).trim())
+        ? String(req.get('X-Job-Id')).trim()
+        : uuidv4();
+    const report = (payload) => jobProgress.logJobProgress(jobId, payload);
 
-        // 2. Проверка лимита страниц
+    try {
+        report({ phase: 'parse', stage: 'reading', percent: 2, detail: `Чтение файла: ${displayName}` });
+        console.log(`[UPLOAD] Файл: storage=${file.filename} display="${displayName}"`);
+
+        const parseResult = await parseDocument(filePath, file.mimetype);
+        const { text, pageCount, rawText, diagnostics } = parseResult;
+
+        report({
+            phase: 'parse',
+            stage: 'parsed',
+            percent: 8,
+            detail: `${pageCount != null ? `${pageCount} стр.` : 'страницы ?'}, ${text.length} символов, качество ${diagnostics.extractionQuality ?? '—'}`,
+        });
+
+        logStructured({
+            level: 'info',
+            traceId: jobId,
+            phase: 'upload',
+            event: 'parse_complete',
+            metrics: {
+                text_length: text.length,
+                token_count: countTokens(text),
+                page_count: pageCount ?? null,
+                parse_quality_score: diagnostics.extractionQuality ?? null,
+                low_text_quality: !!diagnostics.lowTextQuality,
+            },
+            metadata: { parse_method: diagnostics.parseMethod || null, display_name: displayName },
+        });
+
+        if (diagnostics.lowTextQuality) {
+            console.warn(`[UPLOAD] Низкое качество извлечения текста (quality=${diagnostics.extractionQuality}, doc=${displayName})`);
+        }
+
         if (pageCount && pageCount > config.MAX_PAGES) {
+            jobProgress.logJobProgress(jobId, {
+                phase: 'error',
+                stage: 'too_many_pages',
+                percent: 0,
+                detail: `Слишком много страниц: ${pageCount} (макс. ${config.MAX_PAGES})`,
+            });
             return res.status(413).json({
                 error: `Документ слишком большой (${pageCount} стр.)`,
-                details: `Максимум ${config.MAX_PAGES} страниц`
+                details: `Максимум ${config.MAX_PAGES} страниц`,
             });
         }
 
-        // 3. Сохранение документа в БД
+        report({ phase: 'db', stage: 'saving', percent: 9, detail: 'Сохранение метаданных документа' });
+
+        const storeFullText = config.STORE_DOCUMENT_TEXT_IN_DB === true;
+        const diagJson = JSON.stringify(diagnostics);
+
         const docInsert = db.prepare(`
-      INSERT INTO documents (filename, original_name, page_count, text_length)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO documents (
+        filename, original_name, original_name_raw, page_count, text_length,
+        extraction_quality, parse_diagnostics_json, low_text_quality, text_raw, text_clean
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-        const docResult = docInsert.run(file.filename, safeOriginalName, pageCount, text.length);
+        const docResult = docInsert.run(
+            file.filename,
+            displayName,
+            originalNameRaw || null,
+            pageCount,
+            text.length,
+            diagnostics.extractionQuality ?? null,
+            diagJson,
+            diagnostics.lowTextQuality ? 1 : 0,
+            storeFullText ? rawText : null,
+            storeFullText ? text : null,
+        );
         const documentId = docResult.lastInsertRowid;
 
-        console.log(`[UPLOAD] Документ #${documentId}: ${text.length} символов, ${countTokens(text)} токенов`);
+        console.log(
+            `[UPLOAD] Документ #${documentId}: ${text.length} символов, ${countTokens(text)} токенов, extractionQuality=${diagnostics.extractionQuality}`,
+        );
+        report({
+            phase: 'db',
+            stage: 'saved',
+            percent: 10,
+            detail: `Документ #${documentId}, ${countTokens(text)} токенов`,
+        });
 
-        // 4. Индексация документа (чанки + эмбеддинги + summary → SQLite)
         console.log(`[UPLOAD] Индексация документа #${documentId}...`);
-        const indexedChunks = await indexDocument(documentId, text);
+        const indexedChunks = await indexDocument(documentId, text, report);
         console.log(`[UPLOAD] Индекс готов: ${indexedChunks.length} чанков`);
 
-        // 5. Генерация теста через LLM + RAG
         const modelId = req.body.model && typeof req.body.model === 'string' ? req.body.model.trim() : null;
-        const allowedIds = (config.LLM_MODELS || []).map(m => m.id);
+        const allowedIds = (config.LLM_MODELS || []).map((m) => m.id);
         const model = (modelId && allowedIds.includes(modelId)) ? modelId : config.LLM_MODEL;
         if (modelId && model !== modelId) {
             console.warn(`[UPLOAD] Неизвестная модель "${modelId}", использована ${model}`);
         }
         console.log(`[UPLOAD] Генерация теста с моделью: ${model}`);
-        const testData = await generateTest(text, safeOriginalName, indexedChunks, null, { model });
+        const testData = await generateTest(text, displayName, indexedChunks, report, {
+            model,
+            extractionQuality: diagnostics.extractionQuality,
+            traceId: jobId,
+            documentId: Number(documentId),
+        });
 
-        // 6. Сохранение теста в БД
         const testInsert = db.prepare(`
-      INSERT INTO tests (document_id, title, questions_json, total_questions)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO tests (document_id, title, questions_json, total_questions, generation_metrics_json)
+      VALUES (?, ?, ?, ?, ?)
     `);
+        const metricsJson = testData.generationMetrics
+            ? JSON.stringify(testData.generationMetrics)
+            : null;
         const testResult = testInsert.run(
             documentId,
             testData.title,
             JSON.stringify(testData.questions),
-            testData.questions.length
+            testData.questions.length,
+            metricsJson,
         );
+
+        const testId = Number(testResult.lastInsertRowid);
+        logStructured({
+            level: 'info',
+            traceId: jobId,
+            documentId: Number(documentId),
+            testId,
+            phase: 'upload',
+            event: 'test_saved',
+            metrics: {
+                total_questions: testData.questions.length,
+                final_quality_score: testData.generationMetrics?.final_quality_score ?? null,
+            },
+        });
+
+        report({
+            phase: 'done',
+            stage: 'saved_test',
+            percent: 100,
+            detail: `Сохранён тест: ${testData.questions.length} вопросов`,
+        });
 
         res.status(201).json({
             success: true,
-            testId: Number(testResult.lastInsertRowid),
+            jobId,
+            testId,
             title: testData.title,
             totalQuestions: testData.questions.length,
+            generationMetrics: testData.generationMetrics ?? null,
             documentInfo: {
                 id: Number(documentId),
-                name: safeOriginalName,
+                name: displayName,
                 pages: pageCount,
-                textLength: text.length
-            }
+                textLength: text.length,
+                extractionQuality: diagnostics.extractionQuality,
+                lowTextQuality: diagnostics.lowTextQuality,
+                parseMethod: diagnostics.parseMethod || null,
+            },
         });
-
     } catch (error) {
+        try {
+            jobProgress.logJobProgress(jobId, {
+                phase: 'error',
+                stage: 'failed',
+                percent: 0,
+                detail: error && error.message ? String(error.message) : 'Ошибка обработки',
+            });
+        } catch {
+            /* ignore */
+        }
         next(error);
     } finally {
-        // Удаляем загруженный файл в любом случае
         try {
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);

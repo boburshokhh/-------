@@ -82,4 +82,15 @@ try { db.exec(`ALTER TABLE document_chunks ADD COLUMN page    INTEGER DEFAULT NU
 try { db.exec(`ALTER TABLE document_chunks ADD COLUMN section TEXT    DEFAULT NULL`); } catch (_) {}
 try { db.exec(`ALTER TABLE document_chunks ADD COLUMN heading TEXT    DEFAULT NULL`); } catch (_) {}
 
+// Документ: имя как пришло от клиента, качество парсинга, опционально полные тексты
+try { db.exec(`ALTER TABLE documents ADD COLUMN original_name_raw TEXT`); } catch (_) {}
+try { db.exec(`ALTER TABLE documents ADD COLUMN extraction_quality REAL`); } catch (_) {}
+try { db.exec(`ALTER TABLE documents ADD COLUMN parse_diagnostics_json TEXT`); } catch (_) {}
+try { db.exec(`ALTER TABLE documents ADD COLUMN low_text_quality INTEGER DEFAULT 0`); } catch (_) {}
+try { db.exec(`ALTER TABLE documents ADD COLUMN text_raw TEXT`); } catch (_) {}
+try { db.exec(`ALTER TABLE documents ADD COLUMN text_clean TEXT`); } catch (_) {}
+
+// Метрики observability по генерации теста (JSON для дашбордов / отладки)
+try { db.exec(`ALTER TABLE tests ADD COLUMN generation_metrics_json TEXT`); } catch (_) {}
+
 module.exports = db;

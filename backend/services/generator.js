@@ -3,6 +3,13 @@ const config = require('../config');
 const { chunkText } = require('./chunker');
 const { validateQuestions, extractJSON } = require('./validator');
 const rag = require('./rag');
+const { calculateQuestionBudget } = require('./budgetCalculator');
+const {
+    logStructured,
+    evidenceReasonToCode,
+    buildGenerationMetrics,
+    REASON_CODES,
+} = require('../utils/observability');
 
 const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
 
@@ -266,7 +273,7 @@ function normalizeQuestion(q, chunkIds = []) {
  * @param {number} [retries]
  * @param {string} [model]
  * @param {string} [lang]       - Код языка документа
- * @returns {Promise<Array<{question: object, intentIdx: number}>>}
+ * @returns {Promise<{ results: Array<{question: object, intentIdx: number}>, stats: { llmSkipped: number, validationFailed: number } }>}
  */
 async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retries = null, model = null, lang = 'auto') {
     retries = retries || config.LLM_MAX_RETRIES;
@@ -294,12 +301,15 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
             if (!Array.isArray(parsed)) parsed = [parsed];
 
             const results = [];
+            let llmSkipped = 0;
+            let validationFailed = 0;
             const limit = Math.min(parsed.length, intents.length);
 
             for (let i = 0; i < limit; i++) {
                 // Soft-skip: LLM сигнализирует, что evidence недостаточен
                 if (parsed[i] && parsed[i].skipped === true) {
                     console.log(`[GENERATOR] Batch: intent[${i + 1}] пропущен LLM — ${parsed[i].reason || 'недостаточный evidence'}`);
+                    llmSkipped++;
                     continue;
                 }
 
@@ -308,11 +318,12 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
                     const [validated] = validateQuestions([normalized]);
                     results.push({ question: { ...validated, sources: normalized.sources }, intentIdx: i });
                 } catch (e) {
+                    validationFailed++;
                     console.warn(`[GENERATOR] Batch: вопрос ${i + 1}/${limit} невалиден — ${e.message}`);
                 }
             }
 
-            if (results.length > 0) return results;
+            if (results.length > 0) return { results, stats: { llmSkipped, validationFailed } };
             throw new Error('Ни один вопрос в batch не прошёл валидацию');
 
         } catch (error) {
@@ -324,7 +335,7 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
     }
 
     console.error(`[GENERATOR] Batch пропущен: ${lastError.message}`);
-    return [];
+    return { results: [], stats: { llmSkipped: 0, validationFailed: 0 } };
 }
 
 // ─── Проверка groundedness ─────────────────────────────────────────────────
@@ -479,21 +490,6 @@ function createBackfillIntents(poolChunks, count, typeOffset = 0) {
 // ─── Главная функция ───────────────────────────────────────────────────────
 
 /**
- * Вычисляет целевое число вопросов по размеру документа.
- */
-function computeTargetQuestionCount(fullText, indexedChunks) {
-    const targetMin = config.TARGET_QUESTIONS_MIN || 20;
-    const targetMax = config.TARGET_QUESTIONS_MAX || 30;
-    let baseTarget;
-    if (indexedChunks && indexedChunks.length > 0) {
-        baseTarget = indexedChunks.length * (config.QUESTIONS_PER_CHUNK || 4);
-    } else {
-        baseTarget = Math.round(fullText.length / (config.CHAR_LENGTH_PER_QUESTION || 2000));
-    }
-    return Math.min(targetMax, Math.max(targetMin, baseTarget));
-}
-
-/**
  * Генерирует тест из полного текста документа с RAG-пайплайном.
  * Формат вопросов: только multiple_choice.
  * Уровни сложности: Bloom's Taxonomy (remember, understand, apply, analyze).
@@ -501,17 +497,33 @@ function computeTargetQuestionCount(fullText, indexedChunks) {
  * @param {string}   fullText       - Текст документа
  * @param {string}   docName        - Имя файла
  * @param {Array}    indexedChunks  - Проиндексированные чанки
- * @param {function} onProgress     - Коллбэк прогресса
+ * @param {function} onProgress     - (payload: { phase, stage, percent, detail }) => void
  * @param {object}   [opts]         - { model }
  * @returns {Promise<{title, questions}>}
  */
 async function generateTest(fullText, docName, indexedChunks, onProgress, opts = {}) {
     const startTime = Date.now();
     const model = opts.model || config.LLM_MODEL;
+    const traceId = opts.traceId || `gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const documentId = opts.documentId != null ? opts.documentId : null;
+
+    const progress = (p) => {
+        if (typeof onProgress === 'function') onProgress(p);
+    };
+
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'generation_start',
+        metrics: { model },
+    });
 
     // Определяем язык документа
     const detectedLang = detectLanguage(fullText);
     console.log(`[GENERATOR] Определён язык документа: ${detectedLang}`);
+    progress({ phase: 'generate', stage: 'language', percent: 45, detail: `Язык: ${detectedLang}` });
 
     // Fallback: если индекс не передан
     if (!indexedChunks || indexedChunks.length === 0) {
@@ -529,29 +541,59 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         }));
     }
 
+    const budgetPlan = calculateQuestionBudget(fullText, indexedChunks, { 
+        extractionQuality: opts.extractionQuality,
+        questionTypes: ['multiple_choice']
+    });
+    
+    const targetCount = budgetPlan.targetCount;
     const targetMin = config.TARGET_QUESTIONS_MIN || 20;
     const targetMax = config.TARGET_QUESTIONS_MAX || 30;
-    const targetCount = computeTargetQuestionCount(fullText, indexedChunks);
-    const baseFromChunks = indexedChunks.length * (config.QUESTIONS_PER_CHUNK || 4);
-    const logReason = baseFromChunks > 0
-        ? `по чанкам: ${indexedChunks.length} × ${config.QUESTIONS_PER_CHUNK} = ${baseFromChunks} → ${targetCount}`
-        : `по тексту: ${fullText.length} / ${config.CHAR_LENGTH_PER_QUESTION} → ${targetCount}`;
-    console.log(`[GENERATOR] Цель: ${targetMin}–${targetMax} вопросов, выбран ${targetCount} (${logReason}), чанков: ${indexedChunks.length}, модель: ${model}, формат: multiple_choice only, Bloom taxonomy`);
+
+    budgetPlan.logs.forEach(l => console.log(`[BUDGET] ${l}`));
+    if (budgetPlan.reductionReasons.length > 0) {
+        console.log(`[BUDGET] Урезание объёма: ${budgetPlan.reductionReasons.join(' | ')}`);
+    }
+
+    const atomicFactsExtracted = indexedChunks.reduce((s, c) => s + (Array.isArray(c.summary) ? c.summary.length : 0), 0);
+    const chunksWithFacts = indexedChunks.filter(c => Array.isArray(c.summary) && c.summary.length > 0).length;
+
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'budget_calculated',
+        metrics: {
+            budget_target: targetCount,
+            target_min: targetMin,
+            target_max: targetMax,
+            chunk_count: indexedChunks.length,
+            atomic_facts_extracted: atomicFactsExtracted,
+            chunks_with_facts: chunksWithFacts,
+        },
+        metadata: budgetPlan.reductionReasons.length
+            ? { reduction_reasons: budgetPlan.reductionReasons }
+            : undefined,
+    });
+
+    console.log(`[GENERATOR] Цель (config: ${targetMin}–${targetMax}): выбран ${targetCount}, чанков: ${indexedChunks.length}, модель: ${model}, формат: multiple_choice only, Bloom taxonomy`);
 
     // Шаг 1: Извлечение тем
-    if (onProgress) onProgress(1, 6);
+    progress({ phase: 'generate', stage: 'themes', percent: 45, detail: 'Извлечение тем из summaries чанков…' });
     console.log('[GENERATOR] Извлечение тем из summaries чанков...');
-    const themes = await rag.extractThemes(indexedChunks, fullText, model);
+    const themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount);
     console.log(`[GENERATOR] Тем: ${themes.length}`, themes.map(t => `[${t.section}] ${t.topic || t}`).join(', '));
+    progress({ phase: 'generate', stage: 'themes', percent: 50, detail: `Тем: ${themes.length}` });
 
     // Шаг 2: Blueprint — план вопросов (только multiple_choice)
-    if (onProgress) onProgress(2, 6);
+    progress({ phase: 'generate', stage: 'blueprint', percent: 51, detail: 'Построение плана вопросов (blueprint)…' });
     console.log('[GENERATOR] Построение blueprint...');
     const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
     console.log(`[GENERATOR] Blueprint: ${blueprint.length} intent-ов`);
+    progress({ phase: 'generate', stage: 'blueprint', percent: 54, detail: `План: ${blueprint.length} intent-ов` });
 
     // Шаг 3: Retrieval + soft-skip + batch-генерация
-    if (onProgress) onProgress(3, 6);
     const topK = config.RAG_TOP_K || 5;
     const batchSize = Math.max(3, Math.min(5, config.LLM_BATCH_SIZE || 4));
     const allQuestions = [];
@@ -566,6 +608,9 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     let statsValidated = 0;
     let statsSkippedEvidence = 0;
     let statsSkippedLLM = 0;
+    let statsValidationFailed = 0;
+    let statsGroundingFailed = 0;
+    let statsRetrievalPassed = 0;
 
     const totalBatches = Math.ceil(blueprintWithDifficulty.length / batchSize);
     console.log(`[GENERATOR] Batch-режим: ${blueprintWithDifficulty.length} intents → ${totalBatches} batch(ей) по ≤${batchSize}`);
@@ -595,9 +640,20 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             if (quality.score < 0.3) {
                 console.log(`[GENERATOR] Soft-skip intent "${intent.intent.slice(0, 60)}…" — ${quality.reason}`);
                 statsSkippedEvidence++;
+                logStructured({
+                    level: 'warn',
+                    traceId,
+                    documentId,
+                    phase: 'generate',
+                    event: 'intent_skipped_weak_evidence',
+                    reasonCode: evidenceReasonToCode(quality.reason),
+                    metrics: { evidence_score: quality.score },
+                    metadata: { intent_preview: intent.intent.slice(0, 120), reason: quality.reason },
+                });
                 continue;
             }
 
+            statsRetrievalPassed++;
             filteredBatch.push(intent);
             evidenceList.push(evidenceText);
             chunkIdsList.push(ids);
@@ -606,24 +662,60 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
 
         if (filteredBatch.length === 0) {
             console.warn(`[GENERATOR] Batch ${batchNum}: все intents пропущены (weak evidence)`);
+            logStructured({
+                level: 'warn',
+                traceId,
+                documentId,
+                phase: 'generate',
+                event: 'batch_all_intents_skipped',
+                reasonCode: REASON_CODES.ERR_WEAK_EVIDENCE,
+                metrics: { batch_num: batchNum },
+            });
             continue;
         }
 
         // Один LLM-вызов на batch
-        const batchResults = await generateBatchQuestions(filteredBatch, evidenceList, chunkIdsList, null, model, detectedLang);
+        const { results: batchResults, stats: batchStats } = await generateBatchQuestions(
+            filteredBatch,
+            evidenceList,
+            chunkIdsList,
+            null,
+            model,
+            detectedLang,
+        );
         statsValidated += batchResults.length;
+        statsSkippedLLM += batchStats.llmSkipped;
+        statsValidationFailed += batchStats.validationFailed;
 
         // Проверка groundedness
         for (const { question, intentIdx } of batchResults) {
             if (enableGrounding) {
                 const grounded = await checkGrounding(question, evidenceList[intentIdx], model);
                 if (!grounded) {
+                    statsGroundingFailed++;
                     console.warn(`[GENERATOR] Batch ${batchNum}, intent[${intentIdx + 1}]: не прошёл groundedness, пропускаем`);
+                    logStructured({
+                        level: 'warn',
+                        traceId,
+                        documentId,
+                        phase: 'validate',
+                        event: 'question_dropped_grounding',
+                        reasonCode: REASON_CODES.ERR_GROUNDING_FAILED,
+                        metrics: { batch_num: batchNum, intent_index: intentIdx },
+                    });
                     continue;
                 }
             }
             allQuestions.push(question);
         }
+
+        const pct = Math.min(78, Math.round(54 + (batchNum / Math.max(1, totalBatches)) * 24));
+        progress({
+            phase: 'generate',
+            stage: 'llm_batch',
+            percent: pct,
+            detail: `Генерация вопросов: пакет ${batchNum}/${totalBatches} (накоплено ${allQuestions.length})`,
+        });
 
         // Пауза между batch-запросами
         if (batchStart + batchSize < blueprintWithDifficulty.length) await sleep(1200);
@@ -632,23 +724,58 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     console.log(`[GENERATOR] Покрытие: ${rag.formatCoverageReport(coverageMap)}`);
     console.log(`[GENERATOR] Статистика: blueprint=${blueprintWithDifficulty.length}, skipped_evidence=${statsSkippedEvidence}, validated=${statsValidated}, grounded=${allQuestions.length}, target=${targetMin}`);
 
+    const preDedupCount = allQuestions.length;
+    const groundedPreDedup = allQuestions.length;
+
     // Шаг 4: Семантическая дедупликация
-    if (onProgress) onProgress(4, 6);
+    progress({ phase: 'generate', stage: 'dedup', percent: 79, detail: 'Семантическая дедупликация…' });
     console.log('[GENERATOR] Семантическая дедупликация...');
     const initialDedup = await semanticDedup(allQuestions, config.DEDUP_THRESHOLD || 0.88);
     console.log(`[GENERATOR] После дедупликации: ${initialDedup.length} (было ${allQuestions.length})`);
 
+    const dedupDropped = preDedupCount - initialDedup.length;
+    if (dedupDropped > 0) {
+        logStructured({
+            level: 'info',
+            traceId,
+            documentId,
+            phase: 'dedup',
+            event: 'dedup_complete',
+            metrics: {
+                pre_dedup: preDedupCount,
+                post_dedup: initialDedup.length,
+                dedup_dropped: dedupDropped,
+                dedup_loss_ratio: preDedupCount > 0 ? dedupDropped / preDedupCount : 0,
+            },
+        });
+    }
+    progress({
+        phase: 'generate',
+        stage: 'dedup',
+        percent: 82,
+        detail: `После дедупликации: ${initialDedup.length} вопросов`,
+    });
+
     // ─── Backfill: добираем вопросы до targetMin ────────────────────────────
     const maxBackfillRounds = config.BACKFILL_MAX_ROUNDS || 3;
     let workingQuestions = [...initialDedup];
+    let backfillRoundsUsed = 0;
+    let backfillQuestionsAdded = 0;
 
     for (let round = 1; round <= maxBackfillRounds && workingQuestions.length < targetMin; round++) {
+        backfillRoundsUsed = round;
         const gap = targetMin - workingQuestions.length;
 
         const uncoveredChunks = indexedChunks.filter(c => !coverageMap.usedChunkIds.has(c.id));
         const poolChunks = uncoveredChunks.length > 0 ? uncoveredChunks : indexedChunks;
 
         console.log(`[GENERATOR] Backfill round ${round}/${maxBackfillRounds}: gap=${gap}, непокрытых чанков: ${uncoveredChunks.length}/${indexedChunks.length}`);
+        progress({
+            phase: 'generate',
+            stage: 'backfill',
+            percent: Math.min(94, 82 + Math.round((round / maxBackfillRounds) * 12)),
+            detail: `Добор вопросов: раунд ${round}/${maxBackfillRounds}, сейчас ${workingQuestions.length}`,
+        });
 
         const intentsNeeded = Math.min(gap * 2, poolChunks.length * 3, 20);
         if (intentsNeeded === 0) {
@@ -691,12 +818,24 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
 
             if (bfFilteredBatch.length === 0) continue;
 
-            const batchResults = await generateBatchQuestions(bfFilteredBatch, bfEvidenceList, bfChunkIdsList, null, model, detectedLang);
+            const { results: batchResults, stats: bfStats } = await generateBatchQuestions(
+                bfFilteredBatch,
+                bfEvidenceList,
+                bfChunkIdsList,
+                null,
+                model,
+                detectedLang,
+            );
+            statsSkippedLLM += bfStats.llmSkipped;
+            statsValidationFailed += bfStats.validationFailed;
 
             for (const { question, intentIdx } of batchResults) {
                 if (enableGrounding) {
                     const grounded = await checkGrounding(question, bfEvidenceList[intentIdx], model);
-                    if (!grounded) continue;
+                    if (!grounded) {
+                        statsGroundingFailed++;
+                        continue;
+                    }
                 }
                 newRawQuestions.push(question);
             }
@@ -720,18 +859,37 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         );
 
         console.log(`[GENERATOR] Backfill round ${round}: получено=${newRawQuestions.length}, dedup=${dedupedNew.length}, уникальных новых=${filtered.length}, итого=${workingQuestions.length + filtered.length}`);
+        backfillQuestionsAdded += filtered.length;
+        logStructured({
+            level: 'info',
+            traceId,
+            documentId,
+            phase: 'backfill',
+            event: 'backfill_round_complete',
+            metrics: {
+                round,
+                new_questions: filtered.length,
+                total_now: workingQuestions.length + filtered.length,
+            },
+        });
         workingQuestions = [...workingQuestions, ...filtered];
     }
 
     // Шаг 5: Финализация
-    if (onProgress) onProgress(5, 6);
+    progress({ phase: 'generate', stage: 'finalize', percent: 97, detail: 'Финализация списка вопросов…' });
     const finalQuestions = workingQuestions
         .slice(0, targetMax)
         .map((q, i) => ({ ...q, id: i + 1 }));
 
-    if (onProgress) onProgress(6, 6);
+    progress({
+        phase: 'generate',
+        stage: 'ready',
+        percent: 99,
+        detail: `Готово к сохранению: ${finalQuestions.length} вопросов`,
+    });
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const durationMs = Date.now() - startTime;
     console.log(
         `[GENERATOR] Итог → запрошено: ${targetMin}–${targetMax} | ` +
         `blueprint: ${blueprintWithDifficulty.length} | ` +
@@ -742,10 +900,54 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         `язык: ${detectedLang} | формат: multiple_choice | Bloom taxonomy`
     );
 
+    const generationMetrics = buildGenerationMetrics({
+        traceId,
+        documentId,
+        model,
+        durationMs,
+        targetCount,
+        targetMin,
+        targetMax,
+        blueprintIntents: blueprintWithDifficulty.length,
+        parseQualityScore: opts.extractionQuality,
+        chunkCount: indexedChunks.length,
+        chunksWithFacts,
+        atomicFactsExtracted,
+        retrievalPassed: statsRetrievalPassed,
+        retrievalSkipped: statsSkippedEvidence,
+        groundingAccepted: groundedPreDedup,
+        groundingFailed: statsGroundingFailed,
+        batchValidated: statsValidated,
+        llmSkipped: statsSkippedLLM,
+        validationFailed: statsValidationFailed,
+        preDedupCount,
+        postDedupCount: initialDedup.length,
+        finalCount: finalQuestions.length,
+        backfillRounds: backfillRoundsUsed,
+        backfillQuestionsAdded,
+    });
+
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'generation_complete',
+        metrics: {
+            duration_ms: durationMs,
+            final_question_count: finalQuestions.length,
+            final_quality_score: generationMetrics.final_quality_score,
+            grounded_question_rate: generationMetrics.grounded_question_rate,
+            retrieval_hit_rate: generationMetrics.retrieval_hit_rate,
+            dedup_loss_ratio: generationMetrics.dedup_loss_ratio,
+        },
+    });
+
     const cleanName = docName.replace(/\.(pdf|docx?)$/i, '');
     return {
         title: `Тест по документу: ${cleanName}`,
         questions: finalQuestions,
+        generationMetrics,
     };
 }
 

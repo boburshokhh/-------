@@ -253,9 +253,23 @@ function buildSummaryDigest(indexedChunks, fullText, maxTotalChars = 14000) {
  */
 function estimateThemeCount(indexedChunks, fullText) {
     if (indexedChunks && indexedChunks.length > 0) {
-        return Math.min(14, Math.max(5, Math.ceil(indexedChunks.length / 2)));
+        let factsCount = 0;
+        for (const chunk of indexedChunks) {
+            if (Array.isArray(chunk.summary)) {
+                factsCount += chunk.summary.length;
+            }
+        }
+        // Адаптивный пол по числу фактов: 1 тема на ~4 факта
+        const themesByFacts = factsCount > 0 ? Math.max(1, Math.ceil(factsCount / 4)) : 1;
+        
+        const baseThemes = Math.ceil(indexedChunks.length / 2);
+        // Не требуем 5 тем, если контента мало
+        const adaptiveMin = Math.min(5, themesByFacts);
+        
+        return Math.min(14, Math.max(adaptiveMin, Math.min(baseThemes, themesByFacts)));
     }
-    return Math.min(8, Math.max(5, Math.floor(fullText.length / 3000)));
+    const lenBasedMin = Math.max(1, Math.floor(fullText.length / 5000));
+    return Math.min(8, Math.max(Math.min(5, lenBasedMin), Math.floor(fullText.length / 3000)));
 }
 
 /**
@@ -265,12 +279,17 @@ function estimateThemeCount(indexedChunks, fullText) {
  * @param {Array}  indexedChunks - Проиндексированные чанки (с полем summary)
  * @param {string} fullText      - Полный текст (fallback если нет чанков)
  * @param {string} [model]
+ * @param {number} [targetCount] - Целевое число вопросов (опционально)
  * @returns {Promise<Array<{topic,section,importance,suggestedCount,difficultyCandidates}>>}
  */
-async function extractThemes(indexedChunks, fullText, model = null) {
+async function extractThemes(indexedChunks, fullText, model = null, targetCount = null) {
     const llmModel = model || config.LLM_MODEL;
     const digest = buildSummaryDigest(indexedChunks, fullText);
-    const targetThemes = estimateThemeCount(indexedChunks, fullText);
+    
+    // Если передан budget, ограничиваем число тем, чтобы на каждую приходилось хотя бы ~2-3 вопроса
+    const targetThemes = targetCount 
+        ? Math.max(1, Math.min(10, Math.ceil(targetCount / 2)))
+        : estimateThemeCount(indexedChunks, fullText);
 
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {

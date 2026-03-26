@@ -1,11 +1,14 @@
+const config = require('../config');
+
 module.exports = function errorHandler(err, req, res, next) {
     console.error(`[ERROR] ${new Date().toISOString()}:`, err.message);
     console.error(err.stack);
 
     if (err.code === 'LIMIT_FILE_SIZE') {
+        const mb = config.MAX_FILE_SIZE_MB || 10;
         return res.status(413).json({
             error: 'Файл слишком большой',
-            details: 'Максимальный размер файла — 10 МБ'
+            details: `Максимальный размер файла — ${mb} МБ`
         });
     }
 

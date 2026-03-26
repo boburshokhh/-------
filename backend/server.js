@@ -46,6 +46,7 @@ app.use('/api/upload', uploadLimiter, require('./routes/upload'));
 app.use('/api/tests', apiLimiter, require('./routes/tests'));
 app.use('/api/results', apiLimiter, require('./routes/results'));
 app.use('/api/logs', require('./routes/logs'));
+app.use('/api/jobs', require('./routes/jobs'));
 
 // Health check
 app.get('/api/health', (req, res) => {

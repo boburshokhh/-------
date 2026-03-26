@@ -43,5 +43,9 @@ module.exports = {
   ENABLE_PDF_OCR: process.env.ENABLE_PDF_OCR !== 'false',
   MAX_OCR_PAGES: parseInt(process.env.MAX_OCR_PAGES, 10) || 10,
   MIN_TEXT_LENGTH: parseInt(process.env.MIN_TEXT_LENGTH, 10) || 50,
-  EVIDENCE_MIN_CHARS: parseInt(process.env.EVIDENCE_MIN_CHARS, 10) || 80
+  EVIDENCE_MIN_CHARS: parseInt(process.env.EVIDENCE_MIN_CHARS, 10) || 80,
+  /** Полные тексты в SQLite (может сильно раздуть data.db) */
+  STORE_DOCUMENT_TEXT_IN_DB: process.env.STORE_DOCUMENT_TEXT_IN_DB === 'true',
+  /** Ниже этого chars/page для pdf-parse будет пробоваться pdf.js */
+  PDF_MIN_CHARS_PER_PAGE_SKIP_FALLBACK: parseInt(process.env.PDF_MIN_CHARS_PER_PAGE_SKIP_FALLBACK, 10) || 120,
 };

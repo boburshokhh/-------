@@ -4,19 +4,42 @@
 export const API = {
     BASE: '/api',
 
-    async upload(file: File, modelId: string | null = null) {
+    async upload(
+        file: File,
+        opts?: { modelId?: string | null; jobId?: string | null },
+    ) {
         const formData = new FormData();
         formData.append('file', file);
+        const modelId = opts?.modelId;
         if (modelId) formData.append('model', modelId);
+
+        const headers: Record<string, string> = {};
+        if (opts?.jobId) headers['X-Job-Id'] = opts.jobId;
 
         const response = await fetch(`${this.BASE}/upload`, {
             method: 'POST',
-            body: formData
+            body: formData,
+            headers,
         });
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.details || data.error || 'Ошибка загрузки');
         return data;
+    },
+
+    async getJobProgress(jobId: string) {
+        const response = await fetch(`${this.BASE}/jobs/${encodeURIComponent(jobId)}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Прогресс недоступен');
+        return data as {
+            ok: boolean;
+            jobId: string;
+            phase: string;
+            stage: string;
+            percent: number;
+            detail: string;
+            updatedAt?: number;
+        };
     },
 
     async getModels() {
