@@ -4,8 +4,11 @@ const config = require('../config');
 const db = require('../db/database');
 const { chunkText } = require('./chunker');
 const { extractJSON } = require('./validator');
+const runtimeConfig = require('./runtimeConfig');
 
-const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
+function getAiClient() {
+    return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
+}
 
 const EMBED_BATCH_SIZE = config.EMBED_BATCH_SIZE || 5;
 const EMBED_CONCURRENCY = config.EMBED_CONCURRENCY || 2;
@@ -31,7 +34,7 @@ async function fetchEmbeddingWithRetry(text, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const response = await ai.models.embedContent({
+            const response = await getAiClient().models.embedContent({
                 model: config.EMBEDDING_MODEL || 'text-embedding-004',
                 contents: text,
             });
@@ -56,7 +59,7 @@ async function fetchChunkSummary(chunkText, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const response = await ai.models.generateContent({
+            const response = await getAiClient().models.generateContent({
                 model: config.LLM_MODEL,
                 contents: `Прочитай следующий фрагмент учебного материала и выдели из него 5–10 конкретных фактов, определений, правил или ключевых утверждений. Оформи каждый факт как отдельный пункт списка (одна строка). Не пересказывай, а вычленяй именно проверяемые знания.\n\nФрагмент:\n${chunkText}\n\nВерни только JSON объект вида {"facts": ["факт 1","факт 2",...]}. Никакого другого текста.`,
                 config: {

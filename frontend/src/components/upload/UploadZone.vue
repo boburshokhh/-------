@@ -12,7 +12,7 @@
         <h3 class="font-headline font-bold text-2xl text-[#2A3439] mb-2">
           Перетащите файлы сюда
         </h3>
-        <p class="text-[#566166] mb-8">Поддерживаются PDF, DOCX и TXT-файлы до 50 МБ</p>
+        <p class="text-[#566166] mb-8">{{ limitsText }}</p>
         <button
           :disabled="disabled"
           class="bg-gradient-to-r from-[#3755C3] to-[#2848B7] text-[#F8F7FF] px-8 py-3 rounded-xl font-bold text-sm tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all"
@@ -25,7 +25,7 @@
           ref="inputRef"
           type="file"
           class="hidden"
-          accept=".pdf,.doc,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+          :accept="accept"
           @change="onFileInput"
         />
         <p v-if="fileName" class="mt-4 text-sm text-[#435368]">
@@ -47,6 +47,8 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
   error: { type: String, default: '' },
   fileName: { type: String, default: '' },
+  accept: { type: String, default: '.pdf,application/pdf' },
+  limitsText: { type: String, default: 'Поддерживаются PDF, максимум 30 страниц и до 10 МБ' },
 });
 
 const emit = defineEmits(['file-selected']);

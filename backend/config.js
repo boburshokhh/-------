@@ -12,8 +12,7 @@ module.exports = {
   UPLOAD_DIR: path.join(dataDir, 'uploads'),
   DB_PATH: path.join(dataDir, 'data.db'),
   ALLOWED_MIMES: [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    'application/pdf'
   ],
   MAX_PAGES: 30,
   QUESTIONS_PER_CHUNK: parseInt(process.env.QUESTIONS_PER_CHUNK, 10) || 4,
@@ -49,6 +48,7 @@ module.exports = {
     .map((v) => v.trim())
     .filter(Boolean),
   LOGS_API_TOKEN: process.env.LOGS_API_TOKEN || '',
+  SETTINGS_API_TOKEN: process.env.SETTINGS_API_TOKEN || '',
   /** Полные тексты в SQLite (может сильно раздуть data.db) */
   STORE_DOCUMENT_TEXT_IN_DB: process.env.STORE_DOCUMENT_TEXT_IN_DB === 'true',
   /** Ниже этого chars/page для pdf-parse будет пробоваться pdf.js */

@@ -3,27 +3,42 @@
     <div class="flex-grow">
       <!-- Hero-секция -->
       <section class="max-w-7xl mx-auto px-6 pt-16 pb-12 text-center">
-        <div class="inline-flex items-center px-4 py-1.5 rounded-full bg-[#DDE1FF] text-[#2747B6] text-xs font-semibold mb-6 tracking-wide uppercase">
-          Обучение с поддержкой ИИ
-        </div>
         <h1 class="font-headline font-extrabold text-4xl md:text-6xl text-[#2A3439] mb-6 tracking-tight max-w-3xl mx-auto">
           Превратите документы в <span class="text-[#3755C3]">интерактивные тесты</span>
         </h1>
-        <p class="text-[#566166] text-lg md:text-xl max-w-2xl mx-auto mb-12 leading-relaxed">
-          Загрузите научные статьи, учебники или конспекты лекций. ИИ проанализирует содержимое и создаст индивидуальные задания за секунды.
-        </p>
       </section>
 
-      <!-- Зона загрузки и шаги -->
+      <!-- Зона загрузки / inline-прогресс -->
       <section class="max-w-4xl mx-auto px-6 pb-24">
         <div class="grid grid-cols-1 gap-12">
           <UploadZone
+            v-if="!showProgressInline"
             :disabled="isBusy"
             :error="store.state.upload.error"
             :file-name="store.state.upload.file?.name || ''"
+            :accept="uploadAccept"
+            :limits-text="uploadLimitsText"
             @file-selected="handleUpload"
           />
-          <StepsIndicator :active-step="0" />
+
+          <GenerationProgress
+            v-else
+            :percent="store.state.upload.progress.percent"
+            :phase="store.state.upload.progress.phase"
+            :stage="store.state.upload.progress.stage"
+            :detail="store.state.upload.progress.detail"
+            :updated-at="store.state.upload.progress.updatedAt"
+            :model-label="selectedModelLabel"
+          />
+
+          <div v-if="canGoToTest" class="flex justify-center">
+            <button
+              class="bg-gradient-to-r from-[#3755C3] to-[#2848B7] text-[#F8F7FF] px-8 py-3 rounded-xl font-bold text-sm tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all"
+              @click="goToTest"
+            >
+              Перейти к тесту
+            </button>
+          </div>
         </div>
       </section>
 
@@ -90,11 +105,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AcademicLayout from '@/layouts/AcademicLayout.vue'
 import UploadZone from '@/components/upload/UploadZone.vue'
-import StepsIndicator from '@/components/upload/StepsIndicator.vue'
+import GenerationProgress from '@/components/upload/GenerationProgress.vue'
 import BentoFeatures from '@/components/upload/BentoFeatures.vue'
 import FloatingStatus from '@/components/upload/FloatingStatus.vue'
 import { API, createClientJobId } from '@/lib/api'
@@ -104,10 +119,32 @@ const router = useRouter()
 const store = useAppStore()
 const healthLoading = ref(false)
 const logsLoading = ref(false)
+let pollTimer = null
 
 const isBusy = computed(() => ['uploading', 'processing'].includes(store.state.upload.status))
+const showProgressInline = computed(() => ['uploading', 'processing', 'done'].includes(store.state.upload.status))
+const canGoToTest = computed(() => store.state.upload.status === 'done' && !!store.state.upload.testId)
+const selectedModelLabel = computed(() => store.state.selectedModel || store.state.defaultModel || 'LLM')
 const healthStatus = computed(() => store.state.diagnostics.health?.status || 'unknown')
 const hasApiKeyLabel = computed(() => store.state.diagnostics.health?.hasApiKey ? 'настроен' : 'не настроен')
+const uploadLimits = computed(() => store.state.diagnostics.health?.uploadLimits || {})
+const allowedMimes = computed(() => uploadLimits.value.allowedMimes || [])
+const maxPages = computed(() => Number(uploadLimits.value.maxPages || 30))
+const maxFileSizeMb = computed(() => Number(uploadLimits.value.maxFileSizeMb || 10))
+const uploadAccept = computed(() => {
+  const mimes = allowedMimes.value
+  if (!mimes.length) {
+    return '.pdf,application/pdf'
+  }
+  return mimes.join(',')
+})
+const uploadLimitsText = computed(() => {
+  const labels = []
+  if (allowedMimes.value.includes('application/pdf')) labels.push('PDF')
+  if (allowedMimes.value.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) labels.push('DOCX')
+  const formatsLabel = labels.length ? labels.join(', ') : 'PDF'
+  return `Поддерживаются ${formatsLabel}, максимум ${maxPages.value} страниц и до ${maxFileSizeMb.value} МБ`
+})
 const healthTimestamp = computed(() => {
   const ts = store.state.diagnostics.health?.timestamp
   if (!ts) return '—'
@@ -124,7 +161,46 @@ onMounted(async () => {
   const models = await API.getModels()
   store.actions.setModels(models)
   await Promise.all([loadHealth(), loadLogs()])
+  if (isBusy.value && store.state.upload.jobId) {
+    startPolling()
+  }
 })
+
+onUnmounted(() => {
+  stopPolling()
+})
+
+function startPolling() {
+  stopPolling()
+  pollProgress()
+  pollTimer = setInterval(pollProgress, 1800)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function pollProgress() {
+  const jobId = store.state.upload.jobId
+  if (!jobId) return
+  try {
+    const progress = await API.getJobProgress(jobId)
+    store.actions.setUploadProgress(progress)
+    if (progress.phase === 'done' || progress.phase === 'error') {
+      stopPolling()
+    }
+  } catch (error) {
+    if (error?.status === 404) {
+      stopPolling()
+      return
+    }
+    store.actions.failUpload(error?.message || 'Не удалось обновить прогресс')
+    stopPolling()
+  }
+}
 
 async function loadHealth() {
   healthLoading.value = true
@@ -154,16 +230,22 @@ async function handleUpload(file) {
   if (!file) return
   const jobId = createClientJobId()
   store.actions.startUpload(file, jobId)
-  router.push({ path: '/progress' })
+  startPolling()
   try {
     const result = await API.upload(file, {
       jobId,
       modelId: store.state.selectedModel || null,
     })
     store.actions.finishUpload(result)
-    router.push({ path: '/test', query: { testId: String(result.testId) } })
+    stopPolling()
   } catch (error) {
+    stopPolling()
     store.actions.failUpload(error?.message || 'Не удалось загрузить файл')
   }
+}
+
+function goToTest() {
+  if (!store.state.upload.testId) return
+  router.push({ path: '/test', query: { testId: String(store.state.upload.testId) } })
 }
 </script>

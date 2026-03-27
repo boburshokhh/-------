@@ -1,5 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 const LOGS_API_TOKEN = import.meta.env.VITE_LOGS_API_TOKEN || '';
+const SETTINGS_API_TOKEN = import.meta.env.VITE_SETTINGS_API_TOKEN || '';
 
 function createError(message, status, payload) {
   const err = new Error(message);
@@ -19,7 +20,7 @@ async function parseJson(response) {
 function mapHttpError(status, payload) {
   const fallback = payload?.details || payload?.error || 'Ошибка запроса';
   if (status === 413) return 'Файл слишком большой или превышен лимит страниц.';
-  if (status === 415) return 'Неподдерживаемый формат файла. Используйте PDF или DOCX.';
+  if (status === 415) return 'Неподдерживаемый формат файла. Используйте PDF.';
   if (status === 422) return 'Документ не удалось обработать. Проверьте содержимое файла.';
   if (status === 429) return 'Слишком много запросов. Повторите попытку чуть позже.';
   if (status === 502) return 'Временная ошибка генерации. Повторите попытку.';
@@ -85,6 +86,26 @@ export const API = {
       headers['X-Logs-Token'] = LOGS_API_TOKEN;
     }
     return request(`/logs?${query.toString()}`, { headers });
+  },
+
+  getRuntimeSettings() {
+    const headers = {};
+    if (SETTINGS_API_TOKEN) {
+      headers['X-Settings-Token'] = SETTINGS_API_TOKEN;
+    }
+    return request('/_hidden/settings/runtime', { headers });
+  },
+
+  setGeminiApiKey(geminiApiKey) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (SETTINGS_API_TOKEN) {
+      headers['X-Settings-Token'] = SETTINGS_API_TOKEN;
+    }
+    return request('/_hidden/settings/gemini-key', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ geminiApiKey }),
+    });
   },
 
   getTests() {

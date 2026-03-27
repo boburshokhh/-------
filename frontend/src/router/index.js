@@ -7,6 +7,7 @@ import ProgressView from '@/views/ProgressView.vue'
 import TestView from '@/views/TestView.vue'
 import ItogView from '@/views/ItogView.vue'
 import RazborView from '@/views/RazborView.vue'
+import HiddenSettingsView from '@/views/HiddenSettingsView.vue'
 
 const routes = [
   { path: '/', redirect: '/biblioteka' },
@@ -16,6 +17,7 @@ const routes = [
   { path: '/test', component: TestView },
   { path: '/itog', component: ItogView },
   { path: '/razbor', component: RazborView },
+  { path: '/_hidden/runtime-settings', component: HiddenSettingsView },
 ]
 
 const router = createRouter({

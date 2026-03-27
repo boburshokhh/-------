@@ -1,5 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const config = require('../config');
+const runtimeConfig = require('./runtimeConfig');
 const { chunkText } = require('./chunker');
 const { validateQuestions, extractJSON } = require('./validator');
 const rag = require('./rag');
@@ -12,7 +13,9 @@ const {
     DEFECT_CLASSES,
 } = require('../utils/observability');
 
-const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
+function getAiClient() {
+    return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
+}
 
 // ─── Bloom's Taxonomy difficulty levels ────────────────────────────────────
 const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
@@ -285,7 +288,7 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
         try {
             const userPrompt = buildBatchPrompt(intents, evidenceList);
 
-            const response = await ai.models.generateContent({
+            const response = await getAiClient().models.generateContent({
                 model: llmModel,
                 contents: userPrompt,
                 config: {
@@ -353,7 +356,7 @@ async function checkGrounding(question, evidenceText, model = null) {
             : JSON.stringify(question.correctIndex);
 
         const prompt = `Вопрос: ${question.question}\nПравильный ответ: ${correctOption}\nОбъяснение: ${question.explanation}\n\nEvidence:\n${evidenceText}`;
-        const response = await ai.models.generateContent({
+        const response = await getAiClient().models.generateContent({
             model: llmModel,
             contents: prompt,
             config: {

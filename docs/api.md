@@ -13,7 +13,12 @@
   {
     "status": "ok",
     "timestamp": "2026-02-24T12:00:00.000Z",
-    "hasApiKey": true
+    "hasApiKey": true,
+    "uploadLimits": {
+      "allowedMimes": ["application/pdf"],
+      "maxPages": 30,
+      "maxFileSizeMb": 10
+    }
   }
   ```
 
@@ -254,3 +259,46 @@
     ]
   }
   ```
+
+---
+
+### 10. Скрытые runtime-настройки (admin)
+
+#### 10a. Получить статус runtime-настроек
+**GET** `/api/_hidden/settings/runtime`
+
+Возвращает публичный статус runtime-конфига.
+- **Header (опционально)**: `X-Settings-Token` (обязателен, если на сервере задан `SETTINGS_API_TOKEN`)
+- **Ответ (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "settings": {
+      "hasGeminiApiKey": true
+    }
+  }
+  ```
+
+#### 10b. Обновить GEMINI_API_KEY (в БД)
+**POST** `/api/_hidden/settings/gemini-key`
+
+- **Header**: `Content-Type: application/json`
+- **Header (опционально)**: `X-Settings-Token` (обязателен, если задан `SETTINGS_API_TOKEN`)
+- **Body**:
+  ```json
+  {
+    "geminiApiKey": "AIza..."
+  }
+  ```
+- **Ответ (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "settings": {
+      "hasGeminiApiKey": true
+    }
+  }
+  ```
+- **Ошибки**:
+  - `400` — `geminiApiKey` отсутствует или пустой
+  - `403` — неверный/отсутствующий `X-Settings-Token`

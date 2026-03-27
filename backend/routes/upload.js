@@ -39,7 +39,7 @@ const fileFilter = (req, file, cb) => {
     if (config.ALLOWED_MIMES.includes(file.mimetype)) {
         cb(null, true);
     } else {
-        const err = new Error('Неподдерживаемый формат. Используйте PDF или DOCX.');
+        const err = new Error('Неподдерживаемый формат. Используйте PDF.');
         err.type = 'INVALID_FILE_TYPE';
         cb(err, false);
     }
@@ -53,7 +53,7 @@ const upload = multer({
 
 /**
  * POST /api/upload
- * Загрузка PDF/DOCX, парсинг, генерация теста
+ * Загрузка PDF, парсинг, генерация теста
  */
 router.post('/', upload.single('file'), async (req, res, next) => {
     const file = req.file;

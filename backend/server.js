@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const errorHandler = require('./middleware/errorHandler');
 const logCollector = require('./services/logCollector');
+const runtimeConfig = require('./services/runtimeConfig');
 
 const app = express();
 
@@ -60,13 +61,19 @@ app.use('/api/tests', apiLimiter, require('./routes/tests'));
 app.use('/api/results', apiLimiter, require('./routes/results'));
 app.use('/api/logs', require('./routes/logs'));
 app.use('/api/jobs', require('./routes/jobs'));
+app.use('/api/_hidden/settings', require('./routes/settings'));
 
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        hasApiKey: !!config.GEMINI_API_KEY && config.GEMINI_API_KEY !== 'your-gemini-api-key-here'
+        hasApiKey: runtimeConfig.hasGeminiApiKey(),
+        uploadLimits: {
+            allowedMimes: config.ALLOWED_MIMES || [],
+            maxPages: config.MAX_PAGES,
+            maxFileSizeMb: config.MAX_FILE_SIZE_MB,
+        },
     });
 });
 
@@ -96,5 +103,5 @@ app.listen(config.PORT, () => {
     console.log(`📁 Загрузки: ${config.UPLOAD_DIR}`);
     console.log(`🗄️  БД: ${config.DB_PATH}`);
     console.log(`🤖 Модель: ${config.LLM_MODEL}`);
-    console.log(`🔑 API ключ: ${config.GEMINI_API_KEY ? 'настроен ✅' : 'НЕ НАСТРОЕН ❌'}\n`);
+    console.log(`🔑 API ключ: ${runtimeConfig.hasGeminiApiKey() ? 'настроен ✅' : 'НЕ НАСТРОЕН ❌'}\n`);
 });
