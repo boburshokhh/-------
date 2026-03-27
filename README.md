@@ -39,7 +39,7 @@ AI Test Generator — это веб-приложение для автомати
    
    **Frontend:**
    ```bash
-   cd "test new front/academic-architect"
+   cd frontend
    npm install
    npm run dev
    ```

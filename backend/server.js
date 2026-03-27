@@ -65,12 +65,13 @@ app.get('/api/models', (req, res) => {
     });
 });
 
-// Serve frontend static files (new template)
-app.use(express.static(path.join(__dirname, '..', 'test new front', 'academic-architect', 'dist')));
+// Serve frontend static files.
+const frontendDistPath = path.join(__dirname, '..', 'frontend', 'dist');
+app.use(express.static(frontendDistPath));
 
 // SPA fallback
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'test new front', 'academic-architect', 'dist', 'index.html'));
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
 // Error handler

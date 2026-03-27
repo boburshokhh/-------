@@ -15,8 +15,8 @@ WORKDIR /app
 COPY backend/package.json backend/package-lock.json* ./backend/
 RUN cd backend && npm ci --omit=dev
 
-# Сборка frontend (new template)
-COPY ["test new front/academic-architect", "./frontend"]
+# Сборка frontend
+COPY frontend ./frontend
 RUN cd frontend && npm ci && npm run build
 
 # Код backend (статика frontend/dist уже собрана)
