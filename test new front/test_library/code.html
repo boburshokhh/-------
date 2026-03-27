@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Academic Architect - My Generated Tests</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-secondary": "#f7f9ff",
+              "secondary-dim": "#44546a",
+              "on-secondary-fixed-variant": "#4d5d73",
+              "surface-variant": "#d9e4ea",
+              "error-container": "#fe8983",
+              "surface-bright": "#f7f9fb",
+              "primary-container": "#dde1ff",
+              "surface": "#f7f9fb",
+              "primary-fixed-dim": "#cad2ff",
+              "secondary-fixed": "#d3e4fe",
+              "on-secondary-fixed": "#314055",
+              "surface-tint": "#3755c3",
+              "primary-fixed": "#dde1ff",
+              "secondary-container": "#d3e4fe",
+              "error-dim": "#4e0309",
+              "on-error-container": "#752121",
+              "on-tertiary-fixed": "#3c3650",
+              "on-error": "#fff7f6",
+              "on-primary-fixed": "#0732a3",
+              "tertiary-container": "#dfd5f7",
+              "outline-variant": "#a9b4b9",
+              "tertiary": "#625b77",
+              "on-surface": "#2a3439",
+              "background": "#f7f9fb",
+              "surface-container-low": "#f0f4f7",
+              "on-background": "#2a3439",
+              "surface-container-high": "#e1e9ee",
+              "surface-dim": "#cfdce3",
+              "on-primary-container": "#2747b6",
+              "secondary-fixed-dim": "#c5d6f0",
+              "on-tertiary-container": "#4f4964",
+              "inverse-primary": "#6d89fa",
+              "inverse-surface": "#0b0f10",
+              "tertiary-fixed": "#dfd5f7",
+              "tertiary-dim": "#564f6b",
+              "on-primary": "#f8f7ff",
+              "error": "#9f403d",
+              "surface-container": "#e8eff3",
+              "surface-container-highest": "#d9e4ea",
+              "on-surface-variant": "#566166",
+              "primary-dim": "#2848b7",
+              "on-tertiary": "#fdf7ff",
+              "on-primary-fixed-variant": "#3352c0",
+              "primary": "#3755c3",
+              "inverse-on-surface": "#9a9d9f",
+              "outline": "#717c82",
+              "on-tertiary-fixed-variant": "#59526e",
+              "on-secondary-container": "#435368",
+              "surface-container-lowest": "#ffffff",
+              "tertiary-fixed-dim": "#d0c7e8",
+              "secondary": "#506076"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .tonal-sculpting-card {
+        transition: background-color 0.2s, box-shadow 0.2s;
+      }
+      .tonal-sculpting-card:hover {
+        background-color: #DDE1FF;
+        box-shadow: 0 4px 12px rgba(42, 52, 57, 0.08);
+      }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface">
+<!-- TopNavBar -->
+<header class="w-full top-0 sticky z-50 bg-[#F7F9FB] dark:bg-slate-900">
+<div class="flex justify-between items-center px-6 py-4 max-w-7xl mx-auto">
+<div class="text-xl font-extrabold text-[#3755C3] dark:text-blue-500 font-headline tracking-tight">Academic Architect</div>
+<nav class="hidden md:flex items-center space-x-8">
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#3755C3] dark:text-blue-400 border-b-2 border-[#3755C3] pb-1" href="#">Library</a>
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#566166] dark:text-slate-400 hover:text-[#3755C3] transition-colors duration-200" href="#">Upload</a>
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#566166] dark:text-slate-400 hover:text-[#3755C3] transition-colors duration-200" href="#">Results</a>
+</nav>
+<div class="flex items-center space-x-4">
+<button class="p-2 rounded-full hover:bg-[#E1E9EE] dark:hover:bg-slate-800 transition-colors duration-200 text-on-surface-variant">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 rounded-full hover:bg-[#E1E9EE] dark:hover:bg-slate-800 transition-colors duration-200 text-on-surface-variant">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-secondary-container overflow-hidden">
+<img alt="User profile avatar" class="w-full h-full object-cover" data-alt="Professional headshot of a young educator with a friendly smile, soft natural studio lighting, neutral background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBnrNCIEwRYdnPkmJg_iifyg1WBocjhgcxb_4-Icia1wM5BVPKeZTg0t4RvwaVsT-LCOqE_LKwqCQ6u2MQGA6susCB9WD2ijg8gYJz57iv8C60OkJ38mLx-BRopKkCkgYWoczfUIej2SaqGgcRKCLbEftVOSyCLbTzGWOjMvxEulZ4VO6qWNsoFxdY50DSL3n7f_rhv-DMzS-rHdH-hfx_CJFOpfQkaaNxfdGxTF0omt-l7ig-jabB-RODuwwKsceH5ulNZ20ZeAwg6"/>
+</div>
+</div>
+</div>
+</header>
+<main class="max-w-7xl mx-auto px-6 py-12">
+<!-- Dashboard Header -->
+<section class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+<div class="space-y-2">
+<h1 class="text-4xl font-headline font-extrabold text-on-surface tracking-tight">My Generated Tests</h1>
+<p class="text-on-surface-variant max-w-2xl">Manage and review your AI-sculpted assessments. Continue progress or analyze previous results.</p>
+</div>
+<div class="flex flex-col sm:flex-row gap-4">
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="pl-10 pr-4 py-2.5 w-full sm:w-64 bg-surface-container-low border-b-2 border-transparent focus:border-primary outline-none transition-all rounded-t-lg font-medium text-sm" placeholder="Search documents..." type="text"/>
+</div>
+<button class="flex items-center justify-center gap-2 bg-gradient-to-br from-primary to-primary-dim text-on-primary px-6 py-2.5 rounded-lg font-bold text-sm shadow-sm hover:opacity-90 transition-all active:scale-95">
+<span class="material-symbols-outlined">add</span>
+                    Create New
+                </button>
+</div>
+</section>
+<!-- Stats Overview (Tonal Sculpting) -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+<div class="bg-surface-container-low p-6 rounded-xl flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container">
+<span class="material-symbols-outlined">menu_book</span>
+</div>
+<div>
+<div class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Total Tests</div>
+<div class="text-2xl font-extrabold text-on-surface">24</div>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container">
+<span class="material-symbols-outlined">trending_up</span>
+</div>
+<div>
+<div class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Avg. Score</div>
+<div class="text-2xl font-extrabold text-on-surface">86%</div>
+</div>
+</div>
+<div class="bg-surface-container-low p-6 rounded-xl flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-tertiary-container flex items-center justify-center text-on-tertiary-container">
+<span class="material-symbols-outlined">timer</span>
+</div>
+<div>
+<div class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">Hours Spent</div>
+<div class="text-2xl font-extrabold text-on-surface">12.5</div>
+</div>
+</div>
+</div>
+<!-- Library Bento Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Card 1: Completed -->
+<div class="tonal-sculpting-card bg-surface-container-lowest p-6 rounded-xl flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container text-[10px] font-bold uppercase tracking-widest rounded-full">Completed</span>
+<span class="text-on-surface-variant text-xs font-medium">Oct 24, 2024</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface mb-2 leading-tight">Advanced Neurobiology: Synaptic Plasticity</h3>
+<div class="flex items-center gap-4 text-sm text-on-surface-variant mb-6">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">quiz</span>
+                            45 Questions
+                        </div>
+<div class="flex items-center gap-1 text-primary font-bold">
+<span class="material-symbols-outlined text-sm">workspace_premium</span>
+                            92%
+                        </div>
+</div>
+</div>
+<div class="flex gap-2 pt-4">
+<button class="flex-1 bg-surface-container-high text-on-secondary-container py-2 rounded-lg text-sm font-bold hover:bg-surface-container-highest transition-colors">View Results</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</div>
+</div>
+<!-- Card 2: In Progress -->
+<div class="tonal-sculpting-card bg-surface-container-lowest p-6 rounded-xl border-l-4 border-primary flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="px-3 py-1 bg-primary-container text-on-primary-container text-[10px] font-bold uppercase tracking-widest rounded-full">In Progress</span>
+<span class="text-on-surface-variant text-xs font-medium">Oct 26, 2024</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface mb-2 leading-tight">Modern Macroeconomics: Fiscal Policy Trends</h3>
+<div class="flex items-center gap-4 text-sm text-on-surface-variant mb-4">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">quiz</span>
+                            20 Questions
+                        </div>
+</div>
+<!-- Progress Bar -->
+<div class="w-full bg-surface-container-high h-1.5 rounded-full mb-6">
+<div class="bg-primary h-full rounded-full" style="width: 65%"></div>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="flex-1 bg-gradient-to-br from-primary to-primary-dim text-on-primary py-2 rounded-lg text-sm font-bold shadow-sm active:scale-95 transition-all">Resume Test</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</div>
+</div>
+<!-- Card 3: Ready -->
+<div class="tonal-sculpting-card bg-surface-container-lowest p-6 rounded-xl flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="px-3 py-1 bg-surface-container-high text-on-surface-variant text-[10px] font-bold uppercase tracking-widest rounded-full">Ready</span>
+<span class="text-on-surface-variant text-xs font-medium">Oct 27, 2024</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface mb-2 leading-tight">Calculus III: Vector Field Integrals</h3>
+<div class="flex items-center gap-4 text-sm text-on-surface-variant mb-6">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">quiz</span>
+                            15 Questions
+                        </div>
+</div>
+</div>
+<div class="flex gap-2 pt-4">
+<button class="flex-1 bg-gradient-to-br from-primary to-primary-dim text-on-primary py-2 rounded-lg text-sm font-bold shadow-sm active:scale-95 transition-all">Start Test</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</div>
+</div>
+<!-- Card 4: Ready -->
+<div class="tonal-sculpting-card bg-surface-container-lowest p-6 rounded-xl flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="px-3 py-1 bg-surface-container-high text-on-surface-variant text-[10px] font-bold uppercase tracking-widest rounded-full">Ready</span>
+<span class="text-on-surface-variant text-xs font-medium">Oct 27, 2024</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface mb-2 leading-tight">Quantum Mechanics Foundations</h3>
+<div class="flex items-center gap-4 text-sm text-on-surface-variant mb-6">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">quiz</span>
+                            30 Questions
+                        </div>
+</div>
+</div>
+<div class="flex gap-2 pt-4">
+<button class="flex-1 bg-gradient-to-br from-primary to-primary-dim text-on-primary py-2 rounded-lg text-sm font-bold shadow-sm active:scale-95 transition-all">Start Test</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</div>
+</div>
+<!-- Card 5: Completed -->
+<div class="tonal-sculpting-card bg-surface-container-lowest p-6 rounded-xl flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-4">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container text-[10px] font-bold uppercase tracking-widest rounded-full">Completed</span>
+<span class="text-on-surface-variant text-xs font-medium">Oct 22, 2024</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface mb-2 leading-tight">Linguistic Structures in Latin Literature</h3>
+<div class="flex items-center gap-4 text-sm text-on-surface-variant mb-6">
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-sm">quiz</span>
+                            25 Questions
+                        </div>
+<div class="flex items-center gap-1 text-primary font-bold">
+<span class="material-symbols-outlined text-sm">workspace_premium</span>
+                            78%
+                        </div>
+</div>
+</div>
+<div class="flex gap-2 pt-4">
+<button class="flex-1 bg-surface-container-high text-on-secondary-container py-2 rounded-lg text-sm font-bold hover:bg-surface-container-highest transition-colors">View Results</button>
+<button class="p-2 text-on-surface-variant hover:text-error transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</div>
+</div>
+<!-- Create New Placeholder -->
+<div class="border-2 border-dashed border-outline-variant/30 p-6 rounded-xl flex flex-col items-center justify-center text-center group hover:bg-surface-container-low transition-colors cursor-pointer">
+<div class="w-14 h-14 rounded-full bg-surface-container-high flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-3xl text-primary">upload_file</span>
+</div>
+<h3 class="font-headline font-bold text-on-surface">Generate from New Document</h3>
+<p class="text-xs text-on-surface-variant mt-2">Upload PDFs, Slides, or Notes</p>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full border-t border-[#A9B4B9]/15 bg-[#F7F9FB] dark:bg-slate-950 mt-20">
+<div class="flex flex-col md:flex-row justify-between items-center px-8 py-12 space-y-4 md:space-y-0 max-w-7xl mx-auto">
+<div class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500">
+                © 2024 Academic Architect. Empowering learners through Tonal Sculpting.
+            </div>
+<div class="flex space-x-6">
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Privacy Policy</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Terms of Service</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Documentation</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Support</a>
+</div>
+</div>
+</footer>
+</body></html>

@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+@theme {
+  /* Palette */
+  --color-primary: #3755c3;
+  --color-primary-dim: #2848b7;
+  --color-primary-fixed: #dde1ff;
+  --color-primary-fixed-dim: #cad2ff;
+  --color-primary-container: #dde1ff;
+  --color-on-primary: #f8f7ff;
+  --color-on-primary-fixed: #0732a3;
+  --color-on-primary-fixed-variant: #3352c0;
+  --color-on-primary-container: #2747b6;
+  --color-inverse-primary: #6d89fa;
+
+  --color-secondary: #506076;
+  --color-secondary-dim: #44546a;
+  --color-secondary-fixed: #d3e4fe;
+  --color-secondary-fixed-dim: #c5d6f0;
+  --color-secondary-container: #d3e4fe;
+  --color-on-secondary: #f7f9ff;
+  --color-on-secondary-fixed: #314055;
+  --color-on-secondary-fixed-variant: #4d5d73;
+  --color-on-secondary-container: #435368;
+
+  --color-tertiary: #625b77;
+  --color-tertiary-dim: #564f6b;
+  --color-tertiary-fixed: #dfd5f7;
+  --color-tertiary-fixed-dim: #d0c7e8;
+  --color-tertiary-container: #dfd5f7;
+  --color-on-tertiary: #fdf7ff;
+  --color-on-tertiary-fixed: #3c3650;
+  --color-on-tertiary-fixed-variant: #59526e;
+  --color-on-tertiary-container: #4f4964;
+
+  --color-error: #9f403d;
+  --color-error-dim: #4e0309;
+  --color-error-container: #fe8983;
+  --color-on-error: #fff7f6;
+  --color-on-error-container: #752121;
+
+  --color-surface: #f7f9fb;
+  --color-surface-bright: #f7f9fb;
+  --color-surface-dim: #cfdce3;
+  --color-surface-variant: #d9e4ea;
+  --color-surface-tint: #3755c3;
+  --color-surface-container: #e8eff3;
+  --color-surface-container-low: #f0f4f7;
+  --color-surface-container-high: #e1e9ee;
+  --color-surface-container-highest: #d9e4ea;
+  --color-surface-container-lowest: #ffffff;
+  --color-on-surface: #2a3439;
+  --color-on-surface-variant: #566166;
+  --color-inverse-surface: #0b0f10;
+  --color-inverse-on-surface: #9a9d9f;
+
+  --color-outline: #717c82;
+  --color-outline-variant: #a9b4b9;
+
+  --color-background: #f7f9fb;
+  --color-on-background: #2a3439;
+
+  /* Typography */
+  --font-headline: "Manrope", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Inter", sans-serif;
+
+  /* Border radius */
+  --radius-DEFAULT: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+}
+
+/* Material Symbols baseline */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Tonal sculpting ambient shadow */
+.tonal-sculpt-shadow {
+  box-shadow: 0 16px 32px -12px rgba(42, 52, 57, 0.06);
+}
+
+/* Glass panel */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+}
+
+/* Tonal card hover */
+.tonal-sculpt-card {
+  background-color: #ffffff;
+  transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+.tonal-sculpt-card:hover {
+  background-color: #dde1ff;
+  box-shadow: 0 4px 12px rgba(42, 52, 57, 0.08);
+}
+
+html, body {
+  font-family: 'Inter', sans-serif;
+  background-color: #f7f9fb;
+  color: #2a3439;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Manrope', sans-serif;
+}
+
+/* Утилиты шрифтов, точно совпадающие с оригиналом */
+.font-headline {
+  font-family: 'Manrope', sans-serif;
+}
+.font-body {
+  font-family: 'Inter', sans-serif;
+}
+.font-label {
+  font-family: 'Inter', sans-serif;
+}

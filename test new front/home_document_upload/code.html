@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Academic Architect | AI Test Generator</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-secondary": "#f7f9ff",
+              "secondary-dim": "#44546a",
+              "on-secondary-fixed-variant": "#4d5d73",
+              "surface-variant": "#d9e4ea",
+              "error-container": "#fe8983",
+              "surface-bright": "#f7f9fb",
+              "primary-container": "#dde1ff",
+              "surface": "#f7f9fb",
+              "primary-fixed-dim": "#cad2ff",
+              "secondary-fixed": "#d3e4fe",
+              "on-secondary-fixed": "#314055",
+              "surface-tint": "#3755c3",
+              "primary-fixed": "#dde1ff",
+              "secondary-container": "#d3e4fe",
+              "error-dim": "#4e0309",
+              "on-error-container": "#752121",
+              "on-tertiary-fixed": "#3c3650",
+              "on-error": "#fff7f6",
+              "on-primary-fixed": "#0732a3",
+              "tertiary-container": "#dfd5f7",
+              "outline-variant": "#a9b4b9",
+              "tertiary": "#625b77",
+              "on-surface": "#2a3439",
+              "background": "#f7f9fb",
+              "surface-container-low": "#f0f4f7",
+              "on-background": "#2a3439",
+              "surface-container-high": "#e1e9ee",
+              "surface-dim": "#cfdce3",
+              "on-primary-container": "#2747b6",
+              "secondary-fixed-dim": "#c5d6f0",
+              "on-tertiary-container": "#4f4964",
+              "inverse-primary": "#6d89fa",
+              "inverse-surface": "#0b0f10",
+              "tertiary-fixed": "#dfd5f7",
+              "tertiary-dim": "#564f6b",
+              "on-primary": "#f8f7ff",
+              "error": "#9f403d",
+              "surface-container": "#e8eff3",
+              "surface-container-highest": "#d9e4ea",
+              "on-surface-variant": "#566166",
+              "primary-dim": "#2848b7",
+              "on-tertiary": "#fdf7ff",
+              "on-primary-fixed-variant": "#3352c0",
+              "primary": "#3755c3",
+              "inverse-on-surface": "#9a9d9f",
+              "outline": "#717c82",
+              "on-tertiary-fixed-variant": "#59526e",
+              "on-secondary-container": "#435368",
+              "surface-container-lowest": "#ffffff",
+              "tertiary-fixed-dim": "#d0c7e8",
+              "secondary": "#506076"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .tonal-sculpt-shadow {
+            box-shadow: 0 16px 32px -12px rgba(42, 52, 57, 0.06);
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body min-h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="w-full top-0 sticky z-50 bg-[#F7F9FB] dark:bg-slate-900">
+<nav class="flex justify-between items-center px-6 py-4 max-w-7xl mx-auto">
+<div class="text-xl font-extrabold text-[#3755C3] dark:text-blue-500 font-headline tracking-tight">
+                Academic Architect
+            </div>
+<div class="hidden md:flex items-center space-x-8">
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#566166] dark:text-slate-400 hover:text-[#3755C3] transition-colors duration-200" href="#">Library</a>
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#3755C3] dark:text-blue-400 border-b-2 border-[#3755C3] pb-1" href="#">Upload</a>
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#566166] dark:text-slate-400 hover:text-[#3755C3] transition-colors duration-200" href="#">Results</a>
+</div>
+<div class="flex items-center space-x-4">
+<button class="p-2 rounded-full hover:bg-[#E1E9EE] dark:hover:bg-slate-800 transition-colors duration-200 text-on-surface-variant">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 rounded-full hover:bg-[#E1E9EE] dark:hover:bg-slate-800 transition-colors duration-200 text-on-surface-variant">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center overflow-hidden">
+<img alt="User profile avatar" class="w-full h-full object-cover" data-alt="close-up portrait of a professional male educator with friendly expression and clean studio lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDL_y-wq18-5P42TOHeuJBYMXEXu0z7BmV4Km9YJB1CdzwH82njsYR1txBNR5ygiOcJWQyzxCzsYDP_pi4LBRGiEVf4Kl0k1ROxmg1F29TU4WGpG39Tf16jRZc8vYZbmdixmhDy4Puh76jW_xkhb8F0AgqmlRYBTYkmdH7u-ORXuIhzOxLMDCARmEh0a-9PqLF4iaMEUy4deTr6qAVDHdBTY-_sI1sabyxG_6P0JF51r_tszTwvYq6y07LMfI9Xb5k-d2MfyhW_xgxe"/>
+</div>
+</div>
+</nav>
+</header>
+<main class="flex-grow">
+<!-- Hero Section -->
+<section class="max-w-7xl mx-auto px-6 pt-16 pb-12 text-center">
+<div class="inline-flex items-center px-4 py-1.5 rounded-full bg-primary-container text-on-primary-container text-xs font-semibold mb-6 tracking-wide uppercase">
+                AI-Powered Learning
+            </div>
+<h1 class="font-headline font-extrabold text-4xl md:text-6xl text-on-surface mb-6 tracking-tight max-w-3xl mx-auto">
+                Transform Documents into <span class="text-primary">Interactive Quizzes</span>
+</h1>
+<p class="text-on-surface-variant text-lg md:text-xl max-w-2xl mx-auto mb-12 leading-relaxed">
+                Upload your research papers, textbooks, or lecture notes. Our AI analyzes the content and crafts tailored assessments in seconds.
+            </p>
+</section>
+<!-- Upload & Interaction Area -->
+<section class="max-w-4xl mx-auto px-6 pb-24">
+<div class="grid grid-cols-1 gap-12">
+<!-- Upload Zone -->
+<div class="relative">
+<div class="bg-surface-container-lowest rounded-xl p-8 md:p-12 tonal-sculpt-shadow text-center group border-2 border-dashed border-outline-variant/30 hover:border-primary/50 transition-all duration-300">
+<div class="flex flex-col items-center justify-center">
+<div class="w-20 h-20 bg-primary-container rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+<span class="material-symbols-outlined text-primary text-4xl">cloud_upload</span>
+</div>
+<h3 class="font-headline font-bold text-2xl text-on-surface mb-2">Drag and drop your files</h3>
+<p class="text-on-surface-variant mb-8">Support for PDF, DOCX, and TXT files up to 50MB</p>
+<button class="bg-gradient-to-r from-primary to-primary-dim text-on-primary px-8 py-3 rounded-lg font-bold text-sm tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all">
+                                Select File
+                            </button>
+</div>
+</div>
+<!-- Asymmetric Decorative Element -->
+<div class="absolute -z-10 -top-6 -right-6 w-32 h-32 bg-tertiary-container rounded-full opacity-20 blur-3xl"></div>
+<div class="absolute -z-10 -bottom-10 -left-10 w-48 h-48 bg-primary-container rounded-full opacity-30 blur-3xl"></div>
+</div>
+<!-- Process Indicator -->
+<div class="flex flex-col md:flex-row items-center justify-between px-4 max-w-2xl mx-auto w-full gap-8">
+<!-- Step 1 -->
+<div class="flex flex-col items-center text-center space-y-3 flex-1">
+<div class="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-sm shadow-md">1</div>
+<div>
+<p class="font-headline font-bold text-on-surface text-sm">Upload</p>
+<p class="text-xs text-on-surface-variant">Your documents</p>
+</div>
+</div>
+<div class="hidden md:block h-px bg-outline-variant/20 flex-grow mx-4"></div>
+<!-- Step 2 -->
+<div class="flex flex-col items-center text-center space-y-3 flex-1">
+<div class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-bold text-sm">2</div>
+<div>
+<p class="font-headline font-bold text-on-surface text-sm">AI Analysis</p>
+<p class="text-xs text-on-surface-variant">Knowledge extraction</p>
+</div>
+</div>
+<div class="hidden md:block h-px bg-outline-variant/20 flex-grow mx-4"></div>
+<!-- Step 3 -->
+<div class="flex flex-col items-center text-center space-y-3 flex-1">
+<div class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-bold text-sm">3</div>
+<div>
+<p class="font-headline font-bold text-on-surface text-sm">Test Ready</p>
+<p class="text-xs text-on-surface-variant">Interactive quiz</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Bento Grid Features (Editorial Flow) -->
+<section class="bg-surface-container-low py-24">
+<div class="max-w-7xl mx-auto px-6">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-6 h-auto md:h-[600px]">
+<!-- Large Feature -->
+<div class="md:col-span-7 bg-surface-container-lowest rounded-xl p-10 flex flex-col justify-end relative overflow-hidden tonal-sculpt-shadow group">
+<div class="absolute top-0 right-0 w-full h-full -z-10">
+<img class="w-full h-full object-cover opacity-10 group-hover:scale-105 transition-transform duration-700" data-alt="aesthetic overhead shot of open textbooks, highlighters and a digital tablet on a clean wooden desk with soft natural light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCDQEp4cSrnC2_gWozwOb68E7zwBssseokNB60NoE-0cR3CixYl2FoOBrTLAKc9jj6lZ8JPzb3xlDSKV5O-wBdICUgwhINGP0q-Q_gr4uUxTgFoHUtn8sAqa5z_VC11JJBJfDf6O9onzNVku6W0q7GhIsf-JGlVFTNmh1g65OCPUcy6-RlVz4fQkIeVXKzMoLKOPOpWax2McSjZdr-SHNdHYHJivds7ZWsRydckYpcT16G2NFigCMltZ0_DsOVWYSwPy2qT33MP5aRP"/>
+</div>
+<span class="material-symbols-outlined text-primary text-5xl mb-6">psychology</span>
+<h2 class="font-headline font-extrabold text-3xl text-on-surface mb-4">Deep Content Extraction</h2>
+<p class="text-on-surface-variant leading-relaxed max-w-lg">
+                            Our proprietary Tonal Sculpting engine identifies core concepts, key dates, and complex relationships within your text to generate multi-dimensional questions.
+                        </p>
+</div>
+<!-- Side Stack -->
+<div class="md:col-span-5 flex flex-col gap-6">
+<div class="flex-1 bg-primary text-on-primary rounded-xl p-8 flex flex-col justify-center tonal-sculpt-shadow">
+<span class="material-symbols-outlined text-4xl mb-4">auto_awesome</span>
+<h3 class="font-headline font-bold text-xl mb-2">Instant Generation</h3>
+<p class="text-primary-container/80 text-sm leading-relaxed">
+                                Go from 500-page PDF to a 50-question practice exam in under 30 seconds.
+                            </p>
+</div>
+<div class="flex-1 bg-surface-container-highest rounded-xl p-8 flex flex-col justify-center tonal-sculpt-shadow">
+<span class="material-symbols-outlined text-tertiary text-4xl mb-4">analytics</span>
+<h3 class="font-headline font-bold text-xl text-on-surface mb-2">Performance Insights</h3>
+<p class="text-on-surface-variant text-sm leading-relaxed">
+                                Receive a detailed breakdown of your knowledge gaps after every completed quiz.
+                            </p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Floating AI Insight Component -->
+<div class="fixed bottom-8 right-8 z-40 hidden lg:block">
+<div class="glass-panel tonal-sculpt-shadow rounded-xl p-6 w-80 border border-outline-variant/10">
+<div class="flex items-center space-x-3 mb-4">
+<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+<p class="text-xs font-bold text-primary tracking-widest uppercase">System Status</p>
+</div>
+<div class="space-y-4">
+<div class="flex items-start space-x-3">
+<div class="w-1 h-12 bg-primary rounded-full shrink-0"></div>
+<p class="text-sm text-on-surface leading-snug">
+                            "Ready for your next session. We've enhanced PDF table parsing for better data extraction."
+                        </p>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full bg-[#F7F9FB] dark:bg-slate-950 border-t border-[#A9B4B9]/15">
+<div class="flex flex-col md:flex-row justify-between items-center px-8 py-12 space-y-4 md:space-y-0 max-w-7xl mx-auto">
+<p class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500">
+                © 2024 Academic Architect. Empowering learners through Tonal Sculpting.
+            </p>
+<div class="flex flex-wrap justify-center gap-6">
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Privacy Policy</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Terms of Service</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Documentation</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Support</a>
+</div>
+</div>
+</footer>
+</body></html>

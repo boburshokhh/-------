@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Result Breakdown - Academic Architect</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-secondary": "#f7f9ff",
+              "secondary-dim": "#44546a",
+              "on-secondary-fixed-variant": "#4d5d73",
+              "surface-variant": "#d9e4ea",
+              "error-container": "#fe8983",
+              "surface-bright": "#f7f9fb",
+              "primary-container": "#dde1ff",
+              "surface": "#f7f9fb",
+              "primary-fixed-dim": "#cad2ff",
+              "secondary-fixed": "#d3e4fe",
+              "on-secondary-fixed": "#314055",
+              "surface-tint": "#3755c3",
+              "primary-fixed": "#dde1ff",
+              "secondary-container": "#d3e4fe",
+              "error-dim": "#4e0309",
+              "on-error-container": "#752121",
+              "on-tertiary-fixed": "#3c3650",
+              "on-error": "#fff7f6",
+              "on-primary-fixed": "#0732a3",
+              "tertiary-container": "#dfd5f7",
+              "outline-variant": "#a9b4b9",
+              "tertiary": "#625b77",
+              "on-surface": "#2a3439",
+              "background": "#f7f9fb",
+              "surface-container-low": "#f0f4f7",
+              "on-background": "#2a3439",
+              "surface-container-high": "#e1e9ee",
+              "surface-dim": "#cfdce3",
+              "on-primary-container": "#2747b6",
+              "secondary-fixed-dim": "#c5d6f0",
+              "on-tertiary-container": "#4f4964",
+              "inverse-primary": "#6d89fa",
+              "inverse-surface": "#0b0f10",
+              "tertiary-fixed": "#dfd5f7",
+              "tertiary-dim": "#564f6b",
+              "on-primary": "#f8f7ff",
+              "error": "#9f403d",
+              "surface-container": "#e8eff3",
+              "surface-container-highest": "#d9e4ea",
+              "on-surface-variant": "#566166",
+              "primary-dim": "#2848b7",
+              "on-tertiary": "#fdf7ff",
+              "on-primary-fixed-variant": "#3352c0",
+              "primary": "#3755c3",
+              "inverse-on-surface": "#9a9d9f",
+              "outline": "#717c82",
+              "on-tertiary-fixed-variant": "#59526e",
+              "on-secondary-container": "#435368",
+              "surface-container-lowest": "#ffffff",
+              "tertiary-fixed-dim": "#d0c7e8",
+              "secondary": "#506076"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3 { font-family: 'Manrope', sans-serif; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface">
+<!-- TopAppBar from Shared Components -->
+<header class="w-full top-0 sticky bg-[#F0F4F7] dark:bg-slate-800/50 z-50">
+<div class="flex justify-between items-center px-6 py-4 max-w-7xl mx-auto">
+<div class="text-xl font-extrabold text-[#3755C3] dark:text-blue-500">Academic Architect</div>
+<nav class="hidden md:flex items-center space-x-8">
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#566166] dark:text-slate-400 hover:text-[#3755C3] transition-colors duration-200" href="#">Library</a>
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#566166] dark:text-slate-400 hover:text-[#3755C3] transition-colors duration-200" href="#">Upload</a>
+<a class="font-['Manrope'] font-bold text-sm tracking-tight text-[#3755C3] dark:text-blue-400 border-b-2 border-[#3755C3] pb-1" href="#">Results</a>
+</nav>
+<div class="flex items-center space-x-4">
+<button class="p-2 rounded-full hover:bg-[#E1E9EE] dark:hover:bg-slate-800 transition-colors duration-200">
+<span class="material-symbols-outlined text-[#566166]" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 rounded-full hover:bg-[#E1E9EE] dark:hover:bg-slate-800 transition-colors duration-200">
+<span class="material-symbols-outlined text-[#566166]" data-icon="help_outline">help_outline</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden bg-surface-container-high border border-outline-variant/15">
+<img alt="User profile avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBmkTQuc6H_j0b4wgLdD-jqfrIyprXLbeihvoAQ_Fo4rp3uR7tco58jAtIpSKm_nNKxbBHpOXc6VonMBSBnPiqjdDr5E1NaHDJDyEK8YQo6cU_Gkw5c6uxxbt8XtCrRQ2c9Dqs4RDwvzT_qTc0HJohaXimQ5b6uma4vSYFmY82Fb91lFQ1rVadwEaWvSS2Wqn1gBmtdXwoSR5EOA6g5VhooucSwecGg5gJFWrxJp6xHA1-HQtqRXDJqgUBrMCysjQOQY73qIgfFCVx9"/>
+</div>
+</div>
+</div>
+</header>
+<main class="max-w-5xl mx-auto px-6 py-12">
+<!-- Result Summary Hero (Asymmetric Layout) -->
+<section class="grid grid-cols-1 md:grid-cols-12 gap-8 mb-16 items-end">
+<div class="md:col-span-8">
+<nav class="mb-4 flex items-center text-on-surface-variant text-sm font-medium">
+<a class="hover:text-primary transition-colors" href="#">Results</a>
+<span class="material-symbols-outlined text-sm mx-2" data-icon="chevron_right">chevron_right</span>
+<span class="text-on-surface">Quiz: Advanced Macroeconomics (Unit 4)</span>
+</nav>
+<h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-on-surface mb-4">Performance Insights</h1>
+<p class="text-lg text-on-surface-variant max-w-2xl leading-relaxed">
+                    Review your mastery of the material. Use the AI-generated explanations to refine your understanding of the core concepts from your source documents.
+                </p>
+</div>
+<div class="md:col-span-4 bg-surface-container-lowest p-8 rounded-xl flex flex-col items-center justify-center text-center">
+<div class="relative w-24 h-24 mb-4">
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-surface-container-high" cx="48" cy="48" fill="transparent" r="40" stroke="currentColor" stroke-width="8"></circle>
+<circle class="text-primary" cx="48" cy="48" fill="transparent" r="40" stroke="currentColor" stroke-dasharray="251.2" stroke-dashoffset="50.24" stroke-width="8"></circle>
+</svg>
+<div class="absolute inset-0 flex items-center justify-center font-headline font-extrabold text-2xl">80%</div>
+</div>
+<div class="text-sm font-semibold text-on-surface">Grade: Distinguished</div>
+<div class="text-xs text-on-surface-variant mt-1">12 of 15 correct</div>
+</div>
+</section>
+<!-- Detailed Result List -->
+<div class="space-y-6">
+<!-- Question 1: Correct -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden transition-all duration-200 hover:shadow-md">
+<div class="p-6 md:p-8">
+<div class="flex items-start justify-between gap-4 mb-4">
+<div class="flex items-center gap-3">
+<span class="flex items-center justify-center w-8 h-8 rounded-full bg-surface-container-low text-xs font-bold font-headline">01</span>
+<h3 class="text-lg font-bold text-on-surface">What is the primary driver of the 'Liquidity Trap' according to the Keynesian model?</h3>
+</div>
+<span class="flex items-center px-3 py-1 bg-primary/10 text-primary-dim rounded-full text-xs font-bold uppercase tracking-wider">
+<span class="material-symbols-outlined text-sm mr-1" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span> Correct
+                        </span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+<div class="bg-surface-container-low p-4 rounded-lg">
+<span class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1">Your Answer</span>
+<p class="text-sm font-medium text-on-surface">Ineffective monetary policy when nominal interest rates reach zero.</p>
+</div>
+<div class="bg-primary-container/30 p-4 rounded-lg">
+<span class="block text-[10px] font-bold text-on-primary-container uppercase mb-1">Correct Answer</span>
+<p class="text-sm font-medium text-on-primary-container">Ineffective monetary policy when nominal interest rates reach zero.</p>
+</div>
+</div>
+<!-- AI Thought Stream Component -->
+<div class="space-y-2 mt-4">
+<div class="flex items-start gap-4 p-4 bg-surface-container-low rounded-lg relative overflow-hidden">
+<div class="w-1 absolute left-0 top-0 bottom-0 bg-primary"></div>
+<span class="material-symbols-outlined text-primary-dim mt-0.5" data-icon="psychology">psychology</span>
+<div>
+<span class="text-xs font-bold text-primary tracking-wide block mb-1 uppercase">AI Reasoning</span>
+<p class="text-sm text-on-surface leading-relaxed">
+                                    Precisely correct. In your uploaded lecture notes (Page 42), the "Liquidity Trap" is defined as a situation where the public prefers to hold cash rather than debt, rendering interest rate cuts ineffective because they cannot drop below the zero bound.
+                                </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Question 2: Incorrect -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden transition-all duration-200 hover:shadow-md border-l-4 border-error/20">
+<div class="p-6 md:p-8">
+<div class="flex items-start justify-between gap-4 mb-4">
+<div class="flex items-center gap-3">
+<span class="flex items-center justify-center w-8 h-8 rounded-full bg-surface-container-low text-xs font-bold font-headline">02</span>
+<h3 class="text-lg font-bold text-on-surface">Which component is NOT part of the M1 money supply definition?</h3>
+</div>
+<span class="flex items-center px-3 py-1 bg-error-container/20 text-error rounded-full text-xs font-bold uppercase tracking-wider">
+<span class="material-symbols-outlined text-sm mr-1" data-icon="cancel" style="font-variation-settings: 'FILL' 1;">cancel</span> Incorrect
+                        </span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+<div class="bg-error-container/10 p-4 rounded-lg">
+<span class="block text-[10px] font-bold text-error uppercase mb-1">Your Answer</span>
+<p class="text-sm font-medium text-on-surface">Demand deposits</p>
+</div>
+<div class="bg-primary-container/30 p-4 rounded-lg">
+<span class="block text-[10px] font-bold text-on-primary-container uppercase mb-1">Correct Answer</span>
+<p class="text-sm font-medium text-on-primary-container">Small-denomination time deposits (CDs)</p>
+</div>
+</div>
+<!-- AI Thought Stream Component -->
+<div class="space-y-2 mt-4">
+<div class="flex items-start gap-4 p-4 bg-surface-container-low rounded-lg relative overflow-hidden">
+<div class="w-1 absolute left-0 top-0 bottom-0 bg-primary"></div>
+<span class="material-symbols-outlined text-primary-dim mt-0.5" data-icon="psychology">psychology</span>
+<div>
+<span class="text-xs font-bold text-primary tracking-wide block mb-1 uppercase">AI Reasoning</span>
+<p class="text-sm text-on-surface leading-relaxed">
+                                    You selected demand deposits, which are highly liquid and a core part of M1. According to Chapter 7 of the textbook provided, small-denomination time deposits are classified under M2 because they require a waiting period or penalty for withdrawal, making them "near money" rather than M1.
+                                </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Question 3: Correct -->
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden transition-all duration-200 hover:shadow-md">
+<div class="p-6 md:p-8">
+<div class="flex items-start justify-between gap-4 mb-4">
+<div class="flex items-center gap-3">
+<span class="flex items-center justify-center w-8 h-8 rounded-full bg-surface-container-low text-xs font-bold font-headline">03</span>
+<h3 class="text-lg font-bold text-on-surface">How does an increase in the reserve requirement ratio affect the money multiplier?</h3>
+</div>
+<span class="flex items-center px-3 py-1 bg-primary/10 text-primary-dim rounded-full text-xs font-bold uppercase tracking-wider">
+<span class="material-symbols-outlined text-sm mr-1" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span> Correct
+                        </span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+<div class="bg-surface-container-low p-4 rounded-lg">
+<span class="block text-[10px] font-bold text-on-surface-variant uppercase mb-1">Your Answer</span>
+<p class="text-sm font-medium text-on-surface">It decreases the money multiplier.</p>
+</div>
+<div class="bg-primary-container/30 p-4 rounded-lg">
+<span class="block text-[10px] font-bold text-on-primary-container uppercase mb-1">Correct Answer</span>
+<p class="text-sm font-medium text-on-primary-container">It decreases the money multiplier.</p>
+</div>
+</div>
+<div class="space-y-2 mt-4">
+<div class="flex items-start gap-4 p-4 bg-surface-container-low rounded-lg relative overflow-hidden">
+<div class="w-1 absolute left-0 top-0 bottom-0 bg-primary"></div>
+<span class="material-symbols-outlined text-primary-dim mt-0.5" data-icon="psychology">psychology</span>
+<div>
+<span class="text-xs font-bold text-primary tracking-wide block mb-1 uppercase">AI Reasoning</span>
+<p class="text-sm text-on-surface leading-relaxed">
+                                    Correct. As stated in the Federal Reserve overview PDF, the multiplier is the reciprocal of the reserve ratio (1/R). Increasing the denominator (R) mathematically results in a smaller quotient, reducing the potential for credit expansion.
+                                </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Call to Action Section -->
+<section class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="bg-primary-container/20 p-8 rounded-xl flex flex-col justify-between">
+<div>
+<h4 class="text-xl font-bold text-on-primary-container mb-2">Refine Your Knowledge</h4>
+<p class="text-sm text-on-secondary-container mb-6 leading-relaxed">
+                        Ready to improve? Generate a targeted study guide based specifically on the questions you missed today.
+                    </p>
+</div>
+<button class="bg-gradient-to-r from-primary to-primary-dim text-on-primary px-6 py-3 rounded-lg font-bold text-sm self-start transition-all active:scale-95">
+                    Generate Focused Study Guide
+                </button>
+</div>
+<div class="bg-surface-container-high p-8 rounded-xl flex flex-col justify-between">
+<div>
+<h4 class="text-xl font-bold text-on-surface mb-2">Discuss with AI Architect</h4>
+<p class="text-sm text-on-surface-variant mb-6 leading-relaxed">
+                        Have more questions about these results? Open a chat to deep-dive into any of these concepts right now.
+                    </p>
+</div>
+<button class="bg-surface-container-lowest text-primary font-bold px-6 py-3 rounded-lg text-sm self-start transition-all active:scale-95 hover:bg-white">
+                    Start AI Discussion
+                </button>
+</div>
+</section>
+</main>
+<!-- Footer from Shared Components -->
+<footer class="w-full border-t border-[#A9B4B9]/15 bg-[#F7F9FB] dark:bg-slate-950">
+<div class="flex flex-col md:flex-row justify-between items-center px-8 py-12 space-y-4 md:space-y-0 max-w-7xl mx-auto">
+<p class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500">
+                © 2024 Academic Architect. Empowering learners through Tonal Sculpting.
+            </p>
+<div class="flex space-x-6">
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Privacy Policy</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Terms of Service</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Documentation</a>
+<a class="font-['Inter'] text-xs text-[#566166] dark:text-slate-500 hover:text-[#3755C3] dark:hover:text-blue-400 transition-colors" href="#">Support</a>
+</div>
+</div>
+</footer>
+</body></html>

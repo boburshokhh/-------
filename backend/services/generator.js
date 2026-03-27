@@ -9,6 +9,7 @@ const {
     evidenceReasonToCode,
     buildGenerationMetrics,
     REASON_CODES,
+    DEFECT_CLASSES,
 } = require('../utils/observability');
 
 const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
@@ -611,6 +612,8 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     let statsValidationFailed = 0;
     let statsGroundingFailed = 0;
     let statsRetrievalPassed = 0;
+    /** @type {number[]} Scores from scoreEvidenceQuality — all intents including skipped */
+    const evidenceScores = [];
 
     const totalBatches = Math.ceil(blueprintWithDifficulty.length / batchSize);
     console.log(`[GENERATOR] Batch-режим: ${blueprintWithDifficulty.length} intents → ${totalBatches} batch(ей) по ≤${batchSize}`);
@@ -637,9 +640,14 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
 
             // === Soft-skip: проверяем качество evidence ===
             const quality = scoreEvidenceQuality(evidenceText, intent.intent);
+            // Always collect score for evidence_precision metric
+            evidenceScores.push(quality.score);
             if (quality.score < 0.3) {
                 console.log(`[GENERATOR] Soft-skip intent "${intent.intent.slice(0, 60)}…" — ${quality.reason}`);
                 statsSkippedEvidence++;
+                // Extract relevance overlap % from reason string for richer diagnostics
+                const overlapMatch = quality.reason ? quality.reason.match(/(\d+)%/) : null;
+                const overlapPct = overlapMatch ? parseInt(overlapMatch[1], 10) : null;
                 logStructured({
                     level: 'warn',
                     traceId,
@@ -647,7 +655,8 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
                     phase: 'generate',
                     event: 'intent_skipped_weak_evidence',
                     reasonCode: evidenceReasonToCode(quality.reason),
-                    metrics: { evidence_score: quality.score },
+                    defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
+                    metrics: { evidence_score: quality.score, relevance_overlap_pct: overlapPct },
                     metadata: { intent_preview: intent.intent.slice(0, 120), reason: quality.reason },
                 });
                 continue;
@@ -669,6 +678,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
                 phase: 'generate',
                 event: 'batch_all_intents_skipped',
                 reasonCode: REASON_CODES.ERR_WEAK_EVIDENCE,
+                defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
                 metrics: { batch_num: batchNum },
             });
             continue;
@@ -701,6 +711,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
                         phase: 'validate',
                         event: 'question_dropped_grounding',
                         reasonCode: REASON_CODES.ERR_GROUNDING_FAILED,
+                        defectClass: DEFECT_CLASSES.VALIDATION_FAIL,
                         metrics: { batch_num: batchNum, intent_index: intentIdx },
                     });
                     continue;
@@ -902,8 +913,19 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         `язык: ${detectedLang} | формат: multiple_choice | Bloom taxonomy`
     );
 
+    // ── Fallback auto-decisions based on computed metrics ───────────────────
+    const fallbackDecision = applyFallbackDecisions({
+        retrievalPassed: statsRetrievalPassed,
+        retrievalSkipped: statsSkippedEvidence,
+        finalCount: finalQuestions.length,
+        blueprintIntents: blueprintWithDifficulty.length,
+        preDedupCount,
+        postDedupCount: initialDedup.length,
+    }, { traceId, documentId });
+
     const generationMetrics = buildGenerationMetrics({
         traceId,
+        sessionId: opts.sessionId,
         documentId,
         model,
         durationMs,
@@ -927,21 +949,51 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         finalCount: finalQuestions.length,
         backfillRounds: backfillRoundsUsed,
         backfillQuestionsAdded,
+        evidenceScores,
     });
 
     logStructured({
-        level: 'info',
+        level: generationMetrics.low_confidence ? 'warn' : 'info',
         traceId,
+        sessionId: opts.sessionId,
         documentId,
-        phase: 'generate',
-        event: 'generation_complete',
+        testId: null,  // populated by caller after DB insert
+        phase: 'finalize',
+        event: generationMetrics.low_confidence ? 'generation_low_confidence' : 'generation_complete',
+        defectClass: generationMetrics.low_confidence ? DEFECT_CLASSES.VALIDATION_FAIL : null,
+        fallbackTriggered: fallbackDecision || null,
         metrics: {
-            duration_ms: durationMs,
-            final_question_count: finalQuestions.length,
-            final_quality_score: generationMetrics.final_quality_score,
-            grounded_question_rate: generationMetrics.grounded_question_rate,
-            retrieval_hit_rate: generationMetrics.retrieval_hit_rate,
-            dedup_loss_ratio: generationMetrics.dedup_loss_ratio,
+            duration_ms:             durationMs,
+            parse_quality_score:     generationMetrics.parse_quality_score,
+            chunk_count:             generationMetrics.chunk_count,
+            chunks_with_facts:       generationMetrics.chunks_with_facts,
+            chunk_usefulness_score:  generationMetrics.chunk_usefulness_score,
+            atomic_facts_extracted:  generationMetrics.atomic_facts_extracted,
+            fact_density:            generationMetrics.fact_density,
+            intents_retrieval_passed:  generationMetrics.intents_retrieval_passed,
+            intents_retrieval_skipped: generationMetrics.intents_retrieval_skipped,
+            retrieval_hit_rate:      generationMetrics.retrieval_hit_rate,
+            evidence_precision:      generationMetrics.evidence_precision,
+            evidence_scores_p25:     generationMetrics.evidence_scores_p25,
+            evidence_scores_p75:     generationMetrics.evidence_scores_p75,
+            batch_questions_generated: generationMetrics.batch_questions_generated,
+            llm_skipped_intents:     generationMetrics.llm_skipped_intents,
+            validation_failed:       generationMetrics.validation_failed,
+            grounding_accepted:      generationMetrics.grounding_accepted,
+            grounding_failed:        generationMetrics.grounding_failed,
+            grounded_question_rate:  generationMetrics.grounded_question_rate,
+            pre_dedup_count:         generationMetrics.pre_dedup_count,
+            post_dedup_count:        generationMetrics.post_dedup_count,
+            dedup_loss_ratio:        generationMetrics.dedup_loss_ratio,
+            final_question_count:    generationMetrics.final_question_count,
+            target_min:              targetMin,
+            target_max:              targetMax,
+            accepted_question_rate:  generationMetrics.accepted_question_rate,
+            final_quality_score:     generationMetrics.final_quality_score,
+            backfill_rounds_used:    generationMetrics.backfill_rounds_used,
+            backfill_questions_added: generationMetrics.backfill_questions_added,
+            low_confidence:          generationMetrics.low_confidence,
+            model,
         },
     });
 
