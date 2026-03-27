@@ -37,6 +37,16 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
+
+  /* Единая типографика страниц: без legacy style.css (h1 не «светлеет» в OS dark mode на светлом UI) */
+  #app {
+    @apply text-foreground;
+  }
+  #app h1,
+  #app h2,
+  #app h3 {
+    @apply text-foreground;
+  }
   
   /* Remove intense shadows and enforce minimalistic solid design */
   .shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl {
