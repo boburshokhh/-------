@@ -23,7 +23,20 @@ app.use((req, res, next) => {
 });
 
 // CORS
-app.use(cors());
+const corsOptions = {
+    origin(origin, callback) {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+        if (!config.CORS_ORIGINS.length || config.CORS_ORIGINS.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(new Error('CORS origin is not allowed'));
+    },
+};
+app.use(cors(corsOptions));
 
 // Body parsing
 app.use(express.json({ limit: '1mb' }));

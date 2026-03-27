@@ -2,13 +2,18 @@ const express = require('express');
 const { getJob } = require('../services/jobProgress');
 
 const router = express.Router();
+const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 
 /**
  * GET /api/jobs/:jobId
  * Текущий прогресс загрузки/генерации (опрос с фронта во время POST /upload).
  */
 router.get('/:jobId', (req, res) => {
-    const state = getJob(req.params.jobId);
+    const jobId = String(req.params.jobId || '');
+    if (!JOB_ID_RE.test(jobId)) {
+        return res.status(400).json({ error: 'Некорректный идентификатор задачи' });
+    }
+    const state = getJob(jobId);
     if (!state) {
         return res.status(404).json({ error: 'Задача не найдена или устарела' });
     }

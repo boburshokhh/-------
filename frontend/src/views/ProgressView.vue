@@ -25,7 +25,9 @@
           <GenerationProgress
             :percent="store.state.upload.progress.percent"
             :phase="store.state.upload.progress.phase"
+            :stage="store.state.upload.progress.stage"
             :detail="store.state.upload.progress.detail"
+            :updated-at="store.state.upload.progress.updatedAt"
             :model-label="modelLabel"
           />
         </div>

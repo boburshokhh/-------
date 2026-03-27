@@ -72,7 +72,9 @@ import { computed } from 'vue'
 const props = defineProps({
   percent: { type: Number, default: 0 },
   phase: { type: String, default: '' },
+  stage: { type: String, default: '' },
   detail: { type: String, default: '' },
+  updatedAt: { type: Number, default: 0 },
   modelLabel: { type: String, default: 'LLM' },
 });
 
@@ -83,6 +85,11 @@ const steps = computed(() => ([
 ]));
 
 const progressLineWidth = computed(() => `${Math.max(0, Math.min(100, props.percent))}%`);
+const updatedAtLabel = computed(() => {
+  if (!props.updatedAt) return 'не обновлялось';
+  const dt = new Date(props.updatedAt);
+  return Number.isNaN(dt.getTime()) ? 'неизвестно' : dt.toLocaleTimeString('ru-RU');
+});
 
 function stepClass(i) {
   if (steps.value[i].done || steps.value[i].active) return 'bg-[#3755C3] text-[#F8F7FF] shadow-lg'
@@ -126,6 +133,13 @@ const logItems = computed(() => ([
     value: props.percent >= 100 ? 'Завершено' : '',
     colorClass: props.percent >= 100 ? 'text-green-500' : 'text-[#566166]',
     valueClass: props.percent >= 100 ? 'text-green-500' : 'text-[#566166]',
+  },
+  {
+    icon: 'monitoring',
+    text: `Этап: ${props.stage || '—'} | Обновлено: ${updatedAtLabel.value}`,
+    value: '',
+    colorClass: 'text-[#566166]',
+    valueClass: 'text-[#566166]',
   },
 ]))
 </script>

@@ -3,6 +3,14 @@ const db = require('../db/database');
 
 const router = express.Router();
 
+function parseJsonSafe(raw, fallback) {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return fallback;
+    }
+}
+
 /**
  * GET /api/tests
  * Получение списка всех тестов
@@ -63,7 +71,7 @@ router.get('/:id', (req, res) => {
     res.json({
         id: test.id,
         title: test.title,
-        questions: JSON.parse(test.questions_json),
+        questions: parseJsonSafe(test.questions_json, []),
         totalQuestions: test.total_questions,
         documentName: test.document_name,
         pageCount: test.page_count,

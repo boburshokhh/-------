@@ -30,6 +30,13 @@ const state = reactive({
   resultSummary: null,
   resultDetail: null,
   resultError: '',
+  diagnostics: {
+    health: null,
+    healthError: '',
+    logs: [],
+    logsError: '',
+    logsUpdatedAt: 0,
+  },
 });
 
 const STORAGE_KEY = 'aa_front_state_v1';
@@ -185,6 +192,25 @@ export function useAppStore() {
 
     setResultError(message) {
       state.resultError = message || 'Ошибка загрузки результата';
+    },
+
+    setHealth(payload) {
+      state.diagnostics.health = payload || null;
+      state.diagnostics.healthError = '';
+    },
+
+    setHealthError(message) {
+      state.diagnostics.healthError = message || 'Не удалось получить статус сервиса';
+    },
+
+    setLogs(logs) {
+      state.diagnostics.logs = Array.isArray(logs) ? logs : [];
+      state.diagnostics.logsError = '';
+      state.diagnostics.logsUpdatedAt = Date.now();
+    },
+
+    setLogsError(message) {
+      state.diagnostics.logsError = message || 'Не удалось получить логи';
     },
   };
 

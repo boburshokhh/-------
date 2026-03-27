@@ -24,11 +24,22 @@
           <span class="material-symbols-outlined text-sm">quiz</span>
           {{ item.questions }} вопросов
         </div>
+        <div class="flex items-center gap-1">
+          <span class="material-symbols-outlined text-sm">description</span>
+          {{ item.documentName }}
+        </div>
+        <div v-if="item.pageCount" class="flex items-center gap-1">
+          <span class="material-symbols-outlined text-sm">docs</span>
+          {{ item.pageCount }} стр.
+        </div>
         <div v-if="item.score" class="flex items-center gap-1 text-[#3755C3] font-bold">
           <span class="material-symbols-outlined text-sm">workspace_premium</span>
           {{ item.score }}%
         </div>
       </div>
+      <p v-if="item.lowTextQuality" class="text-xs text-[#9F403D] mb-3">
+        Низкое качество извлечения текста: возможны неточности в вопросах.
+      </p>
 
       <!-- Прогресс-бар для "В процессе" -->
       <div

@@ -8,6 +8,23 @@
         </h1>
         <p class="text-[#566166] text-sm">{{ quizTopic }}</p>
       </div>
+      <div v-if="showDiagnostics" class="mb-8 bg-[#FFFFFF] border border-[#A9B4B9]/20 rounded-xl p-4">
+        <h3 class="font-headline font-bold text-[#2A3439] mb-2">Диагностика генерации</h3>
+        <p class="text-xs text-[#566166] mb-2">
+          Качество извлечения:
+          <span class="font-semibold text-[#2A3439]">{{ extractionQualityLabel }}</span>
+          <span v-if="store.state.activeTest?.lowTextQuality" class="text-[#9F403D]"> (низкое качество текста)</span>
+        </p>
+        <p v-if="store.state.activeTest?.parseDiagnostics?.parseMethod" class="text-xs text-[#566166] mb-2">
+          Метод парсинга: <span class="font-semibold text-[#2A3439]">{{ store.state.activeTest.parseDiagnostics.parseMethod }}</span>
+        </p>
+        <div v-if="store.state.activeTest?.generationMetrics" class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-[#566166]">
+          <p>Quality score: <span class="font-semibold text-[#2A3439]">{{ metric('final_quality_score') }}</span></p>
+          <p>Grounded rate: <span class="font-semibold text-[#2A3439]">{{ metric('grounded_question_rate') }}</span></p>
+          <p>Retrieval hit: <span class="font-semibold text-[#2A3439]">{{ metric('retrieval_hit_rate') }}</span></p>
+          <p>Dedup loss: <span class="font-semibold text-[#2A3439]">{{ metric('dedup_loss_ratio') }}</span></p>
+        </div>
+      </div>
 
       <!-- Прогресс -->
       <div class="mb-10">
@@ -98,6 +115,18 @@ const defaultHint = 'Выберите вариант ответа, которы�
 
 const quizTitle = computed(() => store.state.activeTest?.title || 'Тест по документу')
 const quizTopic = computed(() => store.state.activeTest?.topic || 'Сгенерированный тест')
+const showDiagnostics = computed(() => Boolean(
+  store.state.activeTest?.generationMetrics
+  || store.state.activeTest?.parseDiagnostics
+  || (store.state.activeTest?.extractionQuality !== null && typeof store.state.activeTest?.extractionQuality !== 'undefined')
+))
+const extractionQualityLabel = computed(() => {
+  const value = store.state.activeTest?.extractionQuality
+  if (value === null || typeof value === 'undefined') return '—'
+  const num = Number(value)
+  if (Number.isNaN(num)) return String(value)
+  return `${Math.round(num * 100)}%`
+})
 const totalQuestions = computed(() => store.state.activeTest?.questions?.length || 0)
 const currentQuestion = computed(() => store.state.activeTest?.questions?.[currentIndex.value] || null)
 const completionPercent = computed(() => store.getters.progressPercent.value)
@@ -109,6 +138,12 @@ const selectedId = computed(() => {
   const option = q.options.find((opt) => opt.value === value)
   return option?.id ?? null
 })
+
+function metric(key) {
+  const value = store.state.activeTest?.generationMetrics?.[key]
+  if (typeof value === 'number') return value.toFixed(3)
+  return value ?? '—'
+}
 
 onMounted(loadTest)
 

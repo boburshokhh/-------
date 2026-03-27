@@ -1,4 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const LOGS_API_TOKEN = import.meta.env.VITE_LOGS_API_TOKEN || '';
 
 function createError(message, status, payload) {
   const err = new Error(message);
@@ -70,6 +71,20 @@ export const API = {
     } catch {
       return { models: [], defaultModel: '' };
     }
+  },
+
+  getHealth() {
+    return request('/health');
+  },
+
+  getLogs(limit = 100) {
+    const safeLimit = Math.max(1, Math.min(500, Number(limit) || 100));
+    const query = new URLSearchParams({ limit: String(safeLimit) });
+    const headers = {};
+    if (LOGS_API_TOKEN) {
+      headers['X-Logs-Token'] = LOGS_API_TOKEN;
+    }
+    return request(`/logs?${query.toString()}`, { headers });
   },
 
   getTests() {

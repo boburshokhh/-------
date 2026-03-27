@@ -2,6 +2,35 @@ const express = require('express');
 const db = require('../db/database');
 
 const router = express.Router();
+const MAX_USER_NAME_LENGTH = 120;
+
+function parseJsonSafe(raw, fallback) {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return fallback;
+    }
+}
+
+function validateAnswers(answers) {
+    if (!Array.isArray(answers)) return 'Поле answers должно быть массивом';
+    if (!answers.length) return 'Поле answers не должно быть пустым';
+    if (answers.length > 500) return 'Слишком много ответов в одном запросе';
+    for (const row of answers) {
+        if (!row || typeof row !== 'object') return 'Каждый ответ должен быть объектом';
+        const qid = Number(row.questionId);
+        if (!Number.isInteger(qid) || qid <= 0) return 'questionId должен быть положительным целым числом';
+        const kind = typeof row.answer;
+        const isArray = Array.isArray(row.answer);
+        if (row.answer == null || isArray || !['number', 'boolean', 'string'].includes(kind)) {
+            return 'answer должен быть number, boolean или string';
+        }
+        if (kind === 'string' && row.answer.length > 2000) {
+            return 'Текстовый answer слишком длинный (макс. 2000 символов)';
+        }
+    }
+    return null;
+}
 
 /**
  * POST /api/results
@@ -9,21 +38,37 @@ const router = express.Router();
  */
 router.post('/', (req, res) => {
     const { testId, userName, answers } = req.body;
+    const numericTestId = Number(testId);
 
-    if (!testId || !answers || !Array.isArray(answers)) {
+    if (!Number.isInteger(numericTestId) || numericTestId <= 0) {
+        return res.status(400).json({ error: 'testId должен быть положительным целым числом' });
+    }
+
+    const answersError = validateAnswers(answers);
+    if (answersError) {
         return res.status(400).json({
-            error: 'Необходимы поля: testId, answers (массив)'
+            error: answersError
+        });
+    }
+
+    const safeUserName = typeof userName === 'string' ? userName.trim() : '';
+    if (safeUserName.length > MAX_USER_NAME_LENGTH) {
+        return res.status(400).json({
+            error: `userName слишком длинный (макс. ${MAX_USER_NAME_LENGTH} символов)`
         });
     }
 
     // Получаем тест для проверки ответов
-    const test = db.prepare('SELECT questions_json FROM tests WHERE id = ?').get(testId);
+    const test = db.prepare('SELECT questions_json FROM tests WHERE id = ?').get(numericTestId);
 
     if (!test) {
         return res.status(404).json({ error: 'Тест не найден' });
     }
 
-    const questions = JSON.parse(test.questions_json);
+    const questions = parseJsonSafe(test.questions_json, []);
+    if (!Array.isArray(questions) || !questions.length) {
+        return res.status(422).json({ error: 'Тест поврежден: не удалось прочитать вопросы' });
+    }
 
     // Подсчёт баллов
     let score = 0;
@@ -69,8 +114,8 @@ router.post('/', (req, res) => {
   `);
 
     const result = insert.run(
-        testId,
-        userName || 'Аноним',
+        numericTestId,
+        safeUserName || 'Аноним',
         JSON.stringify(detailedAnswers),
         score,
         maxScore,
@@ -124,8 +169,8 @@ router.get('/detail/:id', (req, res) => {
         score: result.score,
         maxScore: result.max_score,
         percentage: result.percentage,
-        answers: JSON.parse(result.answers_json),
-        questions: JSON.parse(result.questions_json),
+        answers: parseJsonSafe(result.answers_json, []),
+        questions: parseJsonSafe(result.questions_json, []),
         completedAt: result.completed_at
     });
 });

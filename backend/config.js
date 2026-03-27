@@ -44,6 +44,11 @@ module.exports = {
   MAX_OCR_PAGES: parseInt(process.env.MAX_OCR_PAGES, 10) || 10,
   MIN_TEXT_LENGTH: parseInt(process.env.MIN_TEXT_LENGTH, 10) || 50,
   EVIDENCE_MIN_CHARS: parseInt(process.env.EVIDENCE_MIN_CHARS, 10) || 80,
+  CORS_ORIGINS: (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean),
+  LOGS_API_TOKEN: process.env.LOGS_API_TOKEN || '',
   /** Полные тексты в SQLite (может сильно раздуть data.db) */
   STORE_DOCUMENT_TEXT_IN_DB: process.env.STORE_DOCUMENT_TEXT_IN_DB === 'true',
   /** Ниже этого chars/page для pdf-parse будет пробоваться pdf.js */

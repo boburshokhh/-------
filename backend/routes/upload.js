@@ -14,6 +14,7 @@ const { normalizeDisplayFilename, resolveStorageExtension } = require('../utils/
 const { logStructured } = require('../utils/observability');
 
 const router = express.Router();
+const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -69,9 +70,16 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         console.warn(`[UPLOAD] Имя файла нормализовано: raw="${originalNameRaw}" → display="${displayName}"`);
     }
 
-    const jobId = (typeof req.get === 'function' && req.get('X-Job-Id') && String(req.get('X-Job-Id')).trim())
+    const incomingJobId = (typeof req.get === 'function' && req.get('X-Job-Id'))
         ? String(req.get('X-Job-Id')).trim()
-        : uuidv4();
+        : '';
+    if (incomingJobId && !JOB_ID_RE.test(incomingJobId)) {
+        return res.status(400).json({
+            error: 'Некорректный X-Job-Id',
+            details: 'Разрешены только латиница, цифры, "_" и "-", длина до 80 символов',
+        });
+    }
+    const jobId = incomingJobId || uuidv4();
     const report = (payload) => jobProgress.logJobProgress(jobId, payload);
 
     try {

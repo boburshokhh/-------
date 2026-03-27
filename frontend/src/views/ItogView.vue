@@ -14,6 +14,9 @@
           <span class="text-[#3755C3] font-semibold">{{ data.quizName }}</span>.
           Ваше понимание рыночных структур впечатляет.
         </p>
+        <p v-if="data.completedAt" class="text-xs text-[#566166] mt-2">
+          Завершено: {{ completedAtLabel }}
+        </p>
       </section>
 
       <!-- Статистика и обратная связь -->
@@ -101,6 +104,11 @@ const razborLink = computed(() => {
   const resultId = route.query.resultId || store.state.resultSummary?.resultId
   return resultId ? { path: '/razbor', query: { resultId: String(resultId) } } : '/razbor'
 })
+const completedAtLabel = computed(() => {
+  if (!data.value.completedAt) return '—'
+  const dt = new Date(data.value.completedAt)
+  return Number.isNaN(dt.getTime()) ? String(data.value.completedAt) : dt.toLocaleString('ru-RU')
+})
 
 onMounted(async () => {
   if (store.state.resultSummary) return
@@ -116,6 +124,7 @@ onMounted(async () => {
         score: latest.score,
         maxScore: latest.max_score,
         percentage: latest.percentage,
+        completedAt: latest.completed_at,
         answers: [],
       },
       store.state.activeTest,

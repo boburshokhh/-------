@@ -40,6 +40,12 @@ module.exports = function errorHandler(err, req, res, next) {
         });
     }
 
+    if (typeof err.message === 'string' && err.message.includes('CORS origin is not allowed')) {
+        return res.status(403).json({
+            error: 'Доступ с этого origin запрещен',
+        });
+    }
+
     res.status(err.status || 500).json({
         error: 'Внутренняя ошибка сервера',
         details: process.env.NODE_ENV === 'development' ? err.message : undefined

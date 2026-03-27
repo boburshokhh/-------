@@ -56,6 +56,10 @@ export function mapTestDetail(payload) {
     generationMetrics: payload.generationMetrics || null,
     createdAt: payload.createdAt || null,
     documentName: payload.documentName || null,
+    pageCount: payload.pageCount ?? null,
+    extractionQuality: payload.extractionQuality ?? null,
+    lowTextQuality: !!payload.lowTextQuality,
+    parseDiagnostics: payload.parseDiagnostics || null,
   };
 }
 
@@ -95,6 +99,7 @@ export function mapResultSummary(payload, testDetail, userName = 'Пользов
     strength: 'Темы с высоким процентом верных ответов',
     improve: 'Темы с ошибками и пропусками',
     breakdown: [],
+    completedAt: payload.completedAt || null,
     raw: payload,
   };
 }

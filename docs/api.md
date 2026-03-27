@@ -19,6 +19,22 @@
 
 ---
 
+### 1a. Список доступных LLM-моделей
+**GET** `/api/models`
+
+Возвращает список моделей, доступных для генерации теста в UI.
+- **Ответ (200 OK)**:
+  ```json
+  {
+    "models": [
+      { "id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (...)" }
+    ],
+    "defaultModel": "gemini-2.5-flash"
+  }
+  ```
+
+---
+
 ### 2. Загрузка документа и генерация теста
 **POST** `/api/upload`
 
@@ -123,6 +139,11 @@
     "totalQuestions": 1,
     "documentName": "История.pdf",
     "pageCount": 5,
+    "extractionQuality": 0.94,
+    "lowTextQuality": false,
+    "parseDiagnostics": {
+      "parseMethod": "pdf-parse"
+    },
     "generationMetrics": null,
     "createdAt": "2026-02-24 10:00:00"
   }
@@ -210,5 +231,26 @@
     "answers": [ ... ],
     "questions": [ ... ],
     "completedAt": "2026-02-24 10:15:00"
+  }
+  ```
+
+---
+
+### 9. Просмотр backend-логов (debug)
+**GET** `/api/logs?limit=200`
+
+Возвращает последние N строк логов из in-memory буфера (для debug UI).
+- **Query**: `limit` (1..500, опционально, по умолчанию 200)
+- **Защита**: если на сервере установлен `LOGS_API_TOKEN`, передайте `X-Logs-Token` (или `token` в query).
+- **Ответ (200 OK)**:
+  ```json
+  {
+    "logs": [
+      {
+        "ts": "2026-03-27T12:00:00.000Z",
+        "level": "INFO",
+        "message": "[UPLOAD] ..."
+      }
+    ]
   }
   ```
