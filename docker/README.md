@@ -1,6 +1,6 @@
 # Docker-окружение для AI Test Generator
 
-Схема деплоя: **nginx** (порт 80) → **app** (Node.js) → **postgres** (PostgreSQL 16). Загрузки и локальные файлы — volume `ai-testgen-data`; данные БД — volume `ai-testgen-postgres-data`. MinIO при `STORAGE_BACKEND=minio` по умолчанию ожидается на хосте (`host.docker.internal`), либо задайте `MINIO_ENDPOINT` в `.env`.
+Схема деплоя: **nginx** (`HOST_PORT`, по умолчанию 80) → **app** (Node внутри на **3002**) → **postgres**. На хост дополнительно пробрасывается **`APP_HOST_PORT`→3002** (по умолчанию `3002`), чтобы можно было открыть `http://сервер:3002/` без nginx. Для обычной работы достаточно `http://сервер/` (через nginx).
 
 ## Требования на сервере (Ubuntu)
 

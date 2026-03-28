@@ -9,6 +9,9 @@
 # Важно: пользователь БД в Compose всегда ai_testgen (не из PGUSER в .env). Иначе при первом
 # запуске том создаётся с одним именем, а в .env позже ставят другое (например bobur) —
 # приложение ходит под несуществующей ролью → "password authentication failed".
+#
+# Пароль БД в Compose берётся из POSTGRES_PASSWORD (не из PGPASSWORD): строка PGPASSWORD=
+# в .env даёт пустой пароль и ломает вход; POSTGRES_PASSWORD для app и postgres всегда совпадают.
 
 services:
   postgres:
@@ -17,7 +20,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ai_testgen
-      POSTGRES_PASSWORD: ${PGPASSWORD:-ai_testgen_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_testgen_dev}
       POSTGRES_DB: ${PGDATABASE:-ai_testgen}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -52,7 +55,7 @@ services:
       PGPORT: 5432
       PGDATABASE: ${PGDATABASE:-ai_testgen}
       PGUSER: ai_testgen
-      PGPASSWORD: ${PGPASSWORD:-ai_testgen_dev}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-ai_testgen_dev}
       DB_CLIENT: postgres
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-host.docker.internal}
@@ -65,6 +68,9 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - app_data:/data
+    # Снаружи: ${APP_HOST_PORT}:3002 (Node). Без nginx тоже можно открыть http://сервер:3002/
+    ports:
+      - "${APP_HOST_PORT:-3002}:3002"
     expose:
       - "3002"
     healthcheck:
