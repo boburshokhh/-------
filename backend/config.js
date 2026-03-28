@@ -3,6 +3,13 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const dataDir = process.env.DATA_DIR || __dirname;
 
+/** MinIO SDK ждёт только хост/IP, без схемы (http://) и без пути */
+function normalizeMinioEndpoint(raw) {
+  const s = String(raw || 'localhost').trim();
+  if (!s) return 'localhost';
+  return s.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0] || 'localhost';
+}
+
 module.exports = {
   PORT: parseInt(process.env.PORT, 10) || 3002,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
@@ -27,7 +34,7 @@ module.exports = {
 
   // ── MinIO / Object Storage ───────────────────────────────────────────────
   STORAGE_BACKEND: process.env.STORAGE_BACKEND || 'local',
-  MINIO_ENDPOINT: process.env.MINIO_ENDPOINT || 'localhost',
+  MINIO_ENDPOINT: normalizeMinioEndpoint(process.env.MINIO_ENDPOINT || 'localhost'),
   MINIO_PORT: parseInt(process.env.MINIO_PORT) || 9000,
   MINIO_USE_SSL: process.env.MINIO_USE_SSL === 'true',
   MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || '',
