@@ -1,48 +1,48 @@
-const db = require('../db/database');
+const settingsRepo = require('../db/repositories/settingsRepo');
 const config = require('../config');
 
-function getSetting(key) {
-    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
-    return row ? row.value : null;
+let cachedApiKey = null;
+let cacheTs = 0;
+const CACHE_TTL = 30000;
+
+async function getSetting(key) {
+    return settingsRepo.getSetting(key);
 }
 
-function setSetting(key, value) {
-    db.prepare(`
-        INSERT INTO app_settings (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = CURRENT_TIMESTAMP
-    `).run(key, value);
+async function setSetting(key, value) {
+    return settingsRepo.setSetting(key, value);
 }
 
-function getGeminiApiKey() {
-    const fromDb = getSetting('GEMINI_API_KEY');
+async function getGeminiApiKey() {
+    if (cachedApiKey && Date.now() - cacheTs < CACHE_TTL) return cachedApiKey;
+    const fromDb = await settingsRepo.getSetting('GEMINI_API_KEY');
     if (typeof fromDb === 'string' && fromDb.trim()) {
-        return fromDb.trim();
+        cachedApiKey = fromDb.trim();
+        cacheTs = Date.now();
+        return cachedApiKey;
     }
     return config.GEMINI_API_KEY || '';
 }
 
-function setGeminiApiKey(value) {
+async function setGeminiApiKey(value) {
     const normalized = String(value || '').trim();
-    if (!normalized) {
-        throw new Error('GEMINI_API_KEY не может быть пустым');
-    }
-    setSetting('GEMINI_API_KEY', normalized);
-    // Новый ключ — новая «корзина» локального учёта free-tier (защита от злоупотреблений)
-    require('./quotaGuard').resetUsageForNewApiKey();
+    if (!normalized) throw new Error('GEMINI_API_KEY не может быть пустым');
+    await settingsRepo.setSetting('GEMINI_API_KEY', normalized);
+    cachedApiKey = normalized;
+    cacheTs = Date.now();
+    const quotaGuard = require('./quotaGuard');
+    await quotaGuard.resetUsageForNewApiKey();
 }
 
-function hasGeminiApiKey() {
-    return !!getGeminiApiKey();
+async function hasGeminiApiKey() {
+    return !!(await getGeminiApiKey());
 }
 
-function getPublicRuntimeSettings() {
+async function getPublicRuntimeSettings() {
     const quotaGuard = require('./quotaGuard');
     return {
-        hasGeminiApiKey: hasGeminiApiKey(),
-        geminiQuota: quotaGuard.getUsageSummaryPublic(),
+        hasGeminiApiKey: await hasGeminiApiKey(),
+        geminiQuota: await quotaGuard.getUsageSummaryPublic(),
     };
 }
 

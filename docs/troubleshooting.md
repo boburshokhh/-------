@@ -46,25 +46,81 @@
 
 ## Сетевые ошибки
 
+### Сообщение в консоли браузера: «A listener indicated an asynchronous response…»
+- **Причина**: почти всегда это **расширение Chrome** (переводчик, блокировщик рекламы, менеджер паролей), а не ваше приложение.
+- **Решение**: откройте сайт в режиме инкогнито без расширений или временно отключите расширения для этого домена.
+
+### Ошибка 404 на `GET /api/jobs/...` при опросе прогресса
+- **Причина**: состояние задачи хранится **в памяти** одного процесса Node.js. Запись появляется, когда запрос `POST /api/upload` доходит до приложения. 404 бывает, если:
+  - контейнер/процесс **перезапустился** во время генерации;
+  - запрос **не дошёл** до Node (см. 413 у nginx ниже);
+  - опрос шёл по **устаревшему** `jobId` после сброса страницы.
+- **Решение**: повторите загрузку. В Docker смотрите `docker compose logs app` — нет ли падений процесса.
+
+### Ошибка 413 (Payload Too Large) при загрузке
+- **Причина**: файл больше лимита **multer** (`MAX_FILE_SIZE_MB` в `.env`, по умолчанию 10 МБ) **или** больше лимита **nginx** (`client_max_body_size` в `docker/nginx/nginx.conf` — должен быть **не меньше**, чем у приложения).
+- **Решение**: уменьшите PDF или поднимите **оба** лимита согласованно и перезапустите контейнеры.
+
+### Ошибка 502 Bad Gateway на `/api/...` и на статике (`*.css`, `*.js`)
+- **Причина**: **nginx** не получает ответ от контейнера `app` (процесс упал, ещё не поднялся, не прошёл healthcheck, нехватка памяти при OCR/LLM).
+- **Решение**:
+  1. `docker compose ps` — контейнер `app` в статусе `Up`?
+  2. `docker compose logs app --tail 200` — traceback или OOM?
+  3. Для длинной генерации в образе у nginx для `POST /api/upload` увеличен `proxy_read_timeout` (см. `docker/nginx/nginx.conf`).
+
 ### Ошибка: "Слишком много загрузок/запросов, попробуйте позже" (429)
 - **Причина**: Сработал встроенный Rate Limiter. Для загрузок лимит — 10 файлов в 15 минут. Для остальных API-запросов — 100 в 15 минут.
 - **Решение**: Подождите 15 минут. (Для разработчиков: лимиты можно увеличить в `backend/server.js`).
 
-## Подключение к БД в DataGrip (SQLite)
+## Настройка PostgreSQL (первый запуск)
 
-Приложение использует SQLite. Файл базы по умолчанию: **`backend/data.db`** (если не задана переменная `DATA_DIR`). Если в `.env` указан `DATA_DIR`, то путь к БД: **`<DATA_DIR>/data.db`** (например, в Docker это том `/data/data.db`).
+Перед первым запуском приложения нужно создать базу и пользователя:
+
+```sql
+-- Выполнить от имени суперпользователя (postgres):
+CREATE USER ai_testgen WITH PASSWORD 'your-secure-password';
+CREATE DATABASE ai_testgen OWNER ai_testgen;
+GRANT ALL PRIVILEGES ON DATABASE ai_testgen TO ai_testgen;
+```
+
+Затем указать параметры в `.env`:
+```
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=ai_testgen
+PGUSER=ai_testgen
+PGPASSWORD=your-secure-password
+```
+
+Миграции применятся автоматически при старте сервера.
+
+## Подключение к БД (PostgreSQL)
+
+Приложение использует PostgreSQL. Параметры подключения задаются через `.env`: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`.
 
 ### Шаги в DataGrip
 
-1. **Добавить источник данных**: в окне **Database** нажмите **+** → **Data Source** → **SQLite**.
-2. **Указать файл БД**:
-   - В поле **File** нажмите на папку и выберите файл `data.db`.
-   - Локальная разработка (Windows):  
-     `C:\Users\user\Desktop\ИИ тест\backend\data.db`  
-     (если `DATA_DIR` не задан; иначе — папка из `DATA_DIR` и файл `data.db` в ней).
-3. При первом подключении DataGrip может предложить **скачать драйвер SQLite** — согласитесь.
-4. Нажмите **Test Connection**. Если всё ок — **OK**.
+1. **Добавить источник данных**: **+** → **Data Source** → **PostgreSQL**.
+2. **Параметры**:
+   - Host: значение `PGHOST` из `.env` (по умолчанию `localhost`)
+   - Port: `5432`
+   - Database: `ai_testgen`
+   - User / Password: из `.env`
+3. Нажмите **Test Connection**. Если всё ок — **OK**.
 
-После подключения будут видны таблицы: `documents`, `tests`, `results`, `document_chunks`, `chunk_embeddings`, `chunk_summaries`.
+Таблицы: `documents`, `chunks`, `chunk_embeddings`, `chunk_summaries`, `tests`, `results`, `generation_runs`, `intents`, `questions`, `question_sources`, `pipeline_run_events`, `app_settings`, `gemini_usage`, `schema_migrations`.
 
-**Если БД в Docker**: скопируйте `data.db` из тома на хост (`docker cp ai-testgen-app:/data/data.db ./backend/data.db`) и подключайтесь к локальному файлу, либо настройте проброс тома в каталог на хосте и укажите путь к файлу в этом каталоге.
+### Миграция с SQLite
+
+Если есть данные в старой SQLite БД (`data.db`), их можно перенести в PostgreSQL:
+
+```bash
+cd backend
+node scripts/migrate-sqlite-to-postgres.js
+```
+
+Для пробного запуска без записи: `node scripts/migrate-sqlite-to-postgres.js --dry-run`.
+
+### MinIO / Object Storage
+
+Если включён MinIO (`STORAGE_BACKEND=minio`), PDF-файлы хранятся в bucket `ai-testgen-docs` (настраивается через `MINIO_BUCKET`). Для управления файлами используйте MinIO Console (обычно порт 9001) или `mc` CLI.

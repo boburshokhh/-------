@@ -1,9 +1,10 @@
-# AI Test Generator — деплой на Ubuntu (nginx + app + volume)
+# AI Test Generator — деплой (nginx + app + volume)
+# PostgreSQL и MinIO — внешние сервисы (уже работают на хосте).
 # Запуск: docker compose up -d
 # Остановка: docker compose down
 #
-# Порты: единственный хост-порт — HOST_PORT из .env (по умолчанию 80).
-# На сервере заняты: 3000, 8000, 5432, 6379, 9000, 9001 — их не используем.
+# Порты на хосте заняты: 3000, 8000, 5432 (PG), 6379, 9000/9001 (MinIO).
+# Приложение подключается к ним через host.docker.internal.
 
 services:
   # Приложение (Node.js + OCR)
@@ -20,6 +21,23 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATA_DIR: /data
+      # PostgreSQL (внешний, на хосте)
+      PGHOST: host.docker.internal
+      PGPORT: 5432
+      PGDATABASE: ${PGDATABASE:-ai_testgen}
+      PGUSER: ${PGUSER:-ai_testgen}
+      PGPASSWORD: ${PGPASSWORD:-}
+      DB_CLIENT: postgres
+      # MinIO (внешний, на хосте)
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      MINIO_ENDPOINT: host.docker.internal
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET: ${MINIO_BUCKET:-ai-testgen-docs}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - app_data:/data
     expose:
@@ -28,7 +46,7 @@ services:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));"]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 15s
       retries: 3
 
   # Nginx (reverse proxy, единая точка входа)

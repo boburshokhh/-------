@@ -258,6 +258,7 @@ async function pollProgress() {
   } catch (error) {
     if (error?.status === 404) {
       stopPolling()
+      store.actions.failUpload('Прогресс задачи не найден (сервер перезапущен, истёк TTL или запрос не дошёл до приложения). Загрузите файл снова.')
       return
     }
     store.actions.failUpload(error?.message || 'Не удалось обновить прогресс')

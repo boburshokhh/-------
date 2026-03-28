@@ -1,4 +1,19 @@
 const config = require('../config');
+const jobProgress = require('../services/jobProgress');
+
+const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+
+function markUploadJobError(req, detail) {
+    const raw = typeof req.get === 'function' ? req.get('X-Job-Id') : '';
+    const jobId = raw ? String(raw).trim() : '';
+    if (jobId && JOB_ID_RE.test(jobId)) {
+        jobProgress.logJobProgress(jobId, {
+            phase: 'error',
+            stage: 'upload_failed',
+            detail: detail || 'Ошибка загрузки',
+        });
+    }
+}
 
 module.exports = function errorHandler(err, req, res, next) {
     console.error(`[ERROR] ${new Date().toISOString()}:`, err.message);
@@ -6,6 +21,7 @@ module.exports = function errorHandler(err, req, res, next) {
 
     if (err.code === 'LIMIT_FILE_SIZE') {
         const mb = config.MAX_FILE_SIZE_MB || 10;
+        markUploadJobError(req, `Файл больше ${mb} МБ (лимит сервера)`);
         return res.status(413).json({
             error: 'Файл слишком большой',
             details: `Максимальный размер файла — ${mb} МБ`
@@ -13,6 +29,7 @@ module.exports = function errorHandler(err, req, res, next) {
     }
 
     if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        markUploadJobError(req, 'Неверное поле формы для файла');
         return res.status(400).json({
             error: 'Неверное поле файла',
             details: 'Используйте поле "file" для загрузки'
@@ -20,6 +37,7 @@ module.exports = function errorHandler(err, req, res, next) {
     }
 
     if (err.type === 'INVALID_FILE_TYPE') {
+        markUploadJobError(req, err.message || 'Неподдерживаемый формат');
         return res.status(415).json({
             error: 'Неподдерживаемый формат файла',
             details: err.message || 'Поддерживаются только PDF файлы'

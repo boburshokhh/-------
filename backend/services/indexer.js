@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { GoogleGenAI } = require('@google/genai');
 const config = require('../config');
-const db = require('../db/database');
+const chunkRepo = require('../db/repositories/chunkRepo');
 const { chunkText } = require('./chunker');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
@@ -9,42 +9,33 @@ const quotaGuard = require('./quotaGuard');
 const jobProgressSvc = require('./jobProgress');
 const { WEIGHT } = jobProgressSvc;
 
-function getAiClient() {
-    return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
+async function getAiClient() {
+    return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
 }
 
 const EMBED_BATCH_SIZE = config.EMBED_BATCH_SIZE || 5;
 const EMBED_CONCURRENCY = config.EMBED_CONCURRENCY || 2;
 
-/**
- * SHA-256 хэш текста — используется для кэша эмбеддингов
- */
 function hashText(text) {
     return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-/**
- * Экспоненциальный backoff
- */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Получает эмбеддинг для одного текста с retry/backoff
- */
 async function fetchEmbeddingWithRetry(text, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const embedModel = config.EMBEDDING_MODEL || 'text-embedding-004';
-            quotaGuard.assertWithinFreeTierQuota(embedModel);
-            const response = await getAiClient().models.embedContent({
+            const embedModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
+            await quotaGuard.assertWithinFreeTierQuota(embedModel);
+            const ai = await getAiClient();
+            const response = await ai.models.embedContent({
                 model: embedModel,
                 contents: text,
             });
-            quotaGuard.recordGeminiCall(embedModel);
-            // Нормализуем ответ SDK: может вернуть .embeddings[] или .embeddings.values
+            await quotaGuard.recordGeminiCall(embedModel);
             const emb = Array.isArray(response.embeddings)
                 ? response.embeddings[0].values
                 : response.embeddings.values || response.embedding.values;
@@ -58,23 +49,21 @@ async function fetchEmbeddingWithRetry(text, retries = 3) {
     throw lastError;
 }
 
-/**
- * Получает LLM-резюме для одного чанка (5–10 ключевых фактов)
- */
-async function fetchChunkSummary(chunkText, retries = 3) {
+async function fetchChunkSummary(chunkTextStr, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            quotaGuard.assertWithinFreeTierQuota(config.LLM_MODEL);
-            const response = await getAiClient().models.generateContent({
+            await quotaGuard.assertWithinFreeTierQuota(config.LLM_MODEL);
+            const ai = await getAiClient();
+            const response = await ai.models.generateContent({
                 model: config.LLM_MODEL,
-                contents: `Прочитай следующий фрагмент учебного материала и выдели из него 5–10 конкретных фактов, определений, правил или ключевых утверждений. Оформи каждый факт как отдельный пункт списка (одна строка). Не пересказывай, а вычленяй именно проверяемые знания.\n\nФрагмент:\n${chunkText}\n\nВерни только JSON объект вида {"facts": ["факт 1","факт 2",...]}. Никакого другого текста.`,
+                contents: `Прочитай следующий фрагмент учебного материала и выдели из него 5–10 конкретных фактов, определений, правил или ключевых утверждений. Оформи каждый факт как отдельный пункт списка (одна строка). Не пересказывай, а вычленяй именно проверяемые знания.\n\nФрагмент:\n${chunkTextStr}\n\nВерни только JSON объект вида {"facts": ["факт 1","факт 2",...]}. Никакого другого текста.`,
                 config: {
                     temperature: 0.1,
                     responseMimeType: 'application/json',
                 },
             });
-            quotaGuard.recordGeminiCall(config.LLM_MODEL);
+            await quotaGuard.recordGeminiCall(config.LLM_MODEL);
             const raw = response.text;
             if (!raw) throw new Error('Пустой ответ при генерации summary');
             const parsed = extractJSON(raw);
@@ -93,12 +82,8 @@ async function fetchChunkSummary(chunkText, retries = 3) {
     return [];
 }
 
-/**
- * Обрабатывает батч чанков параллельно с ограничением параллелизма
- */
-async function processBatch(batch, embeddingModel) {
+async function processBatch(batch) {
     const results = [];
-    // Батчим с ограничением параллелизма
     for (let i = 0; i < batch.length; i += EMBED_CONCURRENCY) {
         const slice = batch.slice(i, i + EMBED_CONCURRENCY);
         const settled = await Promise.allSettled(
@@ -112,25 +97,14 @@ async function processBatch(batch, embeddingModel) {
                 results.push(result.value);
             } else {
                 console.error(`[INDEXER] Ошибка батч-эмбеддинга: ${result.reason.message}`);
-                results.push({ ...result.reason, embedding: null });
+                results.push({ id: null, embedding: null });
             }
         }
-        // Пауза между батчами
         if (i + EMBED_CONCURRENCY < batch.length) await sleep(300);
     }
     return results;
 }
 
-/**
- * Индексирует документ: чанки → хэши → эмбеддинги → summary → SQLite
- * Пропускает уже проиндексированные чанки по content_hash.
- *
- * @param {number} documentId - ID документа в БД
- * @param {string} fullText - Полный текст документа
- * @param {function} [onProgress] - (payload: { phase, stage, detail, workDelta?, workTotal?, planEstMainBatches? }) => void
- * @param {object} [opts] - { baseWorkDone } — уже выполненные единицы до индексации (парс + БД)
- * @returns {Promise<Array<{id, document_id, chunk_index, text, token_count, content_hash}>>}
- */
 async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     const baseWorkDone = Math.max(0, Math.floor(Number(opts.baseWorkDone) || 0));
     const startTime = Date.now();
@@ -143,36 +117,17 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     console.log(`[INDEXER] Документ #${documentId}: ${rawChunks.length} чанков`);
 
     const { genUnits, estMainBatches } = jobProgressSvc.estimateGenerationTailUnits(config);
+    const embeddingModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
 
-    const embeddingModel = config.EMBEDDING_MODEL || 'text-embedding-004';
-
-    // Загружаем уже существующие хэши для этого документа (кэш)
+    const existingRows = await chunkRepo.getChunkHashesByDocumentId(documentId);
     const existingHashes = new Map();
-    const existingRows = db.prepare(
-        'SELECT id, content_hash FROM document_chunks WHERE document_id = ?'
-    ).all(documentId);
     for (const row of existingRows) {
         existingHashes.set(row.content_hash, row.id);
     }
 
-    // Стейтменты для вставки
-    const insertChunk = db.prepare(`
-        INSERT INTO document_chunks (document_id, chunk_index, text, token_count, content_hash, page, section, heading)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertEmbedding = db.prepare(`
-        INSERT OR REPLACE INTO chunk_embeddings (chunk_id, embedding_model, embedding, dims)
-        VALUES (?, ?, ?, ?)
-    `);
-    const insertSummary = db.prepare(`
-        INSERT OR REPLACE INTO chunk_summaries (chunk_id, summary_text)
-        VALUES (?, ?)
-    `);
-
     const indexedChunks = [];
     const newChunks = [];
 
-    // Проверяем кэш — что уже есть, что нужно индексировать
     for (const raw of rawChunks) {
         const hash = hashText(raw.text);
         if (existingHashes.has(hash)) {
@@ -205,7 +160,7 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
             workDelta: WEIGHT.INDEX_SPLIT + WEIGHT.INDEX_CACHE_HIT,
             detail: `Индекс из кэша: ${indexedChunks.length} фрагментов, новых нет`,
         });
-        return loadIndexedChunks(documentId);
+        return chunkRepo.loadIndexedChunks(documentId);
     }
 
     onProgress?.({
@@ -217,27 +172,14 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
         detail: `Разбиение: ${rawChunks.length} фрагментов (${newChunks.length} новых), полный объём работ: ${workTotal} ед.`,
     });
 
-    // Сохраняем новые чанки в БД
-    const insertedChunks = [];
-    const insertAllChunks = db.transaction(() => {
-        for (const c of newChunks) {
-            const result = insertChunk.run(
-                documentId, c.index, c.text, c.tokens, c.content_hash,
-                c.page    ?? null,
-                c.section ?? null,
-                c.heading ?? null,
-            );
-            insertedChunks.push({ ...c, id: result.lastInsertRowid });
-        }
-    });
-    insertAllChunks();
+    const insertedChunks = await chunkRepo.insertChunks(documentId, newChunks);
+
     onProgress?.({
         phase: 'index',
         stage: 'chunks_saved',
         detail: `Сохранено ${newChunks.length} новых фрагментов в БД`,
     });
 
-    // Батчевые эмбеддинги для новых чанков
     const batches = [];
     for (let i = 0; i < insertedChunks.length; i += EMBED_BATCH_SIZE) {
         batches.push(insertedChunks.slice(i, i + EMBED_BATCH_SIZE));
@@ -246,7 +188,7 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     const chunksWithEmbeddings = [];
     for (let bIdx = 0; bIdx < batches.length; bIdx++) {
         console.log(`[INDEXER] Эмбеддинги батч ${bIdx + 1}/${batches.length}...`);
-        const processed = await processBatch(batches[bIdx], embeddingModel);
+        const processed = await processBatch(batches[bIdx]);
         chunksWithEmbeddings.push(...processed);
         onProgress?.({
             phase: 'index',
@@ -257,29 +199,21 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
         if (bIdx < batches.length - 1) await sleep(500);
     }
 
-    // Сохраняем эмбеддинги в БД
-    const saveEmbeddings = db.transaction(() => {
-        for (const c of chunksWithEmbeddings) {
-            if (!c.embedding) continue;
-            const embJson = JSON.stringify(c.embedding);
-            insertEmbedding.run(c.id, embeddingModel, embJson, c.embedding.length);
-        }
-    });
-    saveEmbeddings();
+    await chunkRepo.insertEmbeddings(chunksWithEmbeddings, embeddingModel);
 
-    // Summary — для каждого нового чанка
     console.log(`[INDEXER] Генерация summary для ${insertedChunks.length} чанков...`);
     onProgress?.({
         phase: 'index',
         stage: 'summaries',
         detail: `Краткие выжимки по фрагментам: 0/${insertedChunks.length}`,
     });
+
     for (let i = 0; i < insertedChunks.length; i++) {
         const c = insertedChunks[i];
         console.log(`[INDEXER] Summary ${i + 1}/${insertedChunks.length}...`);
         const facts = await fetchChunkSummary(c.text);
         if (facts.length > 0) {
-            insertSummary.run(c.id, JSON.stringify(facts));
+            await chunkRepo.insertSummary(c.id, facts);
         }
         onProgress?.({
             phase: 'index',
@@ -300,58 +234,7 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     const elapsed = Date.now() - startTime;
     console.log(`[INDEXER] Индексация завершена за ${(elapsed / 1000).toFixed(1)}s`);
 
-    return loadIndexedChunks(documentId);
+    return chunkRepo.loadIndexedChunks(documentId);
 }
 
-/**
- * Загружает все проиндексированные чанки документа с эмбеддингами и summary
- */
-function loadIndexedChunks(documentId) {
-    const rows = db.prepare(`
-        SELECT
-            dc.id,
-            dc.document_id,
-            dc.chunk_index,
-            dc.text,
-            dc.token_count,
-            dc.content_hash,
-            dc.page,
-            dc.section,
-            dc.heading,
-            ce.embedding,
-            ce.embedding_model,
-            cs.summary_text
-        FROM document_chunks dc
-        LEFT JOIN chunk_embeddings ce ON ce.chunk_id = dc.id
-            AND ce.embedding_model = ?
-        LEFT JOIN chunk_summaries cs ON cs.chunk_id = dc.id
-        WHERE dc.document_id = ?
-        ORDER BY dc.chunk_index ASC
-    `).all(config.EMBEDDING_MODEL || 'text-embedding-004', documentId);
-
-    return rows.map(row => ({
-        id:           Number(row.id),
-        document_id:  Number(row.document_id),
-        chunk_index:  row.chunk_index,
-        text:         row.text,
-        token_count:  row.token_count,
-        content_hash: row.content_hash,
-        page:         row.page    ?? null,
-        section:      row.section ?? null,
-        heading:      row.heading ?? null,
-        embedding:    row.embedding    ? JSON.parse(row.embedding)    : null,
-        summary:      row.summary_text ? JSON.parse(row.summary_text) : [],
-    }));
-}
-
-/**
- * Проверяет, есть ли уже индекс для документа
- */
-function hasIndex(documentId) {
-    const row = db.prepare(
-        'SELECT COUNT(*) as cnt FROM document_chunks WHERE document_id = ?'
-    ).get(documentId);
-    return row.cnt > 0;
-}
-
-module.exports = { indexDocument, loadIndexedChunks, hasIndex };
+module.exports = { indexDocument, loadIndexedChunks: chunkRepo.loadIndexedChunks, hasIndex: chunkRepo.hasIndex };

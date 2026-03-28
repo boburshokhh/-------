@@ -14,6 +14,25 @@ module.exports = {
   ALLOWED_MIMES: [
     'application/pdf'
   ],
+
+  // ── PostgreSQL ───────────────────────────────────────────────────────────
+  DB_CLIENT: process.env.DB_CLIENT || 'postgres',
+  DATABASE_URL: process.env.DATABASE_URL || '',
+  PGHOST: process.env.PGHOST || 'localhost',
+  PGPORT: parseInt(process.env.PGPORT) || 5432,
+  PGDATABASE: process.env.PGDATABASE || 'ai_testgen',
+  PGUSER: process.env.PGUSER || 'ai_testgen',
+  PGPASSWORD: process.env.PGPASSWORD || '',
+  PG_MAX_POOL: parseInt(process.env.PG_MAX_POOL) || 10,
+
+  // ── MinIO / Object Storage ───────────────────────────────────────────────
+  STORAGE_BACKEND: process.env.STORAGE_BACKEND || 'local',
+  MINIO_ENDPOINT: process.env.MINIO_ENDPOINT || 'localhost',
+  MINIO_PORT: parseInt(process.env.MINIO_PORT) || 9000,
+  MINIO_USE_SSL: process.env.MINIO_USE_SSL === 'true',
+  MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || '',
+  MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY || '',
+  MINIO_BUCKET: process.env.MINIO_BUCKET || 'ai-testgen-docs',
   MAX_PAGES: 30,
   QUESTIONS_PER_CHUNK: parseInt(process.env.QUESTIONS_PER_CHUNK, 10) || 4,
   CHAR_LENGTH_PER_QUESTION: parseInt(process.env.CHAR_LENGTH_PER_QUESTION, 10) || 2000,

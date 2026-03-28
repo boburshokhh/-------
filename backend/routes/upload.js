@@ -4,7 +4,10 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const config = require('../config');
-const db = require('../db/database');
+const documentRepo = require('../db/repositories/documentRepo');
+const testRepo = require('../db/repositories/testRepo');
+const runRepo = require('../db/repositories/runRepo');
+const fileStorage = require('../services/storage/fileStorage');
 const { parseDocument } = require('../services/parser');
 const { generateTest } = require('../services/generator');
 const { countTokens } = require('../services/chunker');
@@ -15,6 +18,20 @@ const { logStructured } = require('../utils/observability');
 
 const router = express.Router();
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+
+function registerUploadJobStub(req, res, next) {
+    const incomingJobId = (typeof req.get === 'function' && req.get('X-Job-Id'))
+        ? String(req.get('X-Job-Id')).trim()
+        : '';
+    if (incomingJobId && JOB_ID_RE.test(incomingJobId)) {
+        jobProgress.logJobProgress(incomingJobId, {
+            phase: 'upload',
+            stage: 'receiving',
+            detail: 'Приём файла на сервер…',
+        });
+    }
+    next();
+}
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
@@ -51,13 +68,8 @@ const upload = multer({
     limits: { fileSize: config.MAX_FILE_SIZE_MB * 1024 * 1024 },
 });
 
-/**
- * POST /api/upload
- * Загрузка PDF, парсинг, генерация теста
- */
-router.post('/', upload.single('file'), async (req, res, next) => {
+router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, next) => {
     const file = req.file;
-
     if (!file) {
         return res.status(400).json({ error: 'Файл не загружен' });
     }
@@ -84,6 +96,8 @@ router.post('/', upload.single('file'), async (req, res, next) => {
     const W = jobProgress.WEIGHT;
     const baseWorkAfterDb = W.PARSE_READ + W.PARSE_PARSED + W.DB_SAVING + W.DB_SAVED;
 
+    let storageResult = null;
+
     try {
         report({
             phase: 'parse',
@@ -92,6 +106,13 @@ router.post('/', upload.single('file'), async (req, res, next) => {
             detail: `Чтение файла: ${displayName}`,
         });
         console.log(`[UPLOAD] Файл: storage=${file.filename} display="${displayName}"`);
+
+        // Upload to storage (MinIO or local)
+        try {
+            storageResult = await fileStorage.upload(filePath, displayName);
+        } catch (storageErr) {
+            console.warn(`[UPLOAD] Storage upload failed, continuing with local file: ${storageErr.message}`);
+        }
 
         const parseResult = await parseDocument(filePath, file.mimetype);
         const { text, pageCount, rawText, diagnostics } = parseResult;
@@ -137,28 +158,25 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         report({ phase: 'db', stage: 'saving', workDelta: W.DB_SAVING, detail: 'Сохранение метаданных документа' });
 
         const storeFullText = config.STORE_DOCUMENT_TEXT_IN_DB === true;
-        const diagJson = JSON.stringify(diagnostics);
 
-        const docInsert = db.prepare(`
-      INSERT INTO documents (
-        filename, original_name, original_name_raw, page_count, text_length,
-        extraction_quality, parse_diagnostics_json, low_text_quality, text_raw, text_clean
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-        const docResult = docInsert.run(
-            file.filename,
-            displayName,
-            originalNameRaw || null,
-            pageCount,
-            text.length,
-            diagnostics.extractionQuality ?? null,
-            diagJson,
-            diagnostics.lowTextQuality ? 1 : 0,
-            storeFullText ? rawText : null,
-            storeFullText ? text : null,
-        );
-        const documentId = docResult.lastInsertRowid;
+        const docRow = await documentRepo.insertDocument({
+            filename: file.filename,
+            original_name: displayName,
+            original_name_raw: originalNameRaw || null,
+            page_count: pageCount,
+            text_length: text.length,
+            extraction_quality: diagnostics.extractionQuality ?? null,
+            parse_diagnostics: diagnostics,
+            low_text_quality: !!diagnostics.lowTextQuality,
+            text_raw: storeFullText ? rawText : null,
+            text_clean: storeFullText ? text : null,
+            storage_bucket: storageResult?.bucket || null,
+            storage_key: storageResult?.key || null,
+            mime_type: file.mimetype,
+            size_bytes: storageResult?.size || null,
+            checksum_sha256: storageResult?.checksum || null,
+        });
+        const documentId = docRow.id;
 
         console.log(
             `[UPLOAD] Документ #${documentId}: ${text.length} символов, ${countTokens(text)} токенов, extractionQuality=${diagnostics.extractionQuality}`,
@@ -180,6 +198,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         if (modelId && model !== modelId) {
             console.warn(`[UPLOAD] Неизвестная модель "${modelId}", использована ${model}`);
         }
+
         console.log(`[UPLOAD] Генерация теста с моделью: ${model}`);
         const testData = await generateTest(text, displayName, indexedChunks, report, {
             model,
@@ -188,22 +207,16 @@ router.post('/', upload.single('file'), async (req, res, next) => {
             documentId: Number(documentId),
         });
 
-        const testInsert = db.prepare(`
-      INSERT INTO tests (document_id, title, questions_json, total_questions, generation_metrics_json)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-        const metricsJson = testData.generationMetrics
-            ? JSON.stringify(testData.generationMetrics)
-            : null;
-        const testResult = testInsert.run(
-            documentId,
-            testData.title,
-            JSON.stringify(testData.questions),
-            testData.questions.length,
-            metricsJson,
-        );
+        const testRow = await testRepo.insertTest({
+            document_id: documentId,
+            title: testData.title,
+            questions: testData.questions,
+            total_questions: testData.questions.length,
+            generation_metrics: testData.generationMetrics || null,
+            generation_run_id: testData.runId || null,
+        });
 
-        const testId = Number(testResult.lastInsertRowid);
+        const testId = testRow.id;
         logStructured({
             level: 'info',
             traceId: jobId,
@@ -247,9 +260,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
                 stage: 'failed',
                 detail: error && error.message ? String(error.message) : 'Ошибка обработки',
             });
-        } catch {
-            /* ignore */
-        }
+        } catch { /* ignore */ }
         next(error);
     } finally {
         try {

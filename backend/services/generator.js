@@ -14,53 +14,31 @@ const {
     DEFECT_CLASSES,
 } = require('../utils/observability');
 const jobProgress = require('./jobProgress');
+const runRepo = require('../db/repositories/runRepo');
 const PW = jobProgress.WEIGHT;
 
-function getAiClient() {
-    return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
+async function getAiClient() {
+    return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
 }
 
-// ─── Bloom's Taxonomy difficulty levels ────────────────────────────────────
 const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
 
-// ─── Language Detection ────────────────────────────────────────────────────
-
-/**
- * Определяет язык документа по первым N символам текста.
- * Ищет характерные паттерны кириллицы/латиницы и частотные слова.
- *
- * @param {string} text - Текст документа
- * @returns {string} - Код языка: 'ru', 'en', или 'auto'
- */
 function detectLanguage(text) {
     const sample = text.slice(0, 3000);
-
-    // Считаем кириллические и латинские символы
     const cyrillicCount = (sample.match(/[а-яёА-ЯЁ]/g) || []).length;
     const latinCount = (sample.match(/[a-zA-Z]/g) || []).length;
-
     if (cyrillicCount > latinCount * 1.5) return 'ru';
     if (latinCount > cyrillicCount * 1.5) return 'en';
-
-    // Проверка частотных слов
     const ruWords = ['и', 'в', 'на', 'что', 'это', 'для', 'не', 'по', 'как', 'из', 'при'];
     const enWords = ['the', 'and', 'is', 'in', 'to', 'of', 'for', 'with', 'that', 'on', 'are'];
-
     const lowerSample = sample.toLowerCase();
     const ruHits = ruWords.filter(w => new RegExp(`\\b${w}\\b`, 'g').test(lowerSample)).length;
     const enHits = enWords.filter(w => new RegExp(`\\b${w}\\b`, 'g').test(lowerSample)).length;
-
     if (ruHits > enHits) return 'ru';
     if (enHits > ruHits) return 'en';
-
-    return 'auto'; // Не удалось определить — пусть LLM сам решит
+    return 'auto';
 }
 
-/**
- * Возвращает языковую инструкцию для system prompt.
- * @param {string} lang - Код языка ('ru', 'en', 'auto')
- * @returns {string}
- */
 function getLanguageInstruction(lang) {
     switch (lang) {
         case 'ru':
@@ -72,11 +50,8 @@ function getLanguageInstruction(lang) {
     }
 }
 
-// ─── System prompts ────────────────────────────────────────────────────────
-
 function getBatchSystemPrompt(lang = 'auto') {
     const langInstruction = getLanguageInstruction(lang);
-
     return `Ты — эксперт по генерации учебных тестов по документации.
 
 Твоя задача: создать РОВНО ОДИН вопрос формата multiple_choice для каждого intent на основе предоставленного evidence.
@@ -117,40 +92,22 @@ const GROUNDING_SYSTEM = `Ты проверяешь качество тесто�
 4. Вопрос не выходит за рамки evidence
 Верни JSON: {"grounded": true|false, "reason": "краткое объяснение"}`;
 
-// ─── Утилиты ──────────────────────────────────────────────────────────────
-
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// ─── Evidence Quality Scoring (soft-skip) ─────────────────────────────────
-
-/**
- * Оценивает качество evidence для intent.
- * Возвращает score 0–1 и причину, если evidence недостаточен.
- *
- * @param {string} evidenceText - Текст evidence
- * @param {string} intent - Текст intent
- * @returns {{score: number, reason: string|null}}
- */
 function scoreEvidenceQuality(evidenceText, intent) {
     const minChars = config.EVIDENCE_MIN_CHARS || 80;
-
     if (!evidenceText || evidenceText.trim().length < minChars) {
         return { score: 0.1, reason: `Evidence слишком короткий (${evidenceText ? evidenceText.trim().length : 0} < ${minChars} символов)` };
     }
-
-    // Проверяем наличие конкретных фактов (числа, имена, термины)
     const hasNumbers = /\d+/.test(evidenceText);
     const hasSentences = (evidenceText.match(/[.!?]/g) || []).length >= 2;
     const hasKeyTerms = evidenceText.split(/\s+/).filter(w => w.length > 5).length >= 5;
-
     let score = 0.5;
     if (hasNumbers) score += 0.15;
     if (hasSentences) score += 0.2;
     if (hasKeyTerms) score += 0.15;
-
-    // Проверяем, есть ли пересечение между intent и evidence (релевантность)
     const intentWords = new Set(intent.toLowerCase().split(/\W+/).filter(w => w.length > 3));
     const evidenceLower = evidenceText.toLowerCase();
     let relevanceHits = 0;
@@ -161,17 +118,9 @@ function scoreEvidenceQuality(evidenceText, intent) {
     if (relevance < 0.15) {
         return { score: 0.2, reason: `Evidence не релевантен intent (совпадение: ${Math.round(relevance * 100)}%)` };
     }
-
     return { score: Math.min(1, score), reason: null };
 }
 
-// ─── Вспомогательные функции для batch-генерации ─────────────────────────
-
-/**
- * Распределяет уровни сложности Bloom's Taxonomy по всему blueprint.
- * @param {Array}  blueprint     - Массив intent-объектов
- * @param {object} bloomMix      - { remember, understand, apply, analyze } — доли (в сумме ~1)
- */
 function assignDifficulties(blueprint, bloomMix = { remember: 0.20, understand: 0.35, apply: 0.25, analyze: 0.20 }) {
     const total = blueprint.length;
     const counts = {
@@ -180,36 +129,23 @@ function assignDifficulties(blueprint, bloomMix = { remember: 0.20, understand: 
         apply: Math.round(total * (bloomMix.apply ?? 0.25)),
         analyze: Math.round(total * (bloomMix.analyze ?? 0.20)),
     };
-
-    // Компенсируем ошибки округления, добавляя остаток к understand
     const assigned = counts.remember + counts.understand + counts.apply + counts.analyze;
     counts.understand += total - assigned;
-
     const pool = [
         ...Array(Math.max(0, counts.remember)).fill('remember'),
         ...Array(Math.max(0, counts.understand)).fill('understand'),
         ...Array(Math.max(0, counts.apply)).fill('apply'),
         ...Array(Math.max(0, counts.analyze)).fill('analyze'),
     ];
-
-    // Перемешиваем для разнообразия в каждом batch
     for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [pool[i], pool[j]] = [pool[j], pool[i]];
     }
-
     return blueprint.map((intent, i) => ({ ...intent, difficulty: pool[i] || 'understand' }));
 }
 
-/**
- * Строит текст пользовательского промпта для batch-вызова.
- * @param {Array}  intents            - Intent-объекты (с полем difficulty)
- * @param {Array}  evidenceList       - Evidence text для каждого intent
- * @param {number} maxEvidenceChars   - Лимит символов на один evidence блок
- */
 function buildBatchPrompt(intents, evidenceList, maxEvidenceChars = 2500) {
     const lines = [`Создай ${intents.length} вопрос(а/ов) формата multiple_choice — по одному на каждый intent.\n`];
-
     for (let i = 0; i < intents.length; i++) {
         const intent = intents[i];
         let evidence = evidenceList[i] || '';
@@ -224,38 +160,22 @@ function buildBatchPrompt(intents, evidenceList, maxEvidenceChars = 2500) {
         lines.push(`Evidence:\n${evidence}`);
         lines.push('');
     }
-
     return lines.join('\n');
 }
 
-/**
- * Нормализует поля LLM-ответа к формату пайплайна.
- * - correctIndex как primary field
- * - sourceChunkId → sources
- */
 function normalizeQuestion(q, chunkIds = []) {
     const normalized = { ...q };
-
-    // Нормализуем correctIndex (поддержка разных имён от LLM)
     if (normalized.correctIndex == null && normalized.correct_answer != null) {
         normalized.correctIndex = normalized.correct_answer;
     }
-    // Обеспечиваем backward compatibility
     if (normalized.correctIndex != null) {
         normalized.correct_answer = normalized.correctIndex;
     }
-
-    // Принудительно type = multiple_choice
     normalized.type = 'multiple_choice';
-
-    // Нормализуем difficulty к Bloom taxonomy
     if (!BLOOM_LEVELS.includes(normalized.difficulty)) {
-        // Маппинг из старых уровней
         const mapping = { easy: 'remember', medium: 'understand', hard: 'analyze' };
         normalized.difficulty = mapping[normalized.difficulty] || 'understand';
     }
-
-    // Нормализуем sources
     if (!normalized.sources || !Array.isArray(normalized.sources) || normalized.sources.length === 0) {
         const srcId = normalized.sourceChunkId;
         if (srcId != null) {
@@ -264,24 +184,9 @@ function normalizeQuestion(q, chunkIds = []) {
             normalized.sources = chunkIds.map(id => ({ chunk_id: id, quote: '' }));
         }
     }
-
     return normalized;
 }
 
-// ─── Batch-генерация вопросов ─────────────────────────────────────────────
-
-/**
- * Генерирует batch вопросов за ОДИН LLM-вызов.
- * Поддерживает soft-skip: если LLM вернул {skipped: true}, пропускаем без ошибки.
- *
- * @param {Array}  intents      - Массив intent-объектов
- * @param {Array}  evidenceList - Evidence text для каждого intent
- * @param {Array}  chunkIdsList - Массив chunk ID для каждого intent
- * @param {number} [retries]
- * @param {string} [model]
- * @param {string} [lang]       - Код языка документа
- * @returns {Promise<{ results: Array<{question: object, intentIdx: number}>, stats: { llmSkipped: number, validationFailed: number } }>}
- */
 async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retries = null, model = null, lang = 'auto') {
     retries = retries || config.LLM_MAX_RETRIES;
     const llmModel = model || config.LLM_MODEL;
@@ -290,9 +195,9 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             const userPrompt = buildBatchPrompt(intents, evidenceList);
-
-            quotaGuard.assertWithinFreeTierQuota(llmModel);
-            const response = await getAiClient().models.generateContent({
+            await quotaGuard.assertWithinFreeTierQuota(llmModel);
+            const ai = await getAiClient();
+            const response = await ai.models.generateContent({
                 model: llmModel,
                 contents: userPrompt,
                 config: {
@@ -301,7 +206,7 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
                     responseMimeType: 'application/json',
                 },
             });
-            quotaGuard.recordGeminiCall(llmModel);
+            await quotaGuard.recordGeminiCall(llmModel);
 
             const content = response.text;
             if (!content) throw new Error('Пустой ответ от LLM');
@@ -315,13 +220,11 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
             const limit = Math.min(parsed.length, intents.length);
 
             for (let i = 0; i < limit; i++) {
-                // Soft-skip: LLM сигнализирует, что evidence недостаточен
                 if (parsed[i] && parsed[i].skipped === true) {
                     console.log(`[GENERATOR] Batch: intent[${i + 1}] пропущен LLM — ${parsed[i].reason || 'недостаточный evidence'}`);
                     llmSkipped++;
                     continue;
                 }
-
                 try {
                     const normalized = normalizeQuestion(parsed[i], chunkIdsList[i] || []);
                     const [validated] = validateQuestions([normalized]);
@@ -334,7 +237,6 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
 
             if (results.length > 0) return { results, stats: { llmSkipped, validationFailed } };
             throw new Error('Ни один вопрос в batch не прошёл валидацию');
-
         } catch (error) {
             lastError = error;
             if (attempt < retries) {
@@ -347,22 +249,16 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
     return { results: [], stats: { llmSkipped: 0, validationFailed: 0 } };
 }
 
-// ─── Проверка groundedness ─────────────────────────────────────────────────
-
-/**
- * Проверяет, подтверждается ли ответ evidence (anti-hallucination).
- * @param {string} [model] - ID модели
- */
 async function checkGrounding(question, evidenceText, model = null) {
     const llmModel = model || config.LLM_MODEL;
     try {
         const correctOption = Array.isArray(question.options) && question.correctIndex != null
             ? question.options[question.correctIndex]
             : JSON.stringify(question.correctIndex);
-
         const prompt = `Вопрос: ${question.question}\nПравильный ответ: ${correctOption}\nОбъяснение: ${question.explanation}\n\nEvidence:\n${evidenceText}`;
-        quotaGuard.assertWithinFreeTierQuota(llmModel);
-        const response = await getAiClient().models.generateContent({
+        await quotaGuard.assertWithinFreeTierQuota(llmModel);
+        const ai = await getAiClient();
+        const response = await ai.models.generateContent({
             model: llmModel,
             contents: prompt,
             config: {
@@ -371,24 +267,16 @@ async function checkGrounding(question, evidenceText, model = null) {
                 responseMimeType: 'application/json',
             },
         });
-        quotaGuard.recordGeminiCall(llmModel);
+        await quotaGuard.recordGeminiCall(llmModel);
         const parsed = extractJSON(response.text);
         return parsed.grounded !== false;
     } catch {
-        // Если проверка не прошла технически — оставляем вопрос (не блокируем)
         return true;
     }
 }
 
-// ─── Семантическая дедупликация ────────────────────────────────────────────
-
-/**
- * Семантическая дедупликация через эмбеддинги вопросов + Levenshtein fallback
- */
 async function semanticDedup(questions, threshold = 0.88) {
     if (questions.length === 0) return questions;
-
-    // Получаем эмбеддинги для всех вопросов
     const embeddings = [];
     for (const q of questions) {
         try {
@@ -406,33 +294,26 @@ async function semanticDedup(questions, threshold = 0.88) {
     for (let i = 0; i < questions.length; i++) {
         if (usedIdx.has(i)) continue;
         let isDup = false;
-
         for (let j = 0; j < unique.length; j++) {
             const prevIdx = unique[j]._origIdx;
-            // Семантическое сходство
             if (embeddings[i] && embeddings[prevIdx]) {
                 const sim = rag.cosineSimilarity(embeddings[i], embeddings[prevIdx]);
                 if (sim > threshold) { isDup = true; break; }
             }
-            // Levenshtein fallback
             const textSim = levenshteinSimilarity(
                 questions[i].question.toLowerCase(),
                 unique[j].question.toLowerCase()
             );
             if (textSim > 0.8) { isDup = true; break; }
         }
-
         if (!isDup) {
             unique.push({ ...questions[i], _origIdx: i });
         } else {
             usedIdx.add(i);
         }
     }
-
     return unique.map(({ _origIdx, ...q }, i) => ({ ...q, id: i + 1 }));
 }
-
-// ─── Levenshtein ───────────────────────────────────────────────────────────
 
 function levenshteinSimilarity(a, b) {
     if (a === b) return 1;
@@ -459,23 +340,10 @@ function levenshteinSimilarity(a, b) {
     return (longer.length - costs[shorter.length]) / longer.length;
 }
 
-// ─── Backfill helpers ─────────────────────────────────────────────────────
-
-/**
- * Создаёт backfill-intents из чанков, которые ещё не покрыты вопросами.
- * Все intents — только multiple_choice.
- *
- * @param {Array}  poolChunks   - Чанки-кандидаты для backfill
- * @param {number} count        - Сколько intents создать
- * @param {number} typeOffset   - Смещение (не используется, сохранено для API совместимости)
- * @returns {Array}             - Intent-объекты с полем _chunkRef
- */
 function createBackfillIntents(poolChunks, count, typeOffset = 0) {
     const intents = [];
-
     for (let i = 0; i < count; i++) {
         const chunk = poolChunks[i % poolChunks.length];
-
         let intentText;
         if (Array.isArray(chunk.summary) && chunk.summary.length > 0) {
             const factIdx = Math.floor(i / poolChunks.length) % chunk.summary.length;
@@ -485,7 +353,6 @@ function createBackfillIntents(poolChunks, count, typeOffset = 0) {
         } else {
             intentText = `Проверить понимание фрагмента документа (чанк ${chunk.chunk_index + 1})`;
         }
-
         intents.push({
             theme: chunk.section || 'Документ',
             section: chunk.section || 'Документ',
@@ -494,24 +361,28 @@ function createBackfillIntents(poolChunks, count, typeOffset = 0) {
             _chunkRef: chunk,
         });
     }
-
     return intents;
 }
 
-// ─── Главная функция ───────────────────────────────────────────────────────
+// Fallback decisions imported from observability
+function applyFallbackDecisions(stats, ctx) {
+    const { retrievalPassed, retrievalSkipped, finalCount, blueprintIntents } = stats;
+    if (finalCount === 0 && blueprintIntents > 0) {
+        logStructured({
+            level: 'error',
+            traceId: ctx.traceId,
+            documentId: ctx.documentId,
+            phase: 'finalize',
+            event: 'zero_questions_generated',
+            reasonCode: REASON_CODES.ERR_WEAK_EVIDENCE,
+            defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
+            metrics: { retrieval_passed: retrievalPassed, retrieval_skipped: retrievalSkipped },
+        });
+        return 'zero_output';
+    }
+    return null;
+}
 
-/**
- * Генерирует тест из полного текста документа с RAG-пайплайном.
- * Формат вопросов: только multiple_choice.
- * Уровни сложности: Bloom's Taxonomy (remember, understand, apply, analyze).
- *
- * @param {string}   fullText       - Текст документа
- * @param {string}   docName        - Имя файла
- * @param {Array}    indexedChunks  - Проиндексированные чанки
- * @param {function} onProgress     - (payload: { phase, stage, percent, detail }) => void
- * @param {object}   [opts]         - { model }
- * @returns {Promise<{title, questions}>}
- */
 async function generateTest(fullText, docName, indexedChunks, onProgress, opts = {}) {
     const startTime = Date.now();
     const model = opts.model || config.LLM_MODEL;
@@ -522,21 +393,10 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         if (typeof onProgress === 'function') onProgress(p);
     };
 
-    logStructured({
-        level: 'info',
-        traceId,
-        documentId,
-        phase: 'generate',
-        event: 'generation_start',
-        metrics: { model },
-    });
-
-    // Определяем язык документа
+    // Create generation_run record
+    let runId = null;
     const detectedLang = detectLanguage(fullText);
-    console.log(`[GENERATOR] Определён язык документа: ${detectedLang}`);
-    progress({ phase: 'generate', stage: 'language', workDelta: PW.GEN_LANG, detail: `Язык: ${detectedLang}` });
 
-    // Fallback: если индекс не передан
     if (!indexedChunks || indexedChunks.length === 0) {
         const chunks = chunkText(fullText);
         indexedChunks = chunks.map((c, i) => ({
@@ -552,14 +412,39 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         }));
     }
 
-    const budgetPlan = calculateQuestionBudget(fullText, indexedChunks, { 
+    const budgetPlan = calculateQuestionBudget(fullText, indexedChunks, {
         extractionQuality: opts.extractionQuality,
-        questionTypes: ['multiple_choice']
+        questionTypes: ['multiple_choice'],
     });
-    
+
     const targetCount = budgetPlan.targetCount;
     const targetMin = config.TARGET_QUESTIONS_MIN || 20;
     const targetMax = config.TARGET_QUESTIONS_MAX || 30;
+
+    try {
+        const runRow = await runRepo.insertRun({
+            document_id: documentId,
+            status: 'running',
+            model,
+            target_min: targetMin,
+            target_max: targetMax,
+            target_count: targetCount,
+            language: detectedLang,
+            budget_metrics: budgetPlan.metrics,
+        });
+        runId = runRow.id;
+    } catch (e) {
+        console.warn(`[GENERATOR] Could not create generation_run: ${e.message}`);
+    }
+
+    logStructured({
+        level: 'info', traceId, documentId,
+        phase: 'generate', event: 'generation_start',
+        metrics: { model, run_id: runId },
+    });
+
+    console.log(`[GENERATOR] Определён язык документа: ${detectedLang}`);
+    progress({ phase: 'generate', stage: 'language', workDelta: PW.GEN_LANG, detail: `Язык: ${detectedLang}` });
 
     budgetPlan.logs.forEach(l => console.log(`[BUDGET] ${l}`));
     if (budgetPlan.reductionReasons.length > 0) {
@@ -570,53 +455,41 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     const chunksWithFacts = indexedChunks.filter(c => Array.isArray(c.summary) && c.summary.length > 0).length;
 
     logStructured({
-        level: 'info',
-        traceId,
-        documentId,
-        phase: 'generate',
-        event: 'budget_calculated',
+        level: 'info', traceId, documentId,
+        phase: 'generate', event: 'budget_calculated',
         metrics: {
-            budget_target: targetCount,
-            target_min: targetMin,
-            target_max: targetMax,
-            chunk_count: indexedChunks.length,
-            atomic_facts_extracted: atomicFactsExtracted,
+            budget_target: targetCount, target_min: targetMin, target_max: targetMax,
+            chunk_count: indexedChunks.length, atomic_facts_extracted: atomicFactsExtracted,
             chunks_with_facts: chunksWithFacts,
         },
-        metadata: budgetPlan.reductionReasons.length
-            ? { reduction_reasons: budgetPlan.reductionReasons }
-            : undefined,
+        metadata: budgetPlan.reductionReasons.length ? { reduction_reasons: budgetPlan.reductionReasons } : undefined,
     });
 
-    console.log(`[GENERATOR] Цель (config: ${targetMin}–${targetMax}): выбран ${targetCount}, чанков: ${indexedChunks.length}, модель: ${model}, формат: multiple_choice only, Bloom taxonomy`);
+    console.log(`[GENERATOR] Цель (config: ${targetMin}–${targetMax}): выбран ${targetCount}, чанков: ${indexedChunks.length}, модель: ${model}`);
 
-    // Шаг 1: Извлечение тем
     console.log('[GENERATOR] Извлечение тем из summaries чанков...');
     const themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount);
     console.log(`[GENERATOR] Тем: ${themes.length}`, themes.map(t => `[${t.section}] ${t.topic || t}`).join(', '));
     progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Тем извлечено: ${themes.length}` });
 
-    // Шаг 2: Blueprint — план вопросов (только multiple_choice)
     console.log('[GENERATOR] Построение blueprint...');
     const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
     console.log(`[GENERATOR] Blueprint: ${blueprint.length} intent-ов`);
-    progress({
-        phase: 'generate',
-        stage: 'blueprint',
-        workDelta: PW.GEN_BLUEPRINT,
-        detail: `План: ${blueprint.length} intent-ов`,
-    });
+    progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT, detail: `План: ${blueprint.length} intent-ов` });
 
-    // Шаг 3: Retrieval + soft-skip + batch-генерация
+    // Persist intents
+    if (runId) {
+        try { await runRepo.insertIntents(runId, blueprint); } catch (e) {
+            console.warn(`[GENERATOR] Could not persist intents: ${e.message}`);
+        }
+    }
+
     const topK = config.RAG_TOP_K || 5;
     const batchSize = Math.max(3, Math.min(5, config.LLM_BATCH_SIZE || 4));
     const allQuestions = [];
     const enableGrounding = config.ENABLE_GROUNDING !== false;
 
-    // Распределяем уровни Bloom по blueprint
     const blueprintWithDifficulty = assignDifficulties(blueprint);
-
-    // Coverage map
     const coverageMap = rag.buildCoverageMap(indexedChunks);
 
     let statsValidated = 0;
@@ -625,7 +498,6 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     let statsValidationFailed = 0;
     let statsGroundingFailed = 0;
     let statsRetrievalPassed = 0;
-    /** @type {number[]} Scores from scoreEvidenceQuality — all intents including skipped */
     const evidenceScores = [];
 
     const totalBatches = Math.ceil(blueprintWithDifficulty.length / batchSize);
@@ -640,7 +512,6 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         const batchNum = Math.floor(batchStart / batchSize) + 1;
         console.log(`[GENERATOR] Batch ${batchNum}/${totalBatches}: ${batch.length} intents`);
 
-        // Retrieval + soft-skip pre-check для каждого intent
         const filteredBatch = [];
         const evidenceList = [];
         const chunkIdsList = [];
@@ -648,32 +519,23 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         for (const intent of batch) {
             const relevantChunks = await rag.hybridRetrieve(
                 `${intent.theme}: ${intent.intent}`,
-                indexedChunks,
-                topK
+                indexedChunks, topK
             );
             const packets = rag.buildEvidencePackets(relevantChunks, intent.intent);
             const evidenceText = rag.formatEvidenceForPrompt(packets);
             const ids = relevantChunks.map(c => c.id);
 
-            // === Soft-skip: проверяем качество evidence ===
             const quality = scoreEvidenceQuality(evidenceText, intent.intent);
-            // Always collect score for evidence_precision metric
             evidenceScores.push(quality.score);
             if (quality.score < 0.3) {
                 console.log(`[GENERATOR] Soft-skip intent "${intent.intent.slice(0, 60)}…" — ${quality.reason}`);
                 statsSkippedEvidence++;
-                // Extract relevance overlap % from reason string for richer diagnostics
-                const overlapMatch = quality.reason ? quality.reason.match(/(\d+)%/) : null;
-                const overlapPct = overlapMatch ? parseInt(overlapMatch[1], 10) : null;
                 logStructured({
-                    level: 'warn',
-                    traceId,
-                    documentId,
-                    phase: 'generate',
-                    event: 'intent_skipped_weak_evidence',
+                    level: 'warn', traceId, documentId,
+                    phase: 'generate', event: 'intent_skipped_weak_evidence',
                     reasonCode: evidenceReasonToCode(quality.reason),
                     defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
-                    metrics: { evidence_score: quality.score, relevance_overlap_pct: overlapPct },
+                    metrics: { evidence_score: quality.score },
                     metadata: { intent_preview: intent.intent.slice(0, 120), reason: quality.reason },
                 });
                 continue;
@@ -688,49 +550,22 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
 
         if (filteredBatch.length === 0) {
             console.warn(`[GENERATOR] Batch ${batchNum}: все intents пропущены (weak evidence)`);
-            logStructured({
-                level: 'warn',
-                traceId,
-                documentId,
-                phase: 'generate',
-                event: 'batch_all_intents_skipped',
-                reasonCode: REASON_CODES.ERR_WEAK_EVIDENCE,
-                defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
-                metrics: { batch_num: batchNum },
-            });
             continue;
         }
 
-        // Один LLM-вызов на batch
         const { results: batchResults, stats: batchStats } = await generateBatchQuestions(
-            filteredBatch,
-            evidenceList,
-            chunkIdsList,
-            null,
-            model,
-            detectedLang,
+            filteredBatch, evidenceList, chunkIdsList, null, model, detectedLang,
         );
         statsValidated += batchResults.length;
         statsSkippedLLM += batchStats.llmSkipped;
         statsValidationFailed += batchStats.validationFailed;
 
-        // Проверка groundedness
         for (const { question, intentIdx } of batchResults) {
             if (enableGrounding) {
                 const grounded = await checkGrounding(question, evidenceList[intentIdx], model);
                 if (!grounded) {
                     statsGroundingFailed++;
-                    console.warn(`[GENERATOR] Batch ${batchNum}, intent[${intentIdx + 1}]: не прошёл groundedness, пропускаем`);
-                    logStructured({
-                        level: 'warn',
-                        traceId,
-                        documentId,
-                        phase: 'validate',
-                        event: 'question_dropped_grounding',
-                        reasonCode: REASON_CODES.ERR_GROUNDING_FAILED,
-                        defectClass: DEFECT_CLASSES.VALIDATION_FAIL,
-                        metrics: { batch_num: batchNum, intent_index: intentIdx },
-                    });
+                    console.warn(`[GENERATOR] Batch ${batchNum}, intent[${intentIdx + 1}]: не прошёл groundedness`);
                     continue;
                 }
             }
@@ -738,13 +573,10 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         }
 
         progress({
-            phase: 'generate',
-            stage: 'llm_batch',
-            workDelta: PW.GEN_BATCH,
+            phase: 'generate', stage: 'llm_batch', workDelta: PW.GEN_BATCH,
             detail: `Генерация вопросов: пакет ${batchNum}/${totalBatches} (накоплено ${allQuestions.length})`,
         });
 
-        // Пауза между batch-запросами
         if (batchStart + batchSize < blueprintWithDifficulty.length) await sleep(1200);
     }
 
@@ -754,7 +586,6 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     const preDedupCount = allQuestions.length;
     const groundedPreDedup = allQuestions.length;
 
-    // Шаг 4: Семантическая дедупликация
     console.log('[GENERATOR] Семантическая дедупликация...');
     const initialDedup = await semanticDedup(allQuestions, config.DEDUP_THRESHOLD || 0.88);
     console.log(`[GENERATOR] После дедупликации: ${initialDedup.length} (было ${allQuestions.length})`);
@@ -762,27 +593,14 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     const dedupDropped = preDedupCount - initialDedup.length;
     if (dedupDropped > 0) {
         logStructured({
-            level: 'info',
-            traceId,
-            documentId,
-            phase: 'dedup',
-            event: 'dedup_complete',
-            metrics: {
-                pre_dedup: preDedupCount,
-                post_dedup: initialDedup.length,
-                dedup_dropped: dedupDropped,
-                dedup_loss_ratio: preDedupCount > 0 ? dedupDropped / preDedupCount : 0,
-            },
+            level: 'info', traceId, documentId,
+            phase: 'dedup', event: 'dedup_complete',
+            metrics: { pre_dedup: preDedupCount, post_dedup: initialDedup.length, dedup_dropped: dedupDropped },
         });
     }
-    progress({
-        phase: 'generate',
-        stage: 'dedup',
-        workDelta: PW.GEN_DEDUP,
-        detail: `После дедупликации: ${initialDedup.length} вопросов`,
-    });
+    progress({ phase: 'generate', stage: 'dedup', workDelta: PW.GEN_DEDUP, detail: `После дедупликации: ${initialDedup.length} вопросов` });
 
-    // ─── Backfill: добираем вопросы до targetMin ────────────────────────────
+    // ── Backfill ──
     const maxBackfillRounds = config.BACKFILL_MAX_ROUNDS || 3;
     let workingQuestions = [...initialDedup];
     let backfillRoundsUsed = 0;
@@ -792,34 +610,23 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     for (let round = 1; round <= maxBackfillRounds && workingQuestions.length < targetMin; round++) {
         backfillRoundsUsed = round;
         const gap = targetMin - workingQuestions.length;
-
         const uncoveredChunks = indexedChunks.filter(c => !coverageMap.usedChunkIds.has(c.id));
         const poolChunks = uncoveredChunks.length > 0 ? uncoveredChunks : indexedChunks;
 
         console.log(`[GENERATOR] Backfill round ${round}/${maxBackfillRounds}: gap=${gap}, непокрытых чанков: ${uncoveredChunks.length}/${indexedChunks.length}`);
-        progress({
-            phase: 'generate',
-            stage: 'backfill',
-            detail: `Добор вопросов: раунд ${round}/${maxBackfillRounds}, сейчас ${workingQuestions.length}`,
-        });
+        progress({ phase: 'generate', stage: 'backfill', detail: `Добор вопросов: раунд ${round}/${maxBackfillRounds}, сейчас ${workingQuestions.length}` });
 
         const intentsNeeded = Math.min(gap * 2, poolChunks.length * 3, 20);
-        if (intentsNeeded === 0) {
-            console.warn('[GENERATOR] Backfill: нет доступных чанков, прерываем');
-            break;
-        }
+        if (intentsNeeded === 0) { console.warn('[GENERATOR] Backfill: нет доступных чанков'); break; }
 
         const backfillIntents = createBackfillIntents(poolChunks, intentsNeeded, workingQuestions.length);
         const backfillWithDiff = assignDifficulties(backfillIntents);
-
         const newRawQuestions = [];
         const totalBackfillBatches = Math.ceil(backfillWithDiff.length / batchSize);
 
         for (let bs = 0; bs < backfillWithDiff.length; bs += batchSize) {
             const batchIntents = backfillWithDiff.slice(bs, bs + batchSize);
             const bNum = Math.floor(bs / batchSize) + 1;
-            console.log(`[GENERATOR] Backfill round ${round}, batch ${bNum}/${totalBackfillBatches}: ${batchIntents.length} intents`);
-
             const bfEvidenceList = [];
             const bfChunkIdsList = [];
             const bfFilteredBatch = [];
@@ -828,14 +635,8 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
                 const chunkRef = intent._chunkRef;
                 const packets = rag.buildEvidencePackets([chunkRef], intent.intent);
                 const evidenceText = rag.formatEvidenceForPrompt(packets);
-
-                // Soft-skip для backfill
                 const quality = scoreEvidenceQuality(evidenceText, intent.intent);
-                if (quality.score < 0.3) {
-                    statsSkippedEvidence++;
-                    continue;
-                }
-
+                if (quality.score < 0.3) { statsSkippedEvidence++; continue; }
                 bfFilteredBatch.push(intent);
                 bfEvidenceList.push(evidenceText);
                 bfChunkIdsList.push([chunkRef.id]);
@@ -845,12 +646,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             if (bfFilteredBatch.length === 0) continue;
 
             const { results: batchResults, stats: bfStats } = await generateBatchQuestions(
-                bfFilteredBatch,
-                bfEvidenceList,
-                bfChunkIdsList,
-                null,
-                model,
-                detectedLang,
+                bfFilteredBatch, bfEvidenceList, bfChunkIdsList, null, model, detectedLang,
             );
             statsSkippedLLM += bfStats.llmSkipped;
             statsValidationFailed += bfStats.validationFailed;
@@ -858,29 +654,20 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             for (const { question, intentIdx } of batchResults) {
                 if (enableGrounding) {
                     const grounded = await checkGrounding(question, bfEvidenceList[intentIdx], model);
-                    if (!grounded) {
-                        statsGroundingFailed++;
-                        continue;
-                    }
+                    if (!grounded) { statsGroundingFailed++; continue; }
                 }
                 newRawQuestions.push(question);
                 backfillGroundedAccepted++;
             }
 
             progress({
-                phase: 'generate',
-                stage: 'backfill_batch',
-                workDelta: PW.GEN_BATCH,
+                phase: 'generate', stage: 'backfill_batch', workDelta: PW.GEN_BATCH,
                 detail: `Добор: раунд ${round}, пакет ${bNum}/${totalBackfillBatches}`,
             });
-
             if (bs + batchSize < backfillWithDiff.length) await sleep(1200);
         }
 
-        if (newRawQuestions.length === 0) {
-            console.warn(`[GENERATOR] Backfill round ${round}: нет новых вопросов, прерываем`);
-            break;
-        }
+        if (newRawQuestions.length === 0) { console.warn(`[GENERATOR] Backfill round ${round}: нет новых вопросов`); break; }
 
         const dedupedNew = newRawQuestions.length > 1
             ? await semanticDedup(newRawQuestions, config.DEDUP_THRESHOLD || 0.88)
@@ -892,49 +679,28 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             )
         );
 
-        console.log(`[GENERATOR] Backfill round ${round}: получено=${newRawQuestions.length}, dedup=${dedupedNew.length}, уникальных новых=${filtered.length}, итого=${workingQuestions.length + filtered.length}`);
+        console.log(`[GENERATOR] Backfill round ${round}: получено=${newRawQuestions.length}, dedup=${dedupedNew.length}, уникальных=${filtered.length}`);
         backfillQuestionsAdded += filtered.length;
         logStructured({
-            level: 'info',
-            traceId,
-            documentId,
-            phase: 'backfill',
-            event: 'backfill_round_complete',
-            metrics: {
-                round,
-                new_questions: filtered.length,
-                total_now: workingQuestions.length + filtered.length,
-            },
+            level: 'info', traceId, documentId,
+            phase: 'backfill', event: 'backfill_round_complete',
+            metrics: { round, new_questions: filtered.length, total_now: workingQuestions.length + filtered.length },
         });
         workingQuestions = [...workingQuestions, ...filtered];
     }
 
-    // Шаг 5: Финализация
     progress({ phase: 'generate', stage: 'finalize', workDelta: PW.GEN_FINALIZE, detail: 'Финализация списка вопросов…' });
-    const finalQuestions = workingQuestions
-        .slice(0, targetMax)
-        .map((q, i) => ({ ...q, id: i + 1 }));
-
-    progress({
-        phase: 'generate',
-        stage: 'ready',
-        workDelta: PW.GEN_READY,
-        detail: `Готово к сохранению: ${finalQuestions.length} вопросов`,
-    });
+    const finalQuestions = workingQuestions.slice(0, targetMax).map((q, i) => ({ ...q, id: i + 1 }));
+    progress({ phase: 'generate', stage: 'ready', workDelta: PW.GEN_READY, detail: `Готово к сохранению: ${finalQuestions.length} вопросов` });
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const durationMs = Date.now() - startTime;
     console.log(
-        `[GENERATOR] Итог → запрошено: ${targetMin}–${targetMax} | ` +
-        `blueprint: ${blueprintWithDifficulty.length} | ` +
-        `skipped(evidence): ${statsSkippedEvidence} | ` +
-        `validated: ${statsValidated} | grounded: ${allQuestions.length} | ` +
-        `после dedup: ${initialDedup.length} | ` +
-        `финальных: ${finalQuestions.length} | время: ${elapsed}s | ` +
-        `язык: ${detectedLang} | формат: multiple_choice | Bloom taxonomy`
+        `[GENERATOR] Итог → запрошено: ${targetMin}–${targetMax} | blueprint: ${blueprintWithDifficulty.length} | ` +
+        `skipped(evidence): ${statsSkippedEvidence} | validated: ${statsValidated} | grounded: ${allQuestions.length} | ` +
+        `после dedup: ${initialDedup.length} | финальных: ${finalQuestions.length} | время: ${elapsed}s`
     );
 
-    // ── Fallback auto-decisions based on computed metrics ───────────────────
     const fallbackDecision = applyFallbackDecisions({
         retrievalPassed: statsRetrievalPassed,
         retrievalSkipped: statsSkippedEvidence,
@@ -945,76 +711,51 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     }, { traceId, documentId });
 
     const generationMetrics = buildGenerationMetrics({
-        traceId,
-        sessionId: opts.sessionId,
-        documentId,
-        model,
-        durationMs,
-        targetCount,
-        targetMin,
-        targetMax,
+        traceId, sessionId: opts.sessionId, documentId, model, durationMs,
+        targetCount, targetMin, targetMax,
         blueprintIntents: blueprintWithDifficulty.length,
         parseQualityScore: opts.extractionQuality,
-        chunkCount: indexedChunks.length,
-        chunksWithFacts,
-        atomicFactsExtracted,
-        retrievalPassed: statsRetrievalPassed,
-        retrievalSkipped: statsSkippedEvidence,
-        groundingAccepted: groundedPreDedup + backfillGroundedAccepted,
-        groundingFailed: statsGroundingFailed,
-        batchValidated: statsValidated,
-        llmSkipped: statsSkippedLLM,
-        validationFailed: statsValidationFailed,
-        preDedupCount,
-        postDedupCount: initialDedup.length,
-        finalCount: finalQuestions.length,
-        backfillRounds: backfillRoundsUsed,
-        backfillQuestionsAdded,
-        evidenceScores,
+        chunkCount: indexedChunks.length, chunksWithFacts, atomicFactsExtracted,
+        retrievalPassed: statsRetrievalPassed, retrievalSkipped: statsSkippedEvidence,
+        groundingAccepted: groundedPreDedup + backfillGroundedAccepted, groundingFailed: statsGroundingFailed,
+        batchValidated: statsValidated, llmSkipped: statsSkippedLLM, validationFailed: statsValidationFailed,
+        preDedupCount, postDedupCount: initialDedup.length, finalCount: finalQuestions.length,
+        backfillRounds: backfillRoundsUsed, backfillQuestionsAdded, evidenceScores,
     });
+
+    // Persist questions and update run
+    if (runId) {
+        try {
+            for (let i = 0; i < finalQuestions.length; i++) {
+                const q = finalQuestions[i];
+                const qRow = await runRepo.insertQuestion(runId, i, q);
+                if (q.sources && q.sources.length > 0) {
+                    await runRepo.insertQuestionSources(qRow.id, q.sources);
+                }
+            }
+            await runRepo.updateRunFinished(runId, {
+                status: 'completed',
+                final_metrics: generationMetrics,
+                fallback_decisions: fallbackDecision ? { decision: fallbackDecision } : null,
+                duration_ms: durationMs,
+            });
+        } catch (e) {
+            console.warn(`[GENERATOR] Could not persist run results: ${e.message}`);
+        }
+    }
 
     logStructured({
         level: generationMetrics.low_confidence ? 'warn' : 'info',
-        traceId,
-        sessionId: opts.sessionId,
-        documentId,
-        testId: null,  // populated by caller after DB insert
+        traceId, sessionId: opts.sessionId, documentId, testId: null,
         phase: 'finalize',
         event: generationMetrics.low_confidence ? 'generation_low_confidence' : 'generation_complete',
         defectClass: generationMetrics.low_confidence ? DEFECT_CLASSES.VALIDATION_FAIL : null,
         fallbackTriggered: fallbackDecision || null,
         metrics: {
-            duration_ms:             durationMs,
-            parse_quality_score:     generationMetrics.parse_quality_score,
-            chunk_count:             generationMetrics.chunk_count,
-            chunks_with_facts:       generationMetrics.chunks_with_facts,
-            chunk_usefulness_score:  generationMetrics.chunk_usefulness_score,
-            atomic_facts_extracted:  generationMetrics.atomic_facts_extracted,
-            fact_density:            generationMetrics.fact_density,
-            intents_retrieval_passed:  generationMetrics.intents_retrieval_passed,
-            intents_retrieval_skipped: generationMetrics.intents_retrieval_skipped,
-            retrieval_hit_rate:      generationMetrics.retrieval_hit_rate,
-            evidence_precision:      generationMetrics.evidence_precision,
-            evidence_scores_p25:     generationMetrics.evidence_scores_p25,
-            evidence_scores_p75:     generationMetrics.evidence_scores_p75,
-            batch_questions_generated: generationMetrics.batch_questions_generated,
-            llm_skipped_intents:     generationMetrics.llm_skipped_intents,
-            validation_failed:       generationMetrics.validation_failed,
-            grounding_accepted:      generationMetrics.grounding_accepted,
-            grounding_failed:        generationMetrics.grounding_failed,
-            grounded_question_rate:  generationMetrics.grounded_question_rate,
-            pre_dedup_count:         generationMetrics.pre_dedup_count,
-            post_dedup_count:        generationMetrics.post_dedup_count,
-            dedup_loss_ratio:        generationMetrics.dedup_loss_ratio,
-            final_question_count:    generationMetrics.final_question_count,
-            target_min:              targetMin,
-            target_max:              targetMax,
-            accepted_question_rate:  generationMetrics.accepted_question_rate,
-            final_quality_score:     generationMetrics.final_quality_score,
-            backfill_rounds_used:    generationMetrics.backfill_rounds_used,
-            backfill_questions_added: generationMetrics.backfill_questions_added,
-            low_confidence:          generationMetrics.low_confidence,
-            model,
+            duration_ms: durationMs,
+            final_question_count: generationMetrics.final_question_count,
+            final_quality_score: generationMetrics.final_quality_score,
+            run_id: runId,
         },
     });
 
@@ -1023,6 +764,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         title: `Тест по документу: ${cleanName}`,
         questions: finalQuestions,
         generationMetrics,
+        runId,
     };
 }
 

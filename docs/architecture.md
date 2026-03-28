@@ -121,58 +121,39 @@ sequenceDiagram
 
 Все параметры можно переопределить через `.env`.
 
-## Выбор БД под ваши задачи
+## База данных: PostgreSQL
 
-В проекте используются:
-- **Реляционные данные**: документы, тесты, результаты, чанки (связи по ID, каскадное удаление).
-- **Векторы (эмбеддинги)**: хранятся как JSON в `chunk_embeddings`; поиск по косинусному сходству выполняется **в памяти** только по чанкам **одного документа** (в `rag.js` загружаются чанки по `document_id`, затем цикл по ним в Node.js).
+Проект использует **PostgreSQL** как основную СУБД. Подключение через connection pool (`pg`, `backend/db/pgPool.js`). Схема управляется через SQL-миграции (`backend/db/migrations/*.sql`) с автоматическим применением при старте сервера.
 
-### Сравнение вариантов
+Векторы (эмбеддинги) хранятся как JSONB в `chunk_embeddings`; поиск по косинусному сходству выполняется **в памяти** только по чанкам **одного документа** (RAG scope = один документ). При необходимости можно подключить `pgvector` для in-DB поиска.
 
-| Критерий | SQLite (текущий) | PostgreSQL | PostgreSQL + pgvector |
-|----------|-------------------|-----------|------------------------|
-| Администрирование | Нет сервера, один файл | Отдельный сервер/контейнер | То же + расширение pgvector |
-| Масштаб записи | Один процесс пишет, остальные читают | Много одновременных соединений | То же |
-| Векторный поиск | В приложении (загрузка чанков документа) | — | В БД: `ORDER BY embedding <=> query LIMIT K` |
-| Подходит для | Один инстанс приложения, до сотен документов | Несколько инстансов, тысячи документов | То же + поиск по векторам внутри БД |
+### Файловое хранилище: MinIO / local
 
-### Рекомендация для вашего случая
-
-**Сейчас оптимально оставить SQLite**, потому что:
-
-1. **Один инстанс** — нет необходимости в нескольких процессах, пишущих в БД одновременно.
-2. **RAG работает по одному документу** — для каждого теста поднимаются только чанки этого документа (десятки–сотни строк). Держать их в памяти и считать cosine в Node.js нормально по производительности.
-3. **Минимум инфраструктуры** — не нужен отдельный сервер БД, проще деплой и разработка (в т.ч. Docker с одним файлом в volume).
-4. **Низкий бюджет** — SQLite не требует отдельного хоста и лицензий.
-
-**Имеет смысл смотреть в сторону PostgreSQL (и при необходимости pgvector), если:**
-
-- Появится **несколько инстансов приложения** (балансировка, очереди) — SQLite плохо подходит для конкурентной записи с разных процессов.
-- Документов станет **очень много** (десятки тысяч), а поиск по эмбеддингам захотите делать **по всей базе** (не только внутри одного документа) — тогда векторный индекс в БД (pgvector) уменьшит нагрузку на приложение и ускорит запросы.
-- Понадобятся **сложные отчёты, аналитика, бэкапы на уровне СУБД** — в Postgres это привычнее.
-
-**Отдельная векторная БД** (Qdrant, Weaviate, Pinecone) имеет смысл только при очень большом объёме векторов и поиске по всей коллекции; для сценария «один документ → свои чанки» текущий подход с SQLite достаточен.
-
-**Итог:** для этапа разработки и текущего масштаба **SQLite — лучший выбор**: проще, дешевле, без лишней инфраструктуры. Миграцию на PostgreSQL (и при необходимости pgvector) логично планировать при появлении мультитенантности, нескольких инстансов или поиска по всем документам сразу.
+PDF-файлы хранятся в object storage (MinIO) или на локальном диске (fallback). Конфигурируется через `STORAGE_BACKEND` (`minio` / `local`). В БД сохраняются только метаданные: `storage_bucket`, `storage_key`, `checksum_sha256`, `size_bytes`. Повторная загрузка файла с тем же checksum переиспользует существующий объект.
 
 ---
 
 ## Модель данных (Схема БД)
 
-Используется SQLite (`data.db`).
+Используется PostgreSQL. Миграции: `backend/db/migrations/`.
 
-*   **`documents`**:
-    *   `id`, `filename`, `original_name`, `page_count`, `text_length`, `created_at`
-*   **`tests`**:
-    *   `id`, `document_id` (FK), `title`, `questions_json` (массив вопросов с полем `sources`), `total_questions`, `created_at`
-*   **`results`**:
-    *   `id`, `test_id` (FK), `user_name`, `answers_json` (подробный разбор), `score`, `max_score`, `percentage`, `completed_at`
-*   **`document_chunks`** (RAG индекс):
-    *   `id`, `document_id` (FK), `chunk_index`, `text`, `token_count`, `content_hash` (SHA-256, кэш), `created_at`
-*   **`chunk_embeddings`** (RAG индекс):
-    *   `id`, `chunk_id` (FK), `embedding_model`, `embedding` (JSON float[]), `dims`, `created_at`
-*   **`chunk_summaries`** (контекстная компрессия):
-    *   `id`, `chunk_id` (FK), `summary_text` (JSON string[], 5–10 фактов), `created_at`
+### Core таблицы
+*   **`documents`**: метаданные документа + привязка к object storage (`storage_bucket`, `storage_key`, `checksum_sha256`, `size_bytes`, `mime_type`, `status`). JSONB: `parse_diagnostics`.
+*   **`chunks`** (бывш. `document_chunks`): `document_id` FK, `chunk_index`, `text`, `token_count`, `content_hash` (SHA-256, кэш), `page`, `section`, `heading`.
+*   **`chunk_embeddings`**: `chunk_id` FK, `embedding_model`, `embedding` (JSONB float[]), `dims`. UNIQUE(`chunk_id`, `embedding_model`).
+*   **`chunk_summaries`**: `chunk_id` FK, `summary_text` (JSONB string[], 5–10 фактов). UNIQUE(`chunk_id`).
+*   **`tests`**: `document_id` FK, `title`, `questions_json` (JSONB), `total_questions`, `generation_metrics` (JSONB), `generation_run_id` FK.
+*   **`results`**: `test_id` FK, `user_name`, `answers_json` (JSONB), `score`, `max_score`, `percentage`.
+*   **`app_settings`**: key-value настройки (API ключ и т.д.).
+*   **`gemini_usage`**: дневной учёт запросов к LLM.
+
+### Pipeline таблицы (observability)
+*   **`generation_runs`**: каждый запуск генерации. `document_id`, `status`, `model`, `target_min/max/count`, `budget_metrics` (JSONB), `final_metrics` (JSONB), `duration_ms`.
+*   **`intents`**: план вопросов. `run_id`, `theme`, `section`, `intent_text`, `difficulty`, `status`, `skip_reason`, `evidence_score`.
+*   **`questions`**: нормализованные вопросы. `run_id`, `question`, `options` (JSONB), `correct_index`, `difficulty`, `explanation`, `hint`, `grounded`.
+*   **`question_sources`**: связь вопрос↔чанк. `question_id`, `chunk_id`, `quote`.
+*   **`pipeline_run_events`**: лог событий pipeline. `run_id`, `phase`, `event`, `level`, `reason_code`, `metrics` (JSONB), `metadata` (JSONB).
+*   **`document_sections`**: секции документа (опционально).
 
 ## Архитектурные риски и текущие проблемы (решаются в рамках рефакторинга)
 

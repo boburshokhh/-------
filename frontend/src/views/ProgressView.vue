@@ -87,6 +87,8 @@ async function pollProgress() {
       stopPolling()
       if (store.state.upload.testId) {
         router.replace({ path: '/test', query: { testId: String(store.state.upload.testId) } })
+      } else {
+        store.actions.failUpload('Прогресс задачи не найден. Откройте страницу загрузки и запустите генерацию снова.')
       }
     } else {
       store.actions.failUpload(error?.message || 'Не удалось обновить прогресс')

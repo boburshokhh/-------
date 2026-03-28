@@ -16,26 +16,26 @@ function authorize(req, res) {
     return true;
 }
 
-router.get('/runtime', (req, res) => {
+router.get('/runtime', async (req, res, next) => {
     if (!authorize(req, res)) return;
-    res.json({
-        success: true,
-        settings: runtimeConfig.getPublicRuntimeSettings(),
-    });
+    try {
+        const settings = await runtimeConfig.getPublicRuntimeSettings();
+        res.json({ success: true, settings });
+    } catch (e) {
+        next(e);
+    }
 });
 
-router.post('/gemini-key', (req, res, next) => {
+router.post('/gemini-key', async (req, res, next) => {
     if (!authorize(req, res)) return;
     try {
         const key = req.body?.geminiApiKey;
         if (!key || !String(key).trim()) {
             return res.status(400).json({ error: 'geminiApiKey обязателен' });
         }
-        runtimeConfig.setGeminiApiKey(key);
-        res.json({
-            success: true,
-            settings: runtimeConfig.getPublicRuntimeSettings(),
-        });
+        await runtimeConfig.setGeminiApiKey(key);
+        const settings = await runtimeConfig.getPublicRuntimeSettings();
+        res.json({ success: true, settings });
     } catch (error) {
         next(error);
     }
