@@ -29,7 +29,25 @@ function mapHttpError(status, payload) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, options);
+  const { timeoutMs = 0, ...fetchOpts } = options;
+  const ctrl = new AbortController();
+  let timer;
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  }
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...fetchOpts, signal: ctrl.signal });
+  } catch (e) {
+    if (e?.name === 'AbortError') {
+      const err = new Error('Таймаут запроса к серверу');
+      err.code = 'FETCH_TIMEOUT';
+      throw err;
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   const payload = await parseJson(response);
   if (!response.ok) {
     throw createError(mapHttpError(response.status, payload), response.status, payload);
@@ -63,7 +81,7 @@ export const API = {
   },
 
   getJobProgress(jobId) {
-    return request(`/jobs/${encodeURIComponent(jobId)}`);
+    return request(`/jobs/${encodeURIComponent(jobId)}`, { timeoutMs: 20000 });
   },
 
   async getModels() {

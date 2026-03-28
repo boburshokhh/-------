@@ -123,8 +123,27 @@ async function sleepForGeminiRetry(parsed, attempt, maxAttempts, sleepFn) {
     await sleep(1000 * Math.pow(2, attempt - 1));
 }
 
+/**
+ * Обрывает ожидание по таймауту (запрос к API может ещё висеть в фоне).
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {string} label
+ * @returns {Promise<T>}
+ */
+function withTimeout(promise, ms, label = 'Gemini') {
+    if (!ms || ms <= 0) return promise;
+    let timer;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            reject(new Error(`${label}: превышен таймаут ${ms} мс`));
+        }, ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
+
 module.exports = {
     parseGeminiApiError,
     sleepForGeminiRetry,
+    withTimeout,
     MAX_RETRY_WAIT_MS,
 };

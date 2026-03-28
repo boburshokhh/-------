@@ -145,6 +145,77 @@ function assignDifficulties(blueprint, bloomMix = { remember: 0.20, understand: 
     return blueprint.map((intent, i) => ({ ...intent, difficulty: pool[i] || 'understand' }));
 }
 
+function pickChunkSnippet(c) {
+    if (c && Array.isArray(c.summary) && c.summary.length > 0) {
+        const s = String(c.summary[0]).trim();
+        if (s.length >= 12) return s.slice(0, 200);
+    }
+    if (!c || typeof c.text !== 'string') return '';
+    const t = c.text.replace(/\s+/g, ' ').trim();
+    const m = t.match(/[^.!?]{15,150}[.!?]/);
+    if (m) return m[0].trim();
+    return `${t.slice(0, 140)}…`;
+}
+
+/**
+ * Валидные multiple_choice без вызова LLM (дневная квота generateContent исчерпана).
+ * Правильный вариант — из выжимки или предложения чанка; остальные — из других чанков.
+ */
+function buildOfflineMcqFromChunks(fullText, indexedChunks, targetMin, targetMax) {
+    let pool = (indexedChunks || []).filter((c) => c && typeof c.text === 'string' && c.text.trim().length >= 50);
+    if (pool.length === 0 && fullText && String(fullText).trim().length > 80) {
+        pool = [{
+            id: indexedChunks[0]?.id ?? 0,
+            text: fullText,
+            summary: [],
+            chunk_index: 0,
+        }];
+    }
+    if (pool.length === 0) {
+        throw new Error('Нет текста для автоматических вопросов');
+    }
+    const want = Math.min(
+        targetMax,
+        Math.max(3, targetMin),
+        Math.max(15, pool.length),
+    );
+    const raw = [];
+    for (let i = 0; i < want; i++) {
+        const c = pool[i % pool.length];
+        const correct = pickChunkSnippet(c);
+        const options = [correct];
+        let off = 1;
+        while (options.length < 4 && off < pool.length + 5) {
+            const o = pool[(i + off) % pool.length];
+            const w = pickChunkSnippet(o);
+            if (w && w !== correct && !options.includes(w)) options.push(w);
+            off++;
+        }
+        while (options.length < 4) {
+            options.push(`Вариант ${options.length + 1} (не относится к этому фрагменту).`);
+        }
+        const shuffled = options.slice(0, 4);
+        for (let j = shuffled.length - 1; j > 0; j--) {
+            const r = Math.floor(Math.random() * (j + 1));
+            [shuffled[j], shuffled[r]] = [shuffled[r], shuffled[j]];
+        }
+        const correctIndex = shuffled.indexOf(correct);
+        const ctx = String(c.text).replace(/\s+/g, ' ').trim().slice(0, 320);
+        raw.push({
+            type: 'multiple_choice',
+            question:
+                `По фрагменту: «${ctx}${ctx.length >= 320 ? '…' : ''}» — какое утверждение лучше всего соответствует этому фрагменту?`,
+            explanation:
+                'Собрано без LLM: дневная квота generateContent исчерпана. Варианты из выжимок и предложений чанков.',
+            difficulty: 'remember',
+            options: shuffled,
+            correctIndex,
+            sources: [{ chunk_id: c.id, quote: correct.slice(0, 280) }],
+        });
+    }
+    return validateQuestions(raw);
+}
+
 function buildBatchPrompt(intents, evidenceList, maxEvidenceChars = 2500) {
     const lines = [`Создай ${intents.length} вопрос(а/ов) формата multiple_choice — по одному на каждый intent.\n`];
     for (let i = 0; i < intents.length; i++) {
@@ -473,6 +544,132 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     });
 
     console.log(`[GENERATOR] Цель (config: ${targetMin}–${targetMax}): выбран ${targetCount}, чанков: ${indexedChunks.length}, модель: ${model}`);
+
+    const llmRpdExhausted = await quotaGuard.isRpdExhaustedForModel(model);
+    if (llmRpdExhausted) {
+        console.warn('[GENERATOR] Дневной лимит generateContent исчерпан — тест из чанков/выжимок без новых вызовов LLM');
+        progress({
+            phase: 'generate',
+            stage: 'quota_offline',
+            detail: 'Квота LLM на сутки исчерпана — вопросы из текста и сохранённых выжимок',
+        });
+
+        const themes = [{
+            topic: 'Содержание документа',
+            section: 'Документ',
+            importance: 2,
+            suggestedCount: Math.min(5, Math.max(3, Math.ceil(Math.max(1, targetCount) / 2))),
+            difficultyCandidates: ['remember', 'understand'],
+        }];
+        progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Тем: ${themes.length} (режим без LLM)` });
+
+        const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
+        progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT, detail: `План: ${blueprint.length} intent-ов (без LLM)` });
+
+        if (runId) {
+            try {
+                await runRepo.insertIntents(runId, blueprint);
+            } catch (e) {
+                console.warn(`[GENERATOR] Could not persist intents: ${e.message}`);
+            }
+        }
+
+        let validatedOffline = [];
+        try {
+            validatedOffline = buildOfflineMcqFromChunks(fullText, indexedChunks, targetMin, targetMax);
+        } catch (e) {
+            console.error(`[GENERATOR] Офлайн-сборка вопросов: ${e.message}`);
+        }
+
+        const finalQuestions = validatedOffline.slice(0, targetMax).map((q, i) => ({ ...q, id: i + 1 }));
+        const durationMs = Date.now() - startTime;
+        progress({ phase: 'generate', stage: 'ready', workDelta: PW.GEN_READY, detail: `Готово: ${finalQuestions.length} вопросов (без LLM)` });
+
+        const generationMetrics = buildGenerationMetrics({
+            traceId,
+            sessionId: opts.sessionId,
+            documentId,
+            model,
+            durationMs,
+            targetCount,
+            targetMin,
+            targetMax,
+            blueprintIntents: blueprint.length,
+            parseQualityScore: opts.extractionQuality,
+            chunkCount: indexedChunks.length,
+            chunksWithFacts,
+            atomicFactsExtracted,
+            retrievalPassed: 0,
+            retrievalSkipped: 0,
+            groundingAccepted: finalQuestions.length,
+            groundingFailed: 0,
+            batchValidated: 0,
+            llmSkipped: blueprint.length,
+            validationFailed: 0,
+            preDedupCount: finalQuestions.length,
+            postDedupCount: finalQuestions.length,
+            finalCount: finalQuestions.length,
+            backfillRounds: 0,
+            backfillQuestionsAdded: 0,
+            evidenceScores: [],
+            quotaOffline: true,
+        });
+
+        const fallbackDecision = applyFallbackDecisions({
+            retrievalPassed: 0,
+            retrievalSkipped: 0,
+            finalCount: finalQuestions.length,
+            blueprintIntents: blueprint.length,
+            preDedupCount: finalQuestions.length,
+            postDedupCount: finalQuestions.length,
+        }, { traceId, documentId });
+
+        if (runId) {
+            try {
+                for (let i = 0; i < finalQuestions.length; i++) {
+                    const q = finalQuestions[i];
+                    const qRow = await runRepo.insertQuestion(runId, i, q);
+                    if (q.sources && q.sources.length > 0) {
+                        await runRepo.insertQuestionSources(qRow.id, q.sources);
+                    }
+                }
+                await runRepo.updateRunFinished(runId, {
+                    status: 'completed',
+                    final_metrics: generationMetrics,
+                    fallback_decisions: {
+                        decision: fallbackDecision,
+                        quota_offline: true,
+                    },
+                    duration_ms: durationMs,
+                });
+            } catch (e) {
+                console.warn(`[GENERATOR] Could not persist run results: ${e.message}`);
+            }
+        }
+
+        logStructured({
+            level: 'warn',
+            traceId,
+            sessionId: opts.sessionId,
+            documentId,
+            testId: null,
+            phase: 'finalize',
+            event: 'generation_quota_offline',
+            metrics: {
+                duration_ms: durationMs,
+                final_question_count: finalQuestions.length,
+                run_id: runId,
+            },
+        });
+
+        const cleanName = docName.replace(/\.(pdf|docx?)$/i, '');
+        return {
+            title: `Тест по документу: ${cleanName} (без LLM — квота)`,
+            questions: finalQuestions,
+            generationMetrics,
+            runId,
+        };
+    }
 
     console.log('[GENERATOR] Извлечение тем из summaries чанков...');
     const themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount);

@@ -156,6 +156,7 @@ const store = useAppStore()
 const healthLoading = ref(false)
 const logsLoading = ref(false)
 let pollTimer = null
+let pollActive = false
 
 const isBusy = computed(() => ['uploading', 'processing'].includes(store.state.upload.status))
 const showProgressInline = computed(() => ['uploading', 'processing', 'done'].includes(store.state.upload.status))
@@ -235,15 +236,27 @@ onUnmounted(() => {
 
 function startPolling() {
   stopPolling()
-  pollProgress()
-  pollTimer = setInterval(pollProgress, 1800)
+  pollActive = true
+  void pollLoop()
 }
 
 function stopPolling() {
+  pollActive = false
   if (pollTimer) {
-    clearInterval(pollTimer)
+    clearTimeout(pollTimer)
     pollTimer = null
   }
+}
+
+/** Один запрос прогресса за раз; следующий — только после ответа (не копим сотни висящих GET). */
+async function pollLoop() {
+  if (!pollActive) return
+  await pollProgress()
+  if (!pollActive) return
+  pollTimer = setTimeout(() => {
+    pollTimer = null
+    void pollLoop()
+  }, 1800)
 }
 
 async function pollProgress() {
@@ -256,6 +269,9 @@ async function pollProgress() {
       stopPolling()
     }
   } catch (error) {
+    if (error?.code === 'FETCH_TIMEOUT') {
+      return
+    }
     if (error?.status === 404) {
       // Пока ждём первый ответ по задаче, 404 возможен из‑за гонки сети; после успешного poll статус станет processing.
       if (store.state.upload.status === 'uploading') {

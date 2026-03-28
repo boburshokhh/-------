@@ -6,7 +6,7 @@ const { chunkText } = require('./chunker');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
-const { parseGeminiApiError, sleepForGeminiRetry } = require('./geminiError');
+const { parseGeminiApiError, sleepForGeminiRetry, withTimeout } = require('./geminiError');
 const jobProgressSvc = require('./jobProgress');
 const { WEIGHT } = jobProgressSvc;
 
@@ -58,7 +58,7 @@ async function fetchEmbeddingWithRetry(text, retries = 3) {
 
 async function fetchChunkSummary(chunkTextStr, retries = 3) {
     try {
-        await quotaGuard.assertWithinFreeTierQuota(config.LLM_MODEL);
+        await quotaGuard.waitUntilQuotaAllows(config.LLM_MODEL);
     } catch (e) {
         if (e.type === 'QUOTA_EXCEEDED') {
             console.warn(`[INDEXER] Summary пропущен (лимит free tier): ${e.message}`);
@@ -67,11 +67,12 @@ async function fetchChunkSummary(chunkTextStr, retries = 3) {
         throw e;
     }
 
+    const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             const ai = await getAiClient();
-            const response = await ai.models.generateContent({
+            const genPromise = ai.models.generateContent({
                 model: config.LLM_MODEL,
                 contents: `Прочитай следующий фрагмент учебного материала и выдели из него 5–10 конкретных фактов, определений, правил или ключевых утверждений. Оформи каждый факт как отдельный пункт списка (одна строка). Не пересказывай, а вычленяй именно проверяемые знания.\n\nФрагмент:\n${chunkTextStr}\n\nВерни только JSON объект вида {"facts": ["факт 1","факт 2",...]}. Никакого другого текста.`,
                 config: {
@@ -79,6 +80,7 @@ async function fetchChunkSummary(chunkTextStr, retries = 3) {
                     responseMimeType: 'application/json',
                 },
             });
+            const response = await withTimeout(genPromise, reqTimeout, '[INDEXER] Summary generateContent');
             await quotaGuard.recordGeminiCall(config.LLM_MODEL);
             const raw = response.text;
             if (!raw) throw new Error('Пустой ответ при генерации summary');
@@ -242,7 +244,8 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
             workDelta: WEIGHT.INDEX_SUMMARY,
             detail: `Краткие выжимки: ${i + 1}/${insertedChunks.length}`,
         });
-        if (i < insertedChunks.length - 1) await sleep(800);
+        /* Пауза между чанками: основной pacing — waitUntilQuotaAllows в fetchChunkSummary */
+        if (i < insertedChunks.length - 1) await sleep(200);
     }
 
     onProgress?.({

@@ -274,6 +274,7 @@ function buildGenerationMetrics(raw) {
         low_confidence:          lowConfidence,
 
         schema_version: 2,
+        ...(raw.quotaOffline ? { quota_offline: true } : {}),
     };
 }
 

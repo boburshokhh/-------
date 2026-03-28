@@ -59,13 +59,25 @@ const store = useAppStore()
 
 const modelLabel = computed(() => store.state.selectedModel || store.state.defaultModel || 'LLM')
 
-let timerId = null
+let pollTimer = null
+let pollActive = false
 
 function stopPolling() {
-  if (timerId) {
-    clearInterval(timerId)
-    timerId = null
+  pollActive = false
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
   }
+}
+
+async function pollLoop() {
+  if (!pollActive) return
+  await pollProgress()
+  if (!pollActive) return
+  pollTimer = setTimeout(() => {
+    pollTimer = null
+    void pollLoop()
+  }, 1800)
 }
 
 async function pollProgress() {
@@ -83,6 +95,9 @@ async function pollProgress() {
       store.actions.failUpload(progress.detail || 'Ошибка генерации')
     }
   } catch (error) {
+    if (error?.code === 'FETCH_TIMEOUT') {
+      return
+    }
     if (error?.status === 404) {
       stopPolling()
       if (store.state.upload.testId) {
@@ -102,8 +117,8 @@ onMounted(async () => {
     router.replace('/zagruzka')
     return
   }
-  await pollProgress()
-  timerId = setInterval(pollProgress, 1800)
+  pollActive = true
+  void pollLoop()
 })
 
 onUnmounted(() => {

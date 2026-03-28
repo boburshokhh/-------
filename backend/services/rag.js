@@ -3,7 +3,7 @@ const config = require('../config');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
-const { parseGeminiApiError, sleepForGeminiRetry } = require('./geminiError');
+const { parseGeminiApiError, sleepForGeminiRetry, withTimeout } = require('./geminiError');
 
 async function getAiClient() {
     return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
@@ -184,16 +184,29 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
     const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
     const OLD_TO_BLOOM = { easy: 'remember', medium: 'understand', hard: 'analyze' };
 
+    if (await quotaGuard.isRpdExhaustedForModel(llmModel)) {
+        console.warn('[RAG] extractThemes: дневной лимит LLM исчерпан — одна тема без вызова API');
+        return [{
+            topic: 'Основные концепции документа',
+            section: 'Документ',
+            importance: 2,
+            suggestedCount: 3,
+            difficultyCandidates: ['understand'],
+        }];
+    }
+
+    const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             await quotaGuard.assertWithinFreeTierQuota(llmModel);
             const ai = await getAiClient();
-            const response = await ai.models.generateContent({
+            const genPromise = ai.models.generateContent({
                 model: llmModel,
                 contents: `Ты анализируешь учебный материал. На основе фактов из ВСЕХ чанков документа выдели ровно ${targetThemes} ключевых тем, охватывающих документ РАВНОМЕРНО — не только самые заметные части.\n\nДля каждой темы укажи:\n- topic: конкретное название темы\n- section: название раздела или главы (выводи из заголовка чанка, иначе "Раздел N")\n- importance: важность 1–3 (3 = самая важная)\n- suggestedCount: рекомендуемое число вопросов (2–5)\n- difficultyCandidates: массив из 1–3 значений Bloom Taxonomy: "remember", "understand", "apply", "analyze"\n\nМатериал (факты по чанкам):\n${digest}\n\nВерни JSON массив из ${targetThemes} объектов. Никакого другого текста:\n[{"topic":"...","section":"...","importance":2,"suggestedCount":3,"difficultyCandidates":["understand","apply"]},...]`,
                 config: { temperature: 0.2, responseMimeType: 'application/json' },
             });
+            const response = await withTimeout(genPromise, reqTimeout, '[RAG] extractThemes generateContent');
             await quotaGuard.recordGeminiCall(llmModel);
 
             const parsed = extractJSON(response.text);
@@ -232,6 +245,22 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
     return [{ topic: 'Основные концепции документа', section: 'Документ', importance: 2, suggestedCount: 3, difficultyCandidates: ['understand'] }];
 }
 
+function buildBlueprintFallbackLocal(richThemes, perTheme) {
+    const fallback = [];
+    for (let ti = 0; ti < richThemes.length; ti++) {
+        const t = richThemes[ti];
+        for (let i = 0; i < perTheme[ti]; i++) {
+            fallback.push({
+                theme: t.topic,
+                section: t.section,
+                intent: `Проверить понимание: ${t.topic}`,
+                type: 'multiple_choice',
+            });
+        }
+    }
+    return fallback;
+}
+
 function computeIntentsPerTheme(richThemes, totalTarget) {
     const weights = richThemes.map(t => (t.importance || 2) * (t.suggestedCount || 3));
     const totalWeight = weights.reduce((s, w) => s + w, 0);
@@ -260,16 +289,23 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
         `${i + 1}. [${t.section}] ${t.topic} → ${perTheme[i]} вопросов`
     ).join('\n');
 
+    if (await quotaGuard.isRpdExhaustedForModel(llmModel)) {
+        console.warn('[RAG] buildBlueprint: дневной лимит LLM исчерпан — локальный план без API');
+        return buildBlueprintFallbackLocal(richThemes, perTheme);
+    }
+
+    const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             await quotaGuard.assertWithinFreeTierQuota(llmModel);
             const ai = await getAiClient();
-            const response = await ai.models.generateContent({
+            const genPromise = ai.models.generateContent({
                 model: llmModel,
                 contents: `Ты создаёшь план проверочного теста. Все вопросы — формата multiple_choice (4 варианта, 1 правильный).\n\nДля каждой темы придумай РОВНО указанное число конкретных «намерений вопроса» (question intent) — что именно нужно проверить (1–2 предложения).\n\nТемы (формат: N. [Раздел] Тема → кол-во вопросов):\n${themesForPrompt}\n\nВерни JSON массив ровно из ${expectedCount} объектов:\n[\n  {"theme":"...","section":"...","intent":"...","type":"multiple_choice"},\n  ...\n]\nНикакого другого текста.`,
                 config: { temperature: 0.3, responseMimeType: 'application/json' },
             });
+            const response = await withTimeout(genPromise, reqTimeout, '[RAG] buildBlueprint generateContent');
             await quotaGuard.recordGeminiCall(llmModel);
             const parsed = extractJSON(response.text);
             const list = Array.isArray(parsed) ? parsed
@@ -295,14 +331,7 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
     }
 
     console.error('[RAG] buildBlueprint не удался, используем fallback');
-    const fallback = [];
-    for (let ti = 0; ti < richThemes.length; ti++) {
-        const t = richThemes[ti];
-        for (let i = 0; i < perTheme[ti]; i++) {
-            fallback.push({ theme: t.topic, section: t.section, intent: `Проверить понимание: ${t.topic}`, type: 'multiple_choice' });
-        }
-    }
-    return fallback;
+    return buildBlueprintFallbackLocal(richThemes, perTheme);
 }
 
 function buildEvidencePackets(chunks, _intent, opts = {}) {

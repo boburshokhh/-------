@@ -38,6 +38,10 @@ function pruneRpm(modelId) {
     return arr;
 }
 
+function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+}
+
 async function assertWithinFreeTierQuota(modelId) {
     if (!modelId) return;
     const limits = getLimitsForModel(modelId);
@@ -62,6 +66,61 @@ async function assertWithinFreeTierQuota(modelId) {
             { modelId, limit: 'rpm', max: limits.rpm },
         );
     }
+}
+
+/**
+ * Ждём, пока можно сделать вызов без нарушения RPM (дневной лимит — сразу ошибка).
+ * Нужен для индексации: серия summary быстрее ~10/мин провоцирует «зависание» ответа API без явного 429.
+ */
+/**
+ * Локальный учёт: исчерпан ли дневной лимит generateContent для модели (без новых вызовов API).
+ */
+async function isRpdExhaustedForModel(modelId) {
+    if (!modelId) return false;
+    const limits = getLimitsForModel(modelId);
+    if (!limits) return false;
+    const fp = await getKeyFingerprint();
+    if (!fp) return false;
+    const used = await quotaRepo.getUsage(fp, utcDateString(), modelId);
+    return used >= limits.rpd;
+}
+
+async function waitUntilQuotaAllows(modelId, options = {}) {
+    const maxWaitMs = options.maxWaitMs ?? (config.QUOTA_RPM_WAIT_MAX_MS || 600000);
+    const pollMs = options.pollMs ?? 500;
+    const deadline = Date.now() + maxWaitMs;
+    let lastRpm = null;
+    let lastLog = 0;
+    while (Date.now() < deadline) {
+        try {
+            await assertWithinFreeTierQuota(modelId);
+            return;
+        } catch (e) {
+            if (e.type !== 'QUOTA_EXCEEDED') throw e;
+            if (e.details?.limit === 'rpd') throw e;
+            if (e.details?.limit === 'rpm') {
+                lastRpm = e;
+                const now = Date.now();
+                if (now - lastLog > 30_000) {
+                    lastLog = now;
+                    const sec = Math.max(0, Math.round((deadline - now) / 1000));
+                    console.warn(
+                        `[QUOTA] Ожидание слота RPM для ${modelId} (осталось ≤ ${sec} с до таймаута ожидания)…`,
+                    );
+                }
+                await sleep(pollMs);
+                continue;
+            }
+            throw e;
+        }
+    }
+    const err = new Error(
+        lastRpm?.message || `Таймаут ожидания слота RPM для ${modelId} (${Math.round(maxWaitMs / 1000)} с)`,
+    );
+    err.type = 'QUOTA_EXCEEDED';
+    err.status = 429;
+    err.details = { ...(lastRpm?.details || {}), modelId, limit: 'rpm', timeout: true };
+    throw err;
 }
 
 /**
@@ -145,6 +204,8 @@ async function getUsageSummaryPublic() {
 module.exports = {
     getLimitsForModel,
     assertWithinFreeTierQuota,
+    isRpdExhaustedForModel,
+    waitUntilQuotaAllows,
     recordGeminiCall,
     syncFromGoogle429,
     resetUsageForNewApiKey,

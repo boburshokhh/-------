@@ -65,6 +65,10 @@ module.exports = {
   /** Если model id не в FREE_TIER_QUOTAS — консервативный дефолт */
   FREE_TIER_QUOTA_DEFAULT: { rpm: 5, tpm: 250000, rpd: 20 },
   LLM_MAX_RETRIES: 3,
+  /** Таймаут одного вызова generateContent/embed (мс); 0 = без ограничения */
+  GEMINI_REQUEST_TIMEOUT_MS: parseInt(process.env.GEMINI_REQUEST_TIMEOUT_MS, 10) || 180000,
+  /** Макс. ожидание освобождения RPM-слота при индексации (мс) */
+  QUOTA_RPM_WAIT_MAX_MS: parseInt(process.env.QUOTA_RPM_WAIT_MAX_MS, 10) || 600000,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || 'gemini-embedding-001',
   // RAG настройки
   TARGET_QUESTIONS_MIN: parseInt(process.env.TARGET_QUESTIONS_MIN) || 20,
