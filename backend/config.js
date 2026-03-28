@@ -4,7 +4,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const dataDir = process.env.DATA_DIR || __dirname;
 
 module.exports = {
-  PORT: parseInt(process.env.PORT) || 3000,
+  PORT: parseInt(process.env.PORT, 10) || 3002,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   MAX_FILE_SIZE_MB: parseInt(process.env.MAX_FILE_SIZE_MB) || 10,
   CHUNK_TOKEN_LIMIT: parseInt(process.env.CHUNK_TOKEN_LIMIT) || 2500,

@@ -15,7 +15,7 @@ done
 
 echo ""
 echo "--- Проверка нужных для деплоя портов ---"
-for port in 80 443 3000 9000 9001; do
+for port in 80 443 3000 3002 9000 9001; do
   if ss -tlnp 2>/dev/null | grep -qE ":$port\s"; then
     echo "Порт $port: ЗАНЯТ"
     ss -tlnp 2>/dev/null | grep -E ":$port\s"

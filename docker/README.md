@@ -20,7 +20,7 @@ sudo usermod -aG docker $USER
 
    ```env
    GEMINI_API_KEY=ваш-ключ
-   PORT=3000
+   PORT=3002
    MAX_FILE_SIZE_MB=10
    ENABLE_PDF_OCR=true
    MAX_OCR_PAGES=10
@@ -52,6 +52,6 @@ sudo usermod -aG docker $USER
 
 ## Структура
 
-- `docker/nginx/nginx.conf` — конфиг nginx (проксирование на app:3000).
+- `docker/nginx/nginx.conf` — конфиг nginx (проксирование на app:3002).
 - Volume `ai-testgen-data`: каталог `uploads/` и прочие файлы приложения (в контейнере: `/data`).
 - Volume `ai-testgen-postgres-data`: файлы кластера PostgreSQL.

@@ -12,7 +12,7 @@
 | 9000  | занят    | Minio API              |
 | 9001  | занят    | Minio Console          |
 
-Наше приложение публикует один хост-порт — задаётся в `.env` переменной **`HOST_PORT`** (по умолчанию 80). Внутри Docker приложение слушает 3000 только в сети контейнеров — конфликта с host:3000 нет. Если 80 займут, в `.env` укажи свободный порт, например `HOST_PORT=8080`.
+Наше приложение публикует один хост-порт — задаётся в `.env` переменной **`HOST_PORT`** (по умолчанию 80). Внутри Docker сеть **nginx → app**: Node слушает **3002** (не 3000, чтобы не путать с другим проектом на сервере). Снаружи хоста порт 3002 не обязателен. Если 80 займут, в `.env` укажи свободный порт, например `HOST_PORT=8080`.
 
 ---
 
@@ -21,7 +21,7 @@
 Из каталога проекта на сервере (`/opt/edu_atg_ai_testgen`):
 
 ```bash
-(test -f .env || printf '%s\n' 'GEMINI_API_KEY=REPLACE_WITH_YOUR_KEY' 'PORT=3000' 'HOST_PORT=80' 'MAX_FILE_SIZE_MB=10' 'CHUNK_TOKEN_LIMIT=2500' 'CHUNK_OVERLAP_TOKENS=200' > .env) && docker compose up -d --build
+(test -f .env || printf '%s\n' 'GEMINI_API_KEY=REPLACE_WITH_YOUR_KEY' 'PORT=3002' 'HOST_PORT=80' 'MAX_FILE_SIZE_MB=10' 'CHUNK_TOKEN_LIMIT=2500' 'CHUNK_OVERLAP_TOKENS=200' > .env) && docker compose up -d --build
 ```
 
 Если `.env` уже есть (с правильным `GEMINI_API_KEY`) — создаваться не будет, сразу пойдёт сборка и запуск. Иначе после первого запуска отредактируй `.env`: `nano .env` и подставь ключ Gemini, затем `docker compose up -d`.
@@ -53,7 +53,7 @@ nano .env
 
 ```
 GEMINI_API_KEY=ваш_ключ_gemini
-PORT=3000
+PORT=3002
 HOST_PORT=80
 MAX_FILE_SIZE_MB=10
 CHUNK_TOKEN_LIMIT=2500
@@ -156,7 +156,7 @@ curl -s -X POST -F "file=@/path/to/document.pdf" "$BASE/api/upload"
 
 ## Важно
 
-- **Порт 80** — единственный порт, который приложение слушает на хосте. Остальные порты (3000, 9000 и т.д.) уже заняты другими сервисами — наше приложение их не использует.
+- **Порт 80** — единственный порт, который стек слушает на хосте (nginx). Внутри Compose приложение на **3002**. Порты вроде 3000 (другой проект), 9000/9001 (MinIO) на хосте нашему контейнеру не нужны для входящего HTTP.
 - Minio на сервере уже настроен; текущая версия AI Test Generator хранит файлы в Docker volume `ai-testgen-data`, не в Minio. При необходимости позже можно добавить интеграцию с Minio.
 
 ### Смена порта (если 80 занят)

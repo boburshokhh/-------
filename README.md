@@ -27,7 +27,7 @@ AI Test Generator — это веб-приложение для автомати
 2. Создайте файл `.env` в корне проекта (или скопируйте `.env.example`, если есть) и укажите свой API ключ:
    ```env
    GEMINI_API_KEY=your-gemini-api-key-here
-   PORT=3000
+   PORT=3002
    MAX_FILE_SIZE_MB=10
    CHUNK_TOKEN_LIMIT=2500
    CHUNK_OVERLAP_TOKENS=200
