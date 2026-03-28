@@ -1,10 +1,130 @@
 /**
  * In-memory прогресс длительных задач (загрузка → индекс → генерация).
  * Клиент передаёт X-Job-Id и опрашивает GET /api/jobs/:jobId
+ *
+ * Процент считается от объёма работ (workDone / workTotal), а не «на глаз».
+ * До первого известного workTotal — volumeReady: false (процент на кольце не показываем как достоверный).
  */
 
 const store = new Map();
+const workAccum = new Map();
+const progressHistory = new Map();
+
 const TTL_MS = 30 * 60 * 1000;
+const MAX_HISTORY = 100;
+
+/** Веса этапов (условные единицы «тяжёлых» шагов) — согласованы с indexer + generator */
+const WEIGHT = {
+    PARSE_READ: 2,
+    PARSE_PARSED: 1,
+    DB_SAVING: 1,
+    DB_SAVED: 1,
+    INDEX_SPLIT: 1,
+    INDEX_EMBED_BATCH: 1,
+    INDEX_SUMMARY: 1,
+    INDEX_TAIL: 1,
+    INDEX_CACHE_HIT: 1,
+    GEN_LANG: 1,
+    GEN_THEMES: 2,
+    GEN_BLUEPRINT: 2,
+    GEN_BATCH: 3,
+    GEN_DEDUP: 2,
+    GEN_FINALIZE: 1,
+    GEN_READY: 1,
+};
+
+function getAccum(jobId) {
+    let a = workAccum.get(jobId);
+    if (!a) {
+        a = {
+            workDone: 0,
+            workTotal: null,
+            planEstMainBatches: null,
+        };
+        workAccum.set(jobId, a);
+    }
+    return a;
+}
+
+function cleanupJob(jobId) {
+    store.delete(jobId);
+    workAccum.delete(jobId);
+    progressHistory.delete(jobId);
+}
+
+function appendHistory(jobId, row) {
+    const list = progressHistory.get(jobId) || [];
+    const entry = {
+        updatedAt: row.updatedAt,
+        phase: row.phase,
+        stage: row.stage,
+        percent: row.percent,
+        detail: row.detail,
+        workDone: row.workDone,
+        workTotal: row.workTotal,
+        volumeReady: row.volumeReady,
+    };
+    list.push(entry);
+    while (list.length > MAX_HISTORY) list.shift();
+    progressHistory.set(jobId, list);
+}
+
+/**
+ * После blueprint: уточняем workTotal, если реальное число LLM-батчей отличается от оценки при индексации.
+ */
+function refineMainBatchPlan(jobId, actualMainBatches) {
+    const a = workAccum.get(jobId);
+    if (!a || a.workTotal == null || actualMainBatches == null) return;
+    const actual = Math.max(0, Math.floor(Number(actualMainBatches) || 0));
+    const oldEst = a.planEstMainBatches;
+    if (oldEst == null) return;
+    const delta = (actual - oldEst) * WEIGHT.GEN_BATCH;
+    a.planEstMainBatches = actual;
+    if (delta <= 0) {
+        return;
+    }
+    a.workTotal = Math.max(a.workDone + 1, a.workTotal + delta);
+    logJobProgress(jobId, {
+        phase: 'generate',
+        stage: 'blueprint',
+        detail: `План уточнён: ${actual} пакет(ов) генерации`,
+    });
+}
+
+/**
+ * Оценка суммарного веса этапа генерации (до первого батча), main-батчи — по верхней границе из конфига.
+ */
+function estimateGenerationTailUnits(config) {
+    const batchSize = Math.max(3, Math.min(5, config.LLM_BATCH_SIZE || 4));
+    const targetMax = config.TARGET_QUESTIONS_MAX || 30;
+    const estMainBatches = Math.max(1, Math.ceil(targetMax / batchSize));
+    const maxBf = config.BACKFILL_MAX_ROUNDS || 3;
+    const backfillIntentCap = 20;
+    const estBackfillBatches = maxBf * Math.max(1, Math.ceil(backfillIntentCap / batchSize));
+    const genUnits = WEIGHT.GEN_LANG
+        + WEIGHT.GEN_THEMES
+        + WEIGHT.GEN_BLUEPRINT
+        + estMainBatches * WEIGHT.GEN_BATCH
+        + WEIGHT.GEN_DEDUP
+        + WEIGHT.GEN_FINALIZE
+        + WEIGHT.GEN_READY
+        + estBackfillBatches * WEIGHT.GEN_BATCH;
+    return { genUnits, estMainBatches };
+}
+
+/**
+ * Вес индексации новых чанков (после split).
+ */
+function indexWorkloadUnits(newChunksLength, embedBatchSize) {
+    if (newChunksLength <= 0) {
+        return WEIGHT.INDEX_SPLIT + WEIGHT.INDEX_CACHE_HIT;
+    }
+    const embedBatches = Math.ceil(newChunksLength / Math.max(1, embedBatchSize));
+    return WEIGHT.INDEX_SPLIT
+        + embedBatches * WEIGHT.INDEX_EMBED_BATCH
+        + newChunksLength * WEIGHT.INDEX_SUMMARY
+        + WEIGHT.INDEX_TAIL;
+}
 
 function setJob(jobId, data) {
     store.set(jobId, { ...data, updatedAt: Date.now() });
@@ -14,30 +134,84 @@ function getJob(jobId) {
     const e = store.get(jobId);
     if (!e) return null;
     if (Date.now() - e.updatedAt > TTL_MS) {
-        store.delete(jobId);
+        cleanupJob(jobId);
         return null;
     }
-    return e;
+    const hist = progressHistory.get(jobId) || [];
+    return { ...e, history: hist };
 }
 
 function clearJob(jobId) {
-    store.delete(jobId);
+    cleanupJob(jobId);
 }
 
 /**
- * Обновляет состояние и пишет строку в console → logCollector для панели логов.
+ * @param {string} jobId
+ * @param {object} payload
+ * @param {number} [payload.workDelta] — прибавить к workDone
+ * @param {number} [payload.workDone] — задать workDone абсолютно
+ * @param {number} [payload.workTotal] — полный объём (устанавливается при первом известном плане)
  */
 function logJobProgress(jobId, payload) {
-    const { phase, stage, percent, detail } = payload;
+    const {
+        phase: phaseIn,
+        stage: stageIn,
+        percent: percentIn,
+        detail,
+        workDelta,
+        workDone: workDoneIn,
+        workTotal: workTotalIn,
+        planEstMainBatches: planEstIn,
+    } = payload;
+
+    const a = getAccum(jobId);
+
+    if (workTotalIn != null && Number(workTotalIn) > 0) {
+        a.workTotal = Math.floor(Number(workTotalIn));
+    }
+    if (planEstIn != null) {
+        a.planEstMainBatches = Math.floor(Number(planEstIn));
+    }
+    if (workDoneIn != null) {
+        a.workDone = Math.max(0, Math.floor(Number(workDoneIn)));
+    }
+    if (workDelta != null && Number(workDelta) !== 0) {
+        a.workDone = Math.max(0, a.workDone + Math.floor(Number(workDelta)));
+    }
+
+    const phase = phaseIn || 'unknown';
+    const stage = stageIn || '';
+
+    let percent;
+    if (phase === 'done') {
+        if (a.workTotal != null && a.workTotal > 0) {
+            a.workDone = a.workTotal;
+        }
+        percent = 100;
+    } else if (phase === 'error') {
+        percent = Math.max(0, Math.min(100, Math.round(Number(percentIn) || 0)));
+    } else if (a.workTotal != null && a.workTotal > 0) {
+        percent = Math.min(100, Math.round((100 * a.workDone) / a.workTotal));
+    } else {
+        percent = Math.max(0, Math.min(100, Math.round(Number(percentIn) || 0)));
+    }
+
+    const volumeReady = phase !== 'error' && a.workTotal != null && a.workTotal > 0;
+
     const row = {
         jobId,
-        phase: phase || 'unknown',
-        stage: stage || '',
-        percent: Math.max(0, Math.min(100, Math.round(Number(percent) || 0))),
+        phase,
+        stage,
+        percent,
         detail: detail != null ? String(detail) : '',
+        workDone: a.workDone,
+        workTotal: a.workTotal,
+        volumeReady,
         updatedAt: Date.now(),
     };
+
     setJob(jobId, row);
+    appendHistory(jobId, row);
     console.log(`[PROGRESS] ${JSON.stringify(row)}`);
 }
 
@@ -45,4 +219,8 @@ module.exports = {
     logJobProgress,
     getJob,
     clearJob,
+    refineMainBatchPlan,
+    estimateGenerationTailUnits,
+    indexWorkloadUnits,
+    WEIGHT,
 };

@@ -145,7 +145,7 @@
             text-anchor="middle"
             class="percent-text"
             :fill="isDone ? '#10B981' : (isError ? '#EF4444' : '#E2E8F0')"
-          >{{ displayPercent }}%</text>
+          >{{ percentLabel }}</text>
 
           <!-- Phase emoji label -->
           <text
@@ -208,12 +208,16 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
-  percent:    { type: Number, default: 0 },
-  phase:      { type: String, default: '' },
-  stage:      { type: String, default: '' },
-  detail:     { type: String, default: '' },
-  updatedAt:  { type: Number, default: 0 },
-  modelLabel: { type: String, default: 'LLM' },
+  percent:          { type: Number, default: 0 },
+  phase:            { type: String, default: '' },
+  stage:            { type: String, default: '' },
+  detail:           { type: String, default: '' },
+  updatedAt:        { type: Number, default: 0 },
+  modelLabel:       { type: String, default: 'LLM' },
+  /** С бэкенда: известен полный объём работ (workTotal) */
+  volumeReady:      { type: Boolean, default: false },
+  /** История [PROGRESS] с сервера (тот же поток, что в логах) */
+  progressHistory:  { type: Array, default: () => [] },
 })
 
 // ── State ──────────────────────────────────────────────────────────
@@ -221,16 +225,26 @@ const logHistory      = ref([])
 const logContainerRef = ref(null)
 
 // ── Computed helpers ───────────────────────────────────────────────
-const isActive  = computed(() => props.percent > 0 && props.percent < 100 && props.phase !== 'error')
 const isDone    = computed(() => props.phase === 'done' || props.percent >= 100)
 const isError   = computed(() => props.phase === 'error')
 
+const showNumericPercent = computed(() => props.volumeReady || isDone.value || isError.value)
+
 const displayPercent = computed(() => Math.max(0, Math.min(100, Math.round(props.percent))))
+
+const percentLabel = computed(() => {
+  if (isDone.value && !isError.value) return String(displayPercent.value)
+  if (isError.value) return String(displayPercent.value)
+  if (!showNumericPercent.value) return '—'
+  return String(displayPercent.value)
+})
+
+const isActive  = computed(() => !isDone.value && !isError.value && props.phase !== '' && props.phase !== 'error')
 
 // ── Ring geometry ──────────────────────────────────────────────────
 const ringCircumference = computed(() => 2 * Math.PI * 114)
 const ringOffset = computed(() => {
-  const pct = displayPercent.value / 100
+  const pct = showNumericPercent.value ? displayPercent.value / 100 : 0
   return ringCircumference.value * (1 - pct)
 })
 
@@ -276,13 +290,15 @@ const hexEdges = computed(() => [
 // Active hex node cycles through 0-5 based on percent
 const activeHexNode = computed(() => {
   if (!isActive.value) return -1
-  return Math.floor((props.percent / 100) * 6) % 6
+  const p = showNumericPercent.value ? props.percent : 0
+  return Math.floor((p / 100) * 6) % 6
 })
 
 // ── Phase label (emoji + short text) ──────────────────────────────
 const phaseLabel = computed(() => {
   if (isDone.value)  return '✓ Готово'
   if (isError.value) return '✗ Ошибка'
+  if (!showNumericPercent.value && isActive.value) return '◌ Объём работ'
   const map = {
     upload:   '↑ Загрузка',
     parse:    '◉ Разбор',
@@ -301,7 +317,8 @@ const phaseLabel = computed(() => {
 const statusTitle = computed(() => {
   if (isDone.value)  return 'Тест успешно создан'
   if (isError.value) return 'Ошибка генерации'
-  if (isActive.value) return 'Движок работает · живой анализ'
+  if (isActive.value && !showNumericPercent.value) return 'Считаем полный объём задачи…'
+  if (isActive.value) return 'Движок работает · прогресс по шагам с сервера'
   return 'Ожидание запуска'
 })
 
@@ -353,7 +370,7 @@ const phasePills = computed(() => {
 function phaseIcon(phase, stage) {
   if (phase === 'error')    return '✗'
   if (phase === 'done')     return '✓'
-  if (stage === 'llm_batch') return '⬡'
+  if (stage === 'llm_batch' || stage === 'backfill_batch') return '⬡'
   if (stage === 'blueprint') return '⊟'
   if (stage === 'themes')    return '⊞'
   if (stage === 'language')  return '◉'
@@ -382,10 +399,15 @@ function stageToMessage(phase, stage, detail) {
     'db:saved':          `Документ зарегистрирован${d}`,
     'index:indexing':    `Индексация и векторизация чанков${d}`,
     'index:indexed':     `Индекс построен${d}`,
+    'index:chunks_saved':'Новые фрагменты сохранены в БД',
+    'index:embeddings':  `Векторные эмбеддинги${d}`,
+    'index:summaries':   `Краткие выжимки по чанкам${d}`,
+    'index:cache_hit':   `Индекс из кэша${d}`,
     'generate:language': 'Определение языка документа',
     'generate:themes':   'Извлечение тематических блоков из документа',
     'generate:blueprint':'Построение плана вопросов (blueprint)',
     'generate:llm_batch':'ИИ генерирует вопросы батчами...',
+    'generate:backfill_batch': 'Добор вопросов: пакет LLM',
     'validate:':         'Валидация качества вопросов',
     'generate:dedup':    'Семантическая дедупликация вопросов',
     'generate:backfill': 'Дозаполнение пробелов в тесте',
@@ -404,15 +426,7 @@ function stageToMessage(phase, stage, detail) {
   return `${phase} · ${stage}`
 }
 
-function pushLog() {
-  logHistory.value.push({
-    id:         Date.now() + Math.random(),
-    ts:         new Date().toLocaleTimeString('ru-RU'),
-    icon:       phaseIcon(props.phase, props.stage),
-    colorClass: phaseColor(props.phase),
-    text:       stageToMessage(props.phase, props.stage, props.detail),
-    percent:    displayPercent.value,
-  })
+function scrollLogToEnd() {
   nextTick(() => {
     if (logContainerRef.value) {
       logContainerRef.value.scrollTop = logContainerRef.value.scrollHeight
@@ -420,18 +434,45 @@ function pushLog() {
   })
 }
 
-// Watch for phase:stage change (each unique combination = new log entry)
+function rowFromProgressEntry(entry, idx) {
+  const phase = entry.phase || ''
+  const stage = entry.stage || ''
+  return {
+    id:         `${entry.updatedAt}-${idx}-${stage}`,
+    ts:         entry.updatedAt ? new Date(entry.updatedAt).toLocaleTimeString('ru-RU') : '—',
+    icon:       phaseIcon(phase, stage),
+    colorClass: phaseColor(phase),
+    text:       stageToMessage(phase, stage, entry.detail),
+    percent:    Math.max(0, Math.min(100, Math.round(Number(entry.percent) || 0))),
+  }
+}
+
+function syncLogFromProps() {
+  const h = props.progressHistory || []
+  if (h.length) {
+    logHistory.value = h.map((entry, idx) => rowFromProgressEntry(entry, idx))
+    scrollLogToEnd()
+    return
+  }
+  if (props.phase) {
+    logHistory.value = [rowFromProgressEntry({
+      updatedAt: props.updatedAt || Date.now(),
+      phase: props.phase,
+      stage: props.stage,
+      detail: props.detail,
+      percent: props.percent,
+    }, 0)]
+    scrollLogToEnd()
+  }
+}
+
 watch(
-  () => `${props.phase}:${props.stage}`,
-  (val, old) => {
-    if (val !== old && props.phase) pushLog()
-  },
+  () => [props.progressHistory, props.updatedAt, props.phase, props.stage, props.detail, props.percent],
+  () => syncLogFromProps(),
+  { deep: true },
 )
 
-// Seed initial entry when component mounts if we already have state
-onMounted(() => {
-  if (props.phase) pushLog()
-})
+onMounted(() => syncLogFromProps())
 </script>
 
 <style scoped>

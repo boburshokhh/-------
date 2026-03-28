@@ -92,14 +92,14 @@
 
 Поле **`generationMetrics`** — структурированные метрики пайплайна генерации (observability): бюджет, retrieval, grounding, dedup, длительность; сохраняется в БД в колонке `tests.generation_metrics_json` и возвращается в **GET** `/api/tests/:id` как **`generationMetrics`**.
 
-На сервере прогресс дублируется в логах строками **`[PROGRESS]`** (JSON: `phase`, `stage`, `percent`, `detail`). Дополнительно пишутся **структурированные JSON-логи** (одна строка на событие) с полями `trace_id`, `event`, `reason_code`, `metrics` — удобно для Loki/Datadog.
+На сервере прогресс дублируется в логах строками **`[PROGRESS]`** (JSON: `phase`, `stage`, `percent`, `detail`, `workDone`, `workTotal`, `volumeReady`). Процент считается как `workDone/workTotal` по накопленным «весам» этапов (парсинг, индекс, LLM-батчи и т.д.). Дополнительно пишутся **структурированные JSON-логи** (одна строка на событие) с полями `trace_id`, `event`, `reason_code`, `metrics` — удобно для Loki/Datadog.
 
 ---
 
 ### 2a. Прогресс задачи загрузки
 **GET** `/api/jobs/:jobId`
 
-Возвращает последнее известное состояние обработки для `jobId`, переданного в **`X-Job-Id`** при **POST** `/api/upload`.
+Возвращает последнее известное состояние обработки для `jobId`, переданного в **`X-Job-Id`** при **POST** `/api/upload`, плюс историю шагов (те же события, что уходят в `[PROGRESS]` и в буфер **GET** `/api/logs`).
 - **Ответ (200 OK)**:
   ```json
   {
@@ -109,9 +109,25 @@
     "stage": "llm_batch",
     "percent": 62,
     "detail": "Генерация вопросов: пакет 2/5 (накоплено 12)",
-    "updatedAt": 1711536000000
+    "workDone": 48,
+    "workTotal": 77,
+    "volumeReady": true,
+    "updatedAt": 1711536000000,
+    "history": [
+      {
+        "updatedAt": 1711535990000,
+        "phase": "index",
+        "stage": "split",
+        "percent": 12,
+        "detail": "Разбиение: 8 фрагментов (8 новых), полный объём работ: 77 ед.",
+        "workDone": 5,
+        "workTotal": 77,
+        "volumeReady": true
+      }
+    ]
   }
   ```
+  Пока `volumeReady` равен `false`, полный объём ещё не зафиксирован (ранние этапы до индексации); клиенту не следует показывать процент как итоговый.
 - **404**: задача не найдена (истёк TTL или неверный id).
 
 ---

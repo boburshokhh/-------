@@ -15,6 +15,10 @@ const state = reactive({
       percent: 0,
       detail: '',
       updatedAt: 0,
+      volumeReady: false,
+      workDone: 0,
+      workTotal: null,
+      history: [],
     },
     testId: null,
     generationMetrics: null,
@@ -102,17 +106,32 @@ export function useAppStore() {
       state.upload.status = 'uploading';
       state.upload.error = '';
       state.upload.jobId = jobId;
-      state.upload.progress = { phase: 'upload', stage: 'sending', percent: 1, detail: 'Загрузка файла...', updatedAt: Date.now() };
+      state.upload.progress = {
+        phase: 'upload',
+        stage: 'sending',
+        percent: 0,
+        detail: 'Загрузка файла на сервер…',
+        updatedAt: Date.now(),
+        volumeReady: false,
+        workDone: 0,
+        workTotal: null,
+        history: [],
+      };
       persistState();
     },
 
     setUploadProgress(progress) {
+      const p = progress && typeof progress === 'object' ? progress : {};
       state.upload.progress = {
-        phase: progress?.phase || '',
-        stage: progress?.stage || '',
-        percent: Number(progress?.percent || 0),
-        detail: progress?.detail || '',
-        updatedAt: progress?.updatedAt || Date.now(),
+        phase: p.phase || '',
+        stage: p.stage || '',
+        percent: Number(p.percent || 0),
+        detail: p.detail || '',
+        updatedAt: p.updatedAt || Date.now(),
+        volumeReady: p.volumeReady === true,
+        workDone: Number(p.workDone ?? 0),
+        workTotal: p.workTotal != null && p.workTotal !== '' ? Number(p.workTotal) : null,
+        history: Array.isArray(p.history) ? p.history : [],
       };
       state.upload.status = state.upload.progress.phase === 'error' ? 'error' : 'processing';
       persistState();
@@ -123,7 +142,17 @@ export function useAppStore() {
       state.upload.error = '';
       state.upload.testId = payload?.testId ?? null;
       state.upload.generationMetrics = payload?.generationMetrics ?? null;
-      state.upload.progress = { phase: 'done', stage: 'saved_test', percent: 100, detail: 'Тест успешно сгенерирован', updatedAt: Date.now() };
+      state.upload.progress = {
+        phase: 'done',
+        stage: 'saved_test',
+        percent: 100,
+        detail: 'Тест успешно сгенерирован',
+        updatedAt: Date.now(),
+        volumeReady: true,
+        workDone: state.upload.progress.workTotal ?? 0,
+        workTotal: state.upload.progress.workTotal,
+        history: state.upload.progress.history || [],
+      };
       persistState();
     },
 

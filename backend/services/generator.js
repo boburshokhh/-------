@@ -13,6 +13,8 @@ const {
     REASON_CODES,
     DEFECT_CLASSES,
 } = require('../utils/observability');
+const jobProgress = require('./jobProgress');
+const PW = jobProgress.WEIGHT;
 
 function getAiClient() {
     return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
@@ -532,7 +534,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     // Определяем язык документа
     const detectedLang = detectLanguage(fullText);
     console.log(`[GENERATOR] Определён язык документа: ${detectedLang}`);
-    progress({ phase: 'generate', stage: 'language', percent: 45, detail: `Язык: ${detectedLang}` });
+    progress({ phase: 'generate', stage: 'language', workDelta: PW.GEN_LANG, detail: `Язык: ${detectedLang}` });
 
     // Fallback: если индекс не передан
     if (!indexedChunks || indexedChunks.length === 0) {
@@ -589,18 +591,21 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     console.log(`[GENERATOR] Цель (config: ${targetMin}–${targetMax}): выбран ${targetCount}, чанков: ${indexedChunks.length}, модель: ${model}, формат: multiple_choice only, Bloom taxonomy`);
 
     // Шаг 1: Извлечение тем
-    progress({ phase: 'generate', stage: 'themes', percent: 45, detail: 'Извлечение тем из summaries чанков…' });
     console.log('[GENERATOR] Извлечение тем из summaries чанков...');
     const themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount);
     console.log(`[GENERATOR] Тем: ${themes.length}`, themes.map(t => `[${t.section}] ${t.topic || t}`).join(', '));
-    progress({ phase: 'generate', stage: 'themes', percent: 50, detail: `Тем: ${themes.length}` });
+    progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Тем извлечено: ${themes.length}` });
 
     // Шаг 2: Blueprint — план вопросов (только multiple_choice)
-    progress({ phase: 'generate', stage: 'blueprint', percent: 51, detail: 'Построение плана вопросов (blueprint)…' });
     console.log('[GENERATOR] Построение blueprint...');
     const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
     console.log(`[GENERATOR] Blueprint: ${blueprint.length} intent-ов`);
-    progress({ phase: 'generate', stage: 'blueprint', percent: 54, detail: `План: ${blueprint.length} intent-ов` });
+    progress({
+        phase: 'generate',
+        stage: 'blueprint',
+        workDelta: PW.GEN_BLUEPRINT,
+        detail: `План: ${blueprint.length} intent-ов`,
+    });
 
     // Шаг 3: Retrieval + soft-skip + batch-генерация
     const topK = config.RAG_TOP_K || 5;
@@ -625,6 +630,10 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
 
     const totalBatches = Math.ceil(blueprintWithDifficulty.length / batchSize);
     console.log(`[GENERATOR] Batch-режим: ${blueprintWithDifficulty.length} intents → ${totalBatches} batch(ей) по ≤${batchSize}`);
+
+    if (opts.traceId) {
+        jobProgress.refineMainBatchPlan(String(opts.traceId), totalBatches);
+    }
 
     for (let batchStart = 0; batchStart < blueprintWithDifficulty.length; batchStart += batchSize) {
         const batch = blueprintWithDifficulty.slice(batchStart, batchStart + batchSize);
@@ -728,11 +737,10 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             allQuestions.push(question);
         }
 
-        const pct = Math.min(78, Math.round(54 + (batchNum / Math.max(1, totalBatches)) * 24));
         progress({
             phase: 'generate',
             stage: 'llm_batch',
-            percent: pct,
+            workDelta: PW.GEN_BATCH,
             detail: `Генерация вопросов: пакет ${batchNum}/${totalBatches} (накоплено ${allQuestions.length})`,
         });
 
@@ -747,7 +755,6 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     const groundedPreDedup = allQuestions.length;
 
     // Шаг 4: Семантическая дедупликация
-    progress({ phase: 'generate', stage: 'dedup', percent: 79, detail: 'Семантическая дедупликация…' });
     console.log('[GENERATOR] Семантическая дедупликация...');
     const initialDedup = await semanticDedup(allQuestions, config.DEDUP_THRESHOLD || 0.88);
     console.log(`[GENERATOR] После дедупликации: ${initialDedup.length} (было ${allQuestions.length})`);
@@ -771,7 +778,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     progress({
         phase: 'generate',
         stage: 'dedup',
-        percent: 82,
+        workDelta: PW.GEN_DEDUP,
         detail: `После дедупликации: ${initialDedup.length} вопросов`,
     });
 
@@ -793,7 +800,6 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         progress({
             phase: 'generate',
             stage: 'backfill',
-            percent: Math.min(94, 82 + Math.round((round / maxBackfillRounds) * 12)),
             detail: `Добор вопросов: раунд ${round}/${maxBackfillRounds}, сейчас ${workingQuestions.length}`,
         });
 
@@ -861,6 +867,13 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
                 backfillGroundedAccepted++;
             }
 
+            progress({
+                phase: 'generate',
+                stage: 'backfill_batch',
+                workDelta: PW.GEN_BATCH,
+                detail: `Добор: раунд ${round}, пакет ${bNum}/${totalBackfillBatches}`,
+            });
+
             if (bs + batchSize < backfillWithDiff.length) await sleep(1200);
         }
 
@@ -897,7 +910,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     }
 
     // Шаг 5: Финализация
-    progress({ phase: 'generate', stage: 'finalize', percent: 97, detail: 'Финализация списка вопросов…' });
+    progress({ phase: 'generate', stage: 'finalize', workDelta: PW.GEN_FINALIZE, detail: 'Финализация списка вопросов…' });
     const finalQuestions = workingQuestions
         .slice(0, targetMax)
         .map((q, i) => ({ ...q, id: i + 1 }));
@@ -905,7 +918,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     progress({
         phase: 'generate',
         stage: 'ready',
-        percent: 99,
+        workDelta: PW.GEN_READY,
         detail: `Готово к сохранению: ${finalQuestions.length} вопросов`,
     });
 

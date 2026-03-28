@@ -6,6 +6,8 @@ const { chunkText } = require('./chunker');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
+const jobProgressSvc = require('./jobProgress');
+const { WEIGHT } = jobProgressSvc;
 
 function getAiClient() {
     return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
@@ -125,10 +127,12 @@ async function processBatch(batch, embeddingModel) {
  *
  * @param {number} documentId - ID документа в БД
  * @param {string} fullText - Полный текст документа
- * @param {function} [onProgress] - (payload: { phase, stage, percent, detail }) => void
+ * @param {function} [onProgress] - (payload: { phase, stage, detail, workDelta?, workTotal?, planEstMainBatches? }) => void
+ * @param {object} [opts] - { baseWorkDone } — уже выполненные единицы до индексации (парс + БД)
  * @returns {Promise<Array<{id, document_id, chunk_index, text, token_count, content_hash}>>}
  */
-async function indexDocument(documentId, fullText, onProgress) {
+async function indexDocument(documentId, fullText, onProgress, opts = {}) {
+    const baseWorkDone = Math.max(0, Math.floor(Number(opts.baseWorkDone) || 0));
     const startTime = Date.now();
     const rawChunks = chunkText(fullText);
 
@@ -137,12 +141,8 @@ async function indexDocument(documentId, fullText, onProgress) {
     }
 
     console.log(`[INDEXER] Документ #${documentId}: ${rawChunks.length} чанков`);
-    onProgress?.({
-        phase: 'index',
-        stage: 'split',
-        percent: 10,
-        detail: `Разбиение: ${rawChunks.length} фрагментов`,
-    });
+
+    const { genUnits, estMainBatches } = jobProgressSvc.estimateGenerationTailUnits(config);
 
     const embeddingModel = config.EMBEDDING_MODEL || 'text-embedding-004';
 
@@ -193,15 +193,29 @@ async function indexDocument(documentId, fullText, onProgress) {
 
     console.log(`[INDEXER] Кэш: ${indexedChunks.length} чанков уже есть, ${newChunks.length} новых`);
 
+    const indexW = jobProgressSvc.indexWorkloadUnits(newChunks.length, EMBED_BATCH_SIZE);
+    const workTotal = baseWorkDone + indexW + genUnits;
+
     if (newChunks.length === 0) {
         onProgress?.({
             phase: 'index',
             stage: 'cache_hit',
-            percent: 45,
+            workTotal,
+            planEstMainBatches: estMainBatches,
+            workDelta: WEIGHT.INDEX_SPLIT + WEIGHT.INDEX_CACHE_HIT,
             detail: `Индекс из кэша: ${indexedChunks.length} фрагментов, новых нет`,
         });
         return loadIndexedChunks(documentId);
     }
+
+    onProgress?.({
+        phase: 'index',
+        stage: 'split',
+        workTotal,
+        planEstMainBatches: estMainBatches,
+        workDelta: WEIGHT.INDEX_SPLIT,
+        detail: `Разбиение: ${rawChunks.length} фрагментов (${newChunks.length} новых), полный объём работ: ${workTotal} ед.`,
+    });
 
     // Сохраняем новые чанки в БД
     const insertedChunks = [];
@@ -220,8 +234,7 @@ async function indexDocument(documentId, fullText, onProgress) {
     onProgress?.({
         phase: 'index',
         stage: 'chunks_saved',
-        percent: 11,
-        detail: `Сохранено ${newChunks.length} новых фрагментов`,
+        detail: `Сохранено ${newChunks.length} новых фрагментов в БД`,
     });
 
     // Батчевые эмбеддинги для новых чанков
@@ -235,11 +248,10 @@ async function indexDocument(documentId, fullText, onProgress) {
         console.log(`[INDEXER] Эмбеддинги батч ${bIdx + 1}/${batches.length}...`);
         const processed = await processBatch(batches[bIdx], embeddingModel);
         chunksWithEmbeddings.push(...processed);
-        const embPct = Math.round(11 + ((bIdx + 1) / batches.length) * 18);
         onProgress?.({
             phase: 'index',
             stage: 'embeddings',
-            percent: Math.min(29, embPct),
+            workDelta: WEIGHT.INDEX_EMBED_BATCH,
             detail: `Векторные эмбеддинги: батч ${bIdx + 1}/${batches.length}`,
         });
         if (bIdx < batches.length - 1) await sleep(500);
@@ -260,7 +272,6 @@ async function indexDocument(documentId, fullText, onProgress) {
     onProgress?.({
         phase: 'index',
         stage: 'summaries',
-        percent: 30,
         detail: `Краткие выжимки по фрагментам: 0/${insertedChunks.length}`,
     });
     for (let i = 0; i < insertedChunks.length; i++) {
@@ -270,15 +281,21 @@ async function indexDocument(documentId, fullText, onProgress) {
         if (facts.length > 0) {
             insertSummary.run(c.id, JSON.stringify(facts));
         }
-        const sumPct = Math.round(30 + ((i + 1) / insertedChunks.length) * 15);
         onProgress?.({
             phase: 'index',
             stage: 'summaries',
-            percent: Math.min(45, sumPct),
+            workDelta: WEIGHT.INDEX_SUMMARY,
             detail: `Краткие выжимки: ${i + 1}/${insertedChunks.length}`,
         });
         if (i < insertedChunks.length - 1) await sleep(800);
     }
+
+    onProgress?.({
+        phase: 'index',
+        stage: 'indexed',
+        workDelta: WEIGHT.INDEX_TAIL,
+        detail: 'Индексация завершена, загрузка чанков в память',
+    });
 
     const elapsed = Date.now() - startTime;
     console.log(`[INDEXER] Индексация завершена за ${(elapsed / 1000).toFixed(1)}s`);

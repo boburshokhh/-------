@@ -28,6 +28,8 @@
             :stage="store.state.upload.progress.stage"
             :detail="store.state.upload.progress.detail"
             :updated-at="store.state.upload.progress.updatedAt"
+            :volume-ready="store.state.upload.progress.volumeReady"
+            :progress-history="store.state.upload.progress.history"
             :model-label="modelLabel"
           />
         </div>

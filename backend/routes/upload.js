@@ -81,9 +81,16 @@ router.post('/', upload.single('file'), async (req, res, next) => {
     }
     const jobId = incomingJobId || uuidv4();
     const report = (payload) => jobProgress.logJobProgress(jobId, payload);
+    const W = jobProgress.WEIGHT;
+    const baseWorkAfterDb = W.PARSE_READ + W.PARSE_PARSED + W.DB_SAVING + W.DB_SAVED;
 
     try {
-        report({ phase: 'parse', stage: 'reading', percent: 2, detail: `Чтение файла: ${displayName}` });
+        report({
+            phase: 'parse',
+            stage: 'reading',
+            workDelta: W.PARSE_READ,
+            detail: `Чтение файла: ${displayName}`,
+        });
         console.log(`[UPLOAD] Файл: storage=${file.filename} display="${displayName}"`);
 
         const parseResult = await parseDocument(filePath, file.mimetype);
@@ -92,7 +99,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         report({
             phase: 'parse',
             stage: 'parsed',
-            percent: 8,
+            workDelta: W.PARSE_PARSED,
             detail: `${pageCount != null ? `${pageCount} стр.` : 'страницы ?'}, ${text.length} символов, качество ${diagnostics.extractionQuality ?? '—'}`,
         });
 
@@ -119,7 +126,6 @@ router.post('/', upload.single('file'), async (req, res, next) => {
             jobProgress.logJobProgress(jobId, {
                 phase: 'error',
                 stage: 'too_many_pages',
-                percent: 0,
                 detail: `Слишком много страниц: ${pageCount} (макс. ${config.MAX_PAGES})`,
             });
             return res.status(413).json({
@@ -128,7 +134,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
             });
         }
 
-        report({ phase: 'db', stage: 'saving', percent: 9, detail: 'Сохранение метаданных документа' });
+        report({ phase: 'db', stage: 'saving', workDelta: W.DB_SAVING, detail: 'Сохранение метаданных документа' });
 
         const storeFullText = config.STORE_DOCUMENT_TEXT_IN_DB === true;
         const diagJson = JSON.stringify(diagnostics);
@@ -160,12 +166,12 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         report({
             phase: 'db',
             stage: 'saved',
-            percent: 10,
+            workDelta: W.DB_SAVED,
             detail: `Документ #${documentId}, ${countTokens(text)} токенов`,
         });
 
         console.log(`[UPLOAD] Индексация документа #${documentId}...`);
-        const indexedChunks = await indexDocument(documentId, text, report);
+        const indexedChunks = await indexDocument(documentId, text, report, { baseWorkDone: baseWorkAfterDb });
         console.log(`[UPLOAD] Индекс готов: ${indexedChunks.length} чанков`);
 
         const modelId = req.body.model && typeof req.body.model === 'string' ? req.body.model.trim() : null;
@@ -214,7 +220,6 @@ router.post('/', upload.single('file'), async (req, res, next) => {
         report({
             phase: 'done',
             stage: 'saved_test',
-            percent: 100,
             detail: `Сохранён тест: ${testData.questions.length} вопросов`,
         });
 
@@ -240,7 +245,6 @@ router.post('/', upload.single('file'), async (req, res, next) => {
             jobProgress.logJobProgress(jobId, {
                 phase: 'error',
                 stage: 'failed',
-                percent: 0,
                 detail: error && error.message ? String(error.message) : 'Ошибка обработки',
             });
         } catch {
