@@ -63,10 +63,16 @@ app.get('/api/health', async (req, res) => {
         dbOk = true;
     } catch { /* ignore */ }
 
-    const hasKey = await runtimeConfig.hasGeminiApiKey();
-    const quota = await quotaGuard.getUsageSummaryPublic();
+    let hasKey = false;
+    let quota = { tier: config.GEMINI_QUOTA_TIER || 'free', usageDateUtc: '', perModel: {} };
+    try {
+        hasKey = await runtimeConfig.hasGeminiApiKey();
+        quota = await quotaGuard.getUsageSummaryPublic();
+    } catch (e) {
+        console.warn('[HEALTH] optional checks failed:', e.message);
+    }
 
-    res.json({
+    res.status(200).json({
         status: dbOk ? 'ok' : 'degraded',
         database: dbOk ? 'connected' : 'error',
         storage: config.STORAGE_BACKEND,
@@ -107,7 +113,7 @@ app.use(errorHandler);
 async function start() {
     try {
         console.log('[INIT] Running PostgreSQL migrations...');
-        await runMigrations();
+        await runMigrations(pgPool);
         console.log('[INIT] PostgreSQL ready');
     } catch (err) {
         console.error('[INIT] PostgreSQL init failed:', err.message);

@@ -27,7 +27,7 @@ async function migrate() {
     sqlite.pragma('journal_mode = WAL');
 
     console.log('[MIGRATE] Running PG migrations first...');
-    await runMigrations();
+    await runMigrations(pg);
 
     const tables = [
         {
