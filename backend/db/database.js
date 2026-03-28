@@ -72,6 +72,14 @@ db.exec(`
     value TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS gemini_usage (
+    key_fingerprint TEXT NOT NULL,
+    usage_date TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (key_fingerprint, usage_date, model_id)
+  );
 `);
 
 // Indexes for fast RAG lookups

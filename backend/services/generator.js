@@ -1,6 +1,7 @@
 const { GoogleGenAI } = require('@google/genai');
 const config = require('../config');
 const runtimeConfig = require('./runtimeConfig');
+const quotaGuard = require('./quotaGuard');
 const { chunkText } = require('./chunker');
 const { validateQuestions, extractJSON } = require('./validator');
 const rag = require('./rag');
@@ -288,6 +289,7 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
         try {
             const userPrompt = buildBatchPrompt(intents, evidenceList);
 
+            quotaGuard.assertWithinFreeTierQuota(llmModel);
             const response = await getAiClient().models.generateContent({
                 model: llmModel,
                 contents: userPrompt,
@@ -297,6 +299,7 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
                     responseMimeType: 'application/json',
                 },
             });
+            quotaGuard.recordGeminiCall(llmModel);
 
             const content = response.text;
             if (!content) throw new Error('Пустой ответ от LLM');
@@ -356,6 +359,7 @@ async function checkGrounding(question, evidenceText, model = null) {
             : JSON.stringify(question.correctIndex);
 
         const prompt = `Вопрос: ${question.question}\nПравильный ответ: ${correctOption}\nОбъяснение: ${question.explanation}\n\nEvidence:\n${evidenceText}`;
+        quotaGuard.assertWithinFreeTierQuota(llmModel);
         const response = await getAiClient().models.generateContent({
             model: llmModel,
             contents: prompt,
@@ -365,6 +369,7 @@ async function checkGrounding(question, evidenceText, model = null) {
                 responseMimeType: 'application/json',
             },
         });
+        quotaGuard.recordGeminiCall(llmModel);
         const parsed = extractJSON(response.text);
         return parsed.grounded !== false;
     } catch {

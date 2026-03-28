@@ -18,23 +18,39 @@
       "allowedMimes": ["application/pdf"],
       "maxPages": 30,
       "maxFileSizeMb": 10
+    },
+    "geminiQuota": {
+      "tier": "free",
+      "usageDateUtc": "2026-03-28",
+      "perModel": {
+        "gemini-2.5-flash": { "usedToday": 0, "rpd": 20, "rpm": 7, "tpm": 250000 }
+      }
     }
   }
   ```
+
+Поле **`geminiQuota`** — локальный учёт запросов к Gemini по **отпечатку текущего API-ключа** (защита от злоупотреблений по порогам free tier). При **смене ключа** в настройках счётчики сбрасываются. Реальные квоты Google остаются на стороне Google.
 
 ---
 
 ### 1a. Список доступных LLM-моделей
 **GET** `/api/models`
 
-Возвращает список моделей, доступных для генерации теста в UI.
+Возвращает список моделей, доступных для генерации теста в UI, с лимитами free tier для отображения и серверной проверки.
 - **Ответ (200 OK)**:
   ```json
   {
     "models": [
-      { "id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (...)" }
+      {
+        "id": "gemini-2.5-flash",
+        "label": "Gemini 2.5 Flash (...)",
+        "limits": { "rpm": 7, "tpm": 250000, "rpd": 20 }
+      }
     ],
-    "defaultModel": "gemini-2.5-flash"
+    "defaultModel": "gemini-2.5-flash",
+    "quotaTier": "free",
+    "embeddingModel": "gemini-embedding-001",
+    "embeddingLimits": { "rpm": 100, "tpm": 100000, "rpd": 1500 }
   }
   ```
 

@@ -5,6 +5,7 @@ const db = require('../db/database');
 const { chunkText } = require('./chunker');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
+const quotaGuard = require('./quotaGuard');
 
 function getAiClient() {
     return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
@@ -34,10 +35,13 @@ async function fetchEmbeddingWithRetry(text, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
+            const embedModel = config.EMBEDDING_MODEL || 'text-embedding-004';
+            quotaGuard.assertWithinFreeTierQuota(embedModel);
             const response = await getAiClient().models.embedContent({
-                model: config.EMBEDDING_MODEL || 'text-embedding-004',
+                model: embedModel,
                 contents: text,
             });
+            quotaGuard.recordGeminiCall(embedModel);
             // Нормализуем ответ SDK: может вернуть .embeddings[] или .embeddings.values
             const emb = Array.isArray(response.embeddings)
                 ? response.embeddings[0].values
@@ -59,6 +63,7 @@ async function fetchChunkSummary(chunkText, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
+            quotaGuard.assertWithinFreeTierQuota(config.LLM_MODEL);
             const response = await getAiClient().models.generateContent({
                 model: config.LLM_MODEL,
                 contents: `Прочитай следующий фрагмент учебного материала и выдели из него 5–10 конкретных фактов, определений, правил или ключевых утверждений. Оформи каждый факт как отдельный пункт списка (одна строка). Не пересказывай, а вычленяй именно проверяемые знания.\n\nФрагмент:\n${chunkText}\n\nВерни только JSON объект вида {"facts": ["факт 1","факт 2",...]}. Никакого другого текста.`,
@@ -67,6 +72,7 @@ async function fetchChunkSummary(chunkText, retries = 3) {
                     responseMimeType: 'application/json',
                 },
             });
+            quotaGuard.recordGeminiCall(config.LLM_MODEL);
             const raw = response.text;
             if (!raw) throw new Error('Пустой ответ при генерации summary');
             const parsed = extractJSON(raw);

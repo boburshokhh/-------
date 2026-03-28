@@ -6,6 +6,7 @@ const config = require('./config');
 const errorHandler = require('./middleware/errorHandler');
 const logCollector = require('./services/logCollector');
 const runtimeConfig = require('./services/runtimeConfig');
+const quotaGuard = require('./services/quotaGuard');
 
 const app = express();
 
@@ -74,14 +75,22 @@ app.get('/api/health', (req, res) => {
             maxPages: config.MAX_PAGES,
             maxFileSizeMb: config.MAX_FILE_SIZE_MB,
         },
+        geminiQuota: quotaGuard.getUsageSummaryPublic(),
     });
 });
 
 // Список моделей для переключателя
 app.get('/api/models', (req, res) => {
+    const models = (config.LLM_MODELS || []).map((m) => ({
+        ...m,
+        limits: quotaGuard.getLimitsForModel(m.id),
+    }));
     res.json({
-        models: config.LLM_MODELS || [],
-        defaultModel: config.LLM_MODEL
+        models,
+        defaultModel: config.LLM_MODEL,
+        quotaTier: config.GEMINI_QUOTA_TIER || 'free',
+        embeddingModel: config.EMBEDDING_MODEL,
+        embeddingLimits: quotaGuard.getLimitsForModel(config.EMBEDDING_MODEL),
     });
 });
 

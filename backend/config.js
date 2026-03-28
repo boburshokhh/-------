@@ -18,12 +18,26 @@ module.exports = {
   QUESTIONS_PER_CHUNK: parseInt(process.env.QUESTIONS_PER_CHUNK, 10) || 4,
   CHAR_LENGTH_PER_QUESTION: parseInt(process.env.CHAR_LENGTH_PER_QUESTION, 10) || 2000,
   LLM_MODEL: process.env.LLM_MODEL || 'gemini-2.5-flash',
+  /** Free tier (ориентир для защиты от злоупотреблений; сверяйте с AI Studio для своего ключа) */
+  GEMINI_QUOTA_TIER: 'free',
   // Только Text-out модели с доступными лимитами (RPM/TPM/RPD)
   LLM_MODELS: [
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (7 RPM, 250K TPM, 20 RPD)' },
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (10 RPM, 250K TPM, 20 RPD)' },
     { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (5 RPM, 250K TPM, 20 RPD)' },
   ],
+  /**
+   * Локальные лимиты по модели (free tier). Используются для учёта и блокировки до лимита Google.
+   * tpm — для отображения; жёстко не режем (сложно без точного usageMetadata на каждом ответе).
+   */
+  FREE_TIER_QUOTAS: {
+    'gemini-2.5-flash': { rpm: 7, tpm: 250000, rpd: 20 },
+    'gemini-2.5-flash-lite': { rpm: 10, tpm: 250000, rpd: 20 },
+    'gemini-3-flash-preview': { rpm: 5, tpm: 250000, rpd: 20 },
+    'gemini-embedding-001': { rpm: 100, tpm: 100000, rpd: 1500 },
+  },
+  /** Если model id не в FREE_TIER_QUOTAS — консервативный дефолт */
+  FREE_TIER_QUOTA_DEFAULT: { rpm: 5, tpm: 250000, rpd: 20 },
   LLM_MAX_RETRIES: 3,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || 'gemini-embedding-001',
   // RAG настройки

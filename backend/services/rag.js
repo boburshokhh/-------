@@ -2,6 +2,7 @@ const { GoogleGenAI } = require('@google/genai');
 const config = require('../config');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
+const quotaGuard = require('./quotaGuard');
 
 function getAiClient() {
     return new GoogleGenAI({ apiKey: runtimeConfig.getGeminiApiKey() });
@@ -30,10 +31,13 @@ async function getQueryEmbedding(query, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
+            const embedModel = config.EMBEDDING_MODEL || 'text-embedding-004';
+            quotaGuard.assertWithinFreeTierQuota(embedModel);
             const response = await getAiClient().models.embedContent({
-                model: config.EMBEDDING_MODEL || 'text-embedding-004',
+                model: embedModel,
                 contents: query,
             });
+            quotaGuard.recordGeminiCall(embedModel);
             return Array.isArray(response.embeddings)
                 ? response.embeddings[0].values
                 : response.embeddings.values || response.embedding.values;
@@ -297,6 +301,7 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
+            quotaGuard.assertWithinFreeTierQuota(llmModel);
             const response = await getAiClient().models.generateContent({
                 model: llmModel,
                 contents: `Ты анализируешь учебный материал. На основе фактов из ВСЕХ чанков документа выдели ровно ${targetThemes} ключевых тем, охватывающих документ РАВНОМЕРНО — не только самые заметные части.\n\nДля каждой темы укажи:\n- topic: конкретное название темы\n- section: название раздела или главы (выводи из заголовка чанка, иначе "Раздел N")\n- importance: важность 1–3 (3 = самая важная)\n- suggestedCount: рекомендуемое число вопросов (2–5)\n- difficultyCandidates: массив из 1–3 значений Bloom Taxonomy: "remember", "understand", "apply", "analyze"\n  - remember: факты, определения, даты\n  - understand: объяснение процессов, концепций\n  - apply: применение знаний к ситуациям\n  - analyze: сравнение, причинно-следственные связи\n\nМатериал (факты по чанкам):\n${digest}\n\nВерни JSON массив из ${targetThemes} объектов. Никакого другого текста:\n[{"topic":"...","section":"...","importance":2,"suggestedCount":3,"difficultyCandidates":["understand","apply"]},...]`,
@@ -305,6 +310,7 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
                     responseMimeType: 'application/json',
                 },
             });
+            quotaGuard.recordGeminiCall(llmModel);
 
             const parsed = extractJSON(response.text);
             let themes = Array.isArray(parsed) ? parsed
@@ -409,6 +415,7 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
+            quotaGuard.assertWithinFreeTierQuota(llmModel);
             const response = await getAiClient().models.generateContent({
                 model: llmModel,
                 contents: `Ты создаёшь план проверочного теста. Все вопросы — формата multiple_choice (4 варианта, 1 правильный).\n\nДля каждой темы придумай РОВНО указанное число конкретных «намерений вопроса» (question intent) — что именно нужно проверить (1–2 предложения).\n\nТемы (формат: N. [Раздел] Тема → кол-во вопросов):\n${themesForPrompt}\n\nВерни JSON массив ровно из ${expectedCount} объектов:\n[\n  {"theme":"...","section":"...","intent":"...","type":"multiple_choice"},\n  ...\n]\nНикакого другого текста.`,
@@ -417,6 +424,7 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
                     responseMimeType: 'application/json',
                 },
             });
+            quotaGuard.recordGeminiCall(llmModel);
 
             const parsed = extractJSON(response.text);
             const list = Array.isArray(parsed) ? parsed

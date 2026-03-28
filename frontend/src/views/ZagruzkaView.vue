@@ -11,6 +11,40 @@
       <!-- Зона загрузки / inline-прогресс -->
       <section class="max-w-4xl mx-auto px-6 pb-24">
         <div class="grid grid-cols-1 gap-12">
+          <!-- Выбор модели LLM -->
+          <div
+            v-if="!showProgressInline"
+            class="bg-[#FFFFFF] rounded-xl border border-[#A9B4B9]/25 p-5 md:p-6 tonal-sculpt-shadow"
+          >
+            <label for="model-select" class="block font-headline font-bold text-[#2A3439] text-sm mb-2">
+              Модель для генерации
+            </label>
+            <p v-if="quotaTierLabel" class="text-xs text-[#566166] mb-3">
+              Квота: {{ quotaTierLabel }}
+            </p>
+            <select
+              id="model-select"
+              v-model="selectedModelId"
+              :disabled="isBusy || !modelOptions.length"
+              class="w-full max-w-xl rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm text-[#2A3439] font-medium focus:outline-none focus:ring-2 focus:ring-[#3755C3] focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <option v-if="!modelOptions.length" value="" disabled>
+                Загрузка списка моделей…
+              </option>
+              <option
+                v-for="m in modelOptions"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.label }}
+              </option>
+            </select>
+            <p v-if="selectedModelLimits" class="text-xs text-[#566166] mt-3 leading-relaxed">
+              Free tier (локальный учёт): до {{ selectedModelLimits.rpd }} запросов/сутки (UTC),
+              до {{ selectedModelLimits.rpm }} запросов/мин.
+            </p>
+          </div>
+
           <UploadZone
             v-if="!showProgressInline"
             :disabled="isBusy"
@@ -125,6 +159,30 @@ const isBusy = computed(() => ['uploading', 'processing'].includes(store.state.u
 const showProgressInline = computed(() => ['uploading', 'processing', 'done'].includes(store.state.upload.status))
 const canGoToTest = computed(() => store.state.upload.status === 'done' && !!store.state.upload.testId)
 const selectedModelLabel = computed(() => store.state.selectedModel || store.state.defaultModel || 'LLM')
+
+const modelOptions = computed(() => store.state.models || [])
+
+const quotaTierLabel = computed(() => {
+  const h = store.state.diagnostics.health
+  const q = h?.geminiQuota?.tier
+  if (q) return String(q).toUpperCase()
+  return ''
+})
+
+const selectedModelId = computed({
+  get() {
+    return store.state.selectedModel || store.state.defaultModel || ''
+  },
+  set(value) {
+    store.actions.setSelectedModel(value)
+  },
+})
+
+const selectedModelLimits = computed(() => {
+  const id = store.state.selectedModel || store.state.defaultModel
+  const m = modelOptions.value.find((x) => x.id === id)
+  return m?.limits || null
+})
 const healthStatus = computed(() => store.state.diagnostics.health?.status || 'unknown')
 const hasApiKeyLabel = computed(() => store.state.diagnostics.health?.hasApiKey ? 'настроен' : 'не настроен')
 const uploadLimits = computed(() => store.state.diagnostics.health?.uploadLimits || {})
@@ -158,9 +216,12 @@ const logsUpdatedAtLabel = computed(() => {
 const logsPreview = computed(() => (store.state.diagnostics.logs || []).slice(-20))
 
 onMounted(async () => {
-  const models = await API.getModels()
-  store.actions.setModels(models)
-  await Promise.all([loadHealth(), loadLogs()])
+  const [modelsPayload] = await Promise.all([
+    API.getModels(),
+    loadHealth(),
+    loadLogs(),
+  ])
+  store.actions.setModels(modelsPayload)
   if (isBusy.value && store.state.upload.jobId) {
     startPolling()
   }

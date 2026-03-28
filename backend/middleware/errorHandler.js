@@ -22,7 +22,14 @@ module.exports = function errorHandler(err, req, res, next) {
     if (err.type === 'INVALID_FILE_TYPE') {
         return res.status(415).json({
             error: 'Неподдерживаемый формат файла',
-            details: 'Поддерживаются только PDF и DOCX файлы'
+            details: err.message || 'Поддерживаются только PDF файлы'
+        });
+    }
+
+    if (err.type === 'QUOTA_EXCEEDED') {
+        return res.status(429).json({
+            error: err.message || 'Превышен лимит запросов',
+            details: err.details,
         });
     }
 

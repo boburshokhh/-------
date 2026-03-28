@@ -30,6 +30,8 @@ function setGeminiApiKey(value) {
         throw new Error('GEMINI_API_KEY не может быть пустым');
     }
     setSetting('GEMINI_API_KEY', normalized);
+    // Новый ключ — новая «корзина» локального учёта free-tier (защита от злоупотреблений)
+    require('./quotaGuard').resetUsageForNewApiKey();
 }
 
 function hasGeminiApiKey() {
@@ -37,8 +39,10 @@ function hasGeminiApiKey() {
 }
 
 function getPublicRuntimeSettings() {
+    const quotaGuard = require('./quotaGuard');
     return {
         hasGeminiApiKey: hasGeminiApiKey(),
+        geminiQuota: quotaGuard.getUsageSummaryPublic(),
     };
 }
 
