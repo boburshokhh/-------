@@ -1,6 +1,6 @@
 # Docker-окружение для AI Test Generator
 
-Схема деплоя: **nginx** (reverse proxy, порт 80) → **app** (Node.js, статика + API). Данные (БД, загрузки) хранятся в volume `ai-testgen-data`.
+Схема деплоя: **nginx** (порт 80) → **app** (Node.js) → **postgres** (PostgreSQL 16). Загрузки и локальные файлы — volume `ai-testgen-data`; данные БД — volume `ai-testgen-postgres-data`. MinIO при `STORAGE_BACKEND=minio` по умолчанию ожидается на хосте (`host.docker.internal`), либо задайте `MINIO_ENDPOINT` в `.env`.
 
 ## Требования на сервере (Ubuntu)
 
@@ -16,7 +16,7 @@ sudo usermod -aG docker $USER
 
 ## Запуск
 
-1. В корне проекта создайте `.env` с переменными (обязательно `GEMINI_API_KEY`):
+1. В корне проекта создайте `.env` (обязательно `GEMINI_API_KEY`; для Postgres в Compose — `PGUSER`, `PGPASSWORD`, `PGDATABASE` в согласовании с тем, что вы хотите в контейнере; по умолчанию в compose есть dev-пароль `ai_testgen_dev`, его нужно сменить в проде):
 
    ```env
    GEMINI_API_KEY=ваш-ключ
@@ -24,6 +24,7 @@ sudo usermod -aG docker $USER
    MAX_FILE_SIZE_MB=10
    ENABLE_PDF_OCR=true
    MAX_OCR_PAGES=10
+   PGPASSWORD=надёжный-пароль
    ```
 
 2. Соберите образы и поднимите контейнеры:
@@ -39,7 +40,8 @@ sudo usermod -aG docker $USER
 | Команда | Описание |
 |--------|----------|
 | `docker compose up -d --build` | Сборка и запуск в фоне |
-| `docker compose down` | Остановка и удаление контейнеров (volume сохраняется) |
+| `docker compose down` | Остановка контейнеров (volumes с данными сохраняются) |
+| `docker compose down -v` | То же + удалить volumes (очистить БД и загрузки) |
 | `docker compose logs -f app` | Логи приложения |
 | `docker compose ps` | Статус контейнеров |
 
@@ -51,4 +53,5 @@ sudo usermod -aG docker $USER
 ## Структура
 
 - `docker/nginx/nginx.conf` — конфиг nginx (проксирование на app:3000).
-- Volume `ai-testgen-data`: в нём создаются `data.db` и каталог `uploads/` (путь внутри контейнера: `/data`).
+- Volume `ai-testgen-data`: каталог `uploads/` и прочие файлы приложения (в контейнере: `/data`).
+- Volume `ai-testgen-postgres-data`: файлы кластера PostgreSQL.

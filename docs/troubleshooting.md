@@ -74,7 +74,15 @@
 
 ## Настройка PostgreSQL (первый запуск)
 
-Перед первым запуском приложения нужно создать базу и пользователя:
+### Вариант A: `docker compose up`
+
+В `docker-compose.yml` есть сервис **postgres**: при первом запуске образ сам создаёт пользователя и базу по переменным `POSTGRES_*` (они берутся из тех же `PGUSER`, `PGPASSWORD`, `PGDATABASE`, что в `.env`). Укажите в `.env` надёжный `PGPASSWORD` и при необходимости имя БД/пользователя. Порт PostgreSQL **на хост не публикуется** — доступ только из сети Compose (контейнер `app` подключается к хосту `postgres`).
+
+Миграции применяются автоматически при старте Node после того, как Postgres станет healthy.
+
+### Вариант B: свой сервер PostgreSQL
+
+Создайте базу и пользователя вручную:
 
 ```sql
 -- Выполнить от имени суперпользователя (postgres):
@@ -83,7 +91,8 @@ CREATE DATABASE ai_testgen OWNER ai_testgen;
 GRANT ALL PRIVILEGES ON DATABASE ai_testgen TO ai_testgen;
 ```
 
-Затем указать параметры в `.env`:
+Затем в `.env`:
+
 ```
 PGHOST=localhost
 PGPORT=5432
@@ -92,7 +101,7 @@ PGUSER=ai_testgen
 PGPASSWORD=your-secure-password
 ```
 
-Миграции применятся автоматически при старте сервера.
+Запускайте приложение **вне** Compose или измените `docker-compose.yml` (уберите сервис `postgres`, верните `PGHOST` на хост с БД).
 
 ## Подключение к БД (PostgreSQL)
 

@@ -1,12 +1,29 @@
-# AI Test Generator — деплой (nginx + app + volume)
-# PostgreSQL и MinIO — внешние сервисы (уже работают на хосте).
+# AI Test Generator — деплой (nginx + app + PostgreSQL в Compose).
+# Образ Postgres сам создаёт БД и пользователя по POSTGRES_*.
+# MinIO при необходимости — внешний сервис на хосте (см. MINIO_* в environment app).
 # Запуск: docker compose up -d
-# Остановка: docker compose down
+# Остановка: docker compose down (volume с данными Postgres сохраняется)
 #
-# Порты на хосте заняты: 3000, 8000, 5432 (PG), 6379, 9000/9001 (MinIO).
-# Приложение подключается к ним через host.docker.internal.
+# Локальная разработка без Docker: в .env укажите PGHOST=localhost и свой Postgres.
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-testgen-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER:-ai_testgen}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-ai_testgen_dev}
+      POSTGRES_DB: ${PGDATABASE:-ai_testgen}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   # Приложение (Node.js + OCR)
   app:
     build:
@@ -17,22 +34,23 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3000
       DATA_DIR: /data
-      # PostgreSQL (внешний, на хосте)
-      PGHOST: host.docker.internal
+      PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: ${PGDATABASE:-ai_testgen}
       PGUSER: ${PGUSER:-ai_testgen}
-      PGPASSWORD: ${PGPASSWORD:-}
+      PGPASSWORD: ${PGPASSWORD:-ai_testgen_dev}
       DB_CLIENT: postgres
-      # MinIO (внешний, на хосте)
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      MINIO_ENDPOINT: host.docker.internal
-      MINIO_PORT: 9000
-      MINIO_USE_SSL: "false"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-host.docker.internal}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
       MINIO_BUCKET: ${MINIO_BUCKET:-ai-testgen-docs}
@@ -46,7 +64,7 @@ services:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));"]
       interval: 30s
       timeout: 5s
-      start_period: 15s
+      start_period: 45s
       retries: 3
 
   # Nginx (reverse proxy, единая точка входа)
@@ -65,3 +83,5 @@ services:
 volumes:
   app_data:
     name: ai-testgen-data
+  postgres_data:
+    name: ai-testgen-postgres-data
