@@ -30,6 +30,11 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+    # Без этого Postgres доступен только из сети Compose (контейнер app). С хоста/LAN к нему не подключиться.
+    # По умолчанию 5433 на хосте, чтобы не пересекаться с системным PostgreSQL или другими проектами на :5432.
+    # DataGrip: jdbc:postgresql://IP:5433/ai_testgen  User: ai_testgen  Password: POSTGRES_PASSWORD
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
 
   # Приложение (Node.js + OCR)
   app:

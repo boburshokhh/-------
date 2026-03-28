@@ -257,6 +257,10 @@ async function pollProgress() {
     }
   } catch (error) {
     if (error?.status === 404) {
+      // Пока ждём первый ответ по задаче, 404 возможен из‑за гонки сети; после успешного poll статус станет processing.
+      if (store.state.upload.status === 'uploading') {
+        return
+      }
       stopPolling()
       store.actions.failUpload('Прогресс задачи не найден (сервер перезапущен, истёк TTL или запрос не дошёл до приложения). Загрузите файл снова.')
       return
@@ -294,12 +298,15 @@ async function handleUpload(file) {
   if (!file) return
   const jobId = createClientJobId()
   store.actions.startUpload(file, jobId)
+  // POST /upload должен уйти раньше GET /jobs/:id: иначе registerUploadJobStub на сервере
+  // ещё не выполнится и первый poll вернёт 404 («Задача не найдена»).
+  const uploadPromise = API.upload(file, {
+    jobId,
+    modelId: store.state.selectedModel || null,
+  })
   startPolling()
   try {
-    const result = await API.upload(file, {
-      jobId,
-      modelId: store.state.selectedModel || null,
-    })
+    const result = await uploadPromise
     store.actions.finishUpload(result)
     stopPolling()
   } catch (error) {
