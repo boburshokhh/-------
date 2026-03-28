@@ -4,7 +4,11 @@
 # Запуск: docker compose up -d
 # Остановка: docker compose down (volume с данными Postgres сохраняется)
 #
-# Локальная разработка без Docker: в .env укажите PGHOST=localhost и свой Postgres.
+# Локальная разработка без Docker: в .env — PGHOST=localhost и свои PGUSER/PGPASSWORD.
+#
+# Важно: пользователь БД в Compose всегда ai_testgen (не из PGUSER в .env). Иначе при первом
+# запуске том создаётся с одним именем, а в .env позже ставят другое (например bobur) —
+# приложение ходит под несуществующей ролью → "password authentication failed".
 
 services:
   postgres:
@@ -12,7 +16,7 @@ services:
     container_name: ai-testgen-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${PGUSER:-ai_testgen}
+      POSTGRES_USER: ai_testgen
       POSTGRES_PASSWORD: ${PGPASSWORD:-ai_testgen_dev}
       POSTGRES_DB: ${PGDATABASE:-ai_testgen}
     volumes:
@@ -41,10 +45,13 @@ services:
       NODE_ENV: production
       PORT: 3002
       DATA_DIR: /data
+      # Сброс DATABASE_URL из .env: внутри контейнера localhost ≠ сервис postgres.
+      # Внешняя БД на хосте: уберите эту строку и задайте DATABASE_URL с хостом host.docker.internal.
+      DATABASE_URL: ""
       PGHOST: postgres
       PGPORT: 5432
       PGDATABASE: ${PGDATABASE:-ai_testgen}
-      PGUSER: ${PGUSER:-ai_testgen}
+      PGUSER: ai_testgen
       PGPASSWORD: ${PGPASSWORD:-ai_testgen_dev}
       DB_CLIENT: postgres
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}

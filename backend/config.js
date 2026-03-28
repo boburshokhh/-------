@@ -17,7 +17,7 @@ module.exports = {
 
   // ── PostgreSQL ───────────────────────────────────────────────────────────
   DB_CLIENT: process.env.DB_CLIENT || 'postgres',
-  DATABASE_URL: process.env.DATABASE_URL || '',
+  DATABASE_URL: String(process.env.DATABASE_URL || '').trim(),
   PGHOST: process.env.PGHOST || 'localhost',
   PGPORT: parseInt(process.env.PGPORT) || 5432,
   PGDATABASE: process.env.PGDATABASE || 'ai_testgen',

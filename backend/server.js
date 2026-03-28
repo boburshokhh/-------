@@ -111,6 +111,11 @@ app.get('*', (req, res) => {
 app.use(errorHandler);
 
 async function start() {
+    const dbLabel = config.DATABASE_URL
+        ? 'DATABASE_URL'
+        : `${config.PGHOST}:${config.PGPORT}/${config.PGDATABASE} (user=${config.PGUSER})`;
+    console.log('[INIT] PostgreSQL target:', dbLabel);
+
     try {
         console.log('[INIT] Running PostgreSQL migrations...');
         await runMigrations(pgPool);
