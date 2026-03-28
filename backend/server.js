@@ -122,23 +122,27 @@ async function start() {
         console.log('[INIT] PostgreSQL ready');
     } catch (err) {
         console.error('[INIT] PostgreSQL init failed:', err.message);
+        if (/password authentication failed|28P01/i.test(String(err.message))) {
+            console.error(
+                '[INIT] Пароль БД: роль в Postgres задаётся при первом создании тома. POSTGRES_PASSWORD в .env на хосте должен совпадать с реальным паролем; смена в .env без пересоздания тома пароль внутри БД не обновляет.',
+            );
+        }
         process.exit(1);
     }
 
-    try {
-        await fileStorage.init();
-    } catch (err) {
-        console.warn('[INIT] Storage init warning:', err.message);
-    }
-
-    app.listen(config.PORT, () => {
+    // Порт до init хранилища: при STORAGE_BACKEND=minio вызов MinIO до listen мог долго висеть → Docker healthcheck unhealthy, сайт недоступен.
+    app.listen(config.PORT, '0.0.0.0', () => {
         const hasKey = config.GEMINI_API_KEY ? true : false;
-        console.log(`\n  AI Test Generator запущен на http://localhost:${config.PORT}`);
+        console.log(`\n  AI Test Generator запущен на http://0.0.0.0:${config.PORT}`);
         console.log(`  БД: PostgreSQL ${config.PGHOST}:${config.PGPORT}/${config.PGDATABASE}`);
         console.log(`  Хранилище: ${config.STORAGE_BACKEND}`);
         console.log(`  Загрузки: ${config.UPLOAD_DIR}`);
         console.log(`  Модель: ${config.LLM_MODEL}`);
         console.log(`  API ключ: ${hasKey ? 'настроен' : 'НЕ НАСТРОЕН'}\n`);
+    });
+
+    fileStorage.init().catch((err) => {
+        console.warn('[INIT] Storage init warning:', err.message);
     });
 }
 
