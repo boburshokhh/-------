@@ -17,6 +17,17 @@ async function recordUsage(fingerprint, date, modelId) {
     `, [fingerprint, date, modelId]);
 }
 
+/** Подтянуть счётчик до minRequests (после 429 «дневная квота» от Google). */
+async function setUsageAtLeast(fingerprint, date, modelId, minRequests) {
+    const n = Math.max(0, Math.floor(Number(minRequests) || 0));
+    await pg.query(`
+        INSERT INTO gemini_usage (key_fingerprint, usage_date, model_id, requests)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (key_fingerprint, usage_date, model_id)
+        DO UPDATE SET requests = GREATEST(gemini_usage.requests, EXCLUDED.requests)
+    `, [fingerprint, date, modelId, n]);
+}
+
 async function resetUsage() {
     await pg.query('DELETE FROM gemini_usage');
 }
@@ -29,4 +40,4 @@ async function getUsageSummary(fingerprint, date) {
     return rows;
 }
 
-module.exports = { getUsage, recordUsage, resetUsage, getUsageSummary };
+module.exports = { getUsage, recordUsage, setUsageAtLeast, resetUsage, getUsageSummary };

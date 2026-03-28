@@ -6,6 +6,7 @@ const { chunkText } = require('./chunker');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
+const { parseGeminiApiError, sleepForGeminiRetry } = require('./geminiError');
 const jobProgressSvc = require('./jobProgress');
 const { WEIGHT } = jobProgressSvc;
 
@@ -42,18 +43,33 @@ async function fetchEmbeddingWithRetry(text, retries = 3) {
             return emb;
         } catch (err) {
             lastError = err;
+            if (err.type === 'QUOTA_EXCEEDED') break;
+            const parsed = parseGeminiApiError(err);
+            if (parsed.isResourceExhausted) {
+                await quotaGuard.syncFromGoogle429(config.EMBEDDING_MODEL || 'gemini-embedding-001', err);
+            }
             console.warn(`[INDEXER] Эмбеддинг попытка ${attempt}/${retries}: ${err.message}`);
-            if (attempt < retries) await sleep(1000 * Math.pow(2, attempt - 1));
+            if (parsed.isDailyFreeTierQuota) break;
+            if (attempt < retries) await sleepForGeminiRetry(parsed, attempt, retries, sleep);
         }
     }
     throw lastError;
 }
 
 async function fetchChunkSummary(chunkTextStr, retries = 3) {
+    try {
+        await quotaGuard.assertWithinFreeTierQuota(config.LLM_MODEL);
+    } catch (e) {
+        if (e.type === 'QUOTA_EXCEEDED') {
+            console.warn(`[INDEXER] Summary пропущен (лимит free tier): ${e.message}`);
+            return [];
+        }
+        throw e;
+    }
+
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            await quotaGuard.assertWithinFreeTierQuota(config.LLM_MODEL);
             const ai = await getAiClient();
             const response = await ai.models.generateContent({
                 model: config.LLM_MODEL,
@@ -74,8 +90,13 @@ async function fetchChunkSummary(chunkTextStr, retries = 3) {
             throw new Error('Неожиданный формат summary');
         } catch (err) {
             lastError = err;
+            const g = parseGeminiApiError(err);
+            if (g.isResourceExhausted) {
+                await quotaGuard.syncFromGoogle429(config.LLM_MODEL, err);
+            }
             console.warn(`[INDEXER] Summary попытка ${attempt}/${retries}: ${err.message}`);
-            if (attempt < retries) await sleep(1000 * Math.pow(2, attempt - 1));
+            if (g.isDailyFreeTierQuota) break;
+            if (attempt < retries) await sleepForGeminiRetry(g, attempt, retries, sleep);
         }
     }
     console.error(`[INDEXER] Summary не получен: ${lastError.message}`);

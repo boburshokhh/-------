@@ -2,6 +2,7 @@ const { GoogleGenAI } = require('@google/genai');
 const config = require('../config');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
+const { parseGeminiApiError, sleepForGeminiRetry } = require('./geminiError');
 const { chunkText } = require('./chunker');
 const { validateQuestions, extractJSON } = require('./validator');
 const rag = require('./rag');
@@ -194,8 +195,8 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const userPrompt = buildBatchPrompt(intents, evidenceList);
             await quotaGuard.assertWithinFreeTierQuota(llmModel);
+            const userPrompt = buildBatchPrompt(intents, evidenceList);
             const ai = await getAiClient();
             const response = await ai.models.generateContent({
                 model: llmModel,
@@ -239,8 +240,14 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
             throw new Error('Ни один вопрос в batch не прошёл валидацию');
         } catch (error) {
             lastError = error;
-            if (attempt < retries) {
-                await sleep(1000 * Math.pow(2, attempt - 1));
+            if (error.type === 'QUOTA_EXCEEDED') {
+                console.warn(`[GENERATOR] Batch: лимит free tier — ${error.message}`);
+                break;
+            }
+            const g = parseGeminiApiError(error);
+            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, error);
+            if (attempt < retries && !g.isDailyFreeTierQuota) {
+                await sleepForGeminiRetry(g, attempt, retries, sleep);
             }
         }
     }

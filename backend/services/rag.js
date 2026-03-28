@@ -3,6 +3,7 @@ const config = require('../config');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
+const { parseGeminiApiError, sleepForGeminiRetry } = require('./geminiError');
 
 async function getAiClient() {
     return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
@@ -20,10 +21,10 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 async function getQueryEmbedding(query, retries = 3) {
+    const embedModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const embedModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
             await quotaGuard.assertWithinFreeTierQuota(embedModel);
             const ai = await getAiClient();
             const response = await ai.models.embedContent({
@@ -36,7 +37,13 @@ async function getQueryEmbedding(query, retries = 3) {
                 : response.embeddings.values || response.embedding.values;
         } catch (err) {
             lastError = err;
-            if (attempt < retries) await sleep(800 * attempt);
+            if (err.type === 'QUOTA_EXCEEDED') break;
+            const parsed = parseGeminiApiError(err);
+            if (parsed.isResourceExhausted) {
+                await quotaGuard.syncFromGoogle429(embedModel, err);
+            }
+            if (parsed.isDailyFreeTierQuota) break;
+            if (attempt < retries) await sleepForGeminiRetry(parsed, attempt, retries, sleep);
         }
     }
     throw lastError;
@@ -213,8 +220,12 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
             throw new Error('Пустой список тем');
         } catch (err) {
             lastError = err;
+            if (err.type === 'QUOTA_EXCEEDED') break;
+            const g = parseGeminiApiError(err);
+            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, err);
             console.warn(`[RAG] extractThemes попытка ${attempt}/3: ${err.message}`);
-            if (attempt < 3) await sleep(1000 * attempt);
+            if (g.isDailyFreeTierQuota) break;
+            if (attempt < 3) await sleepForGeminiRetry(g, attempt, 3, sleep);
         }
     }
     console.error('[RAG] extractThemes не удался:', lastError.message);
@@ -274,8 +285,12 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
             throw new Error('Пустой blueprint');
         } catch (err) {
             lastError = err;
+            if (err.type === 'QUOTA_EXCEEDED') break;
+            const g = parseGeminiApiError(err);
+            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, err);
             console.warn(`[RAG] buildBlueprint попытка ${attempt}/3: ${err.message}`);
-            if (attempt < 3) await sleep(1000 * attempt);
+            if (g.isDailyFreeTierQuota) break;
+            if (attempt < 3) await sleepForGeminiRetry(g, attempt, 3, sleep);
         }
     }
 

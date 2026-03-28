@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const quotaRepo = require('../db/repositories/quotaRepo');
 const config = require('../config');
 const runtimeConfig = require('./runtimeConfig');
+const { parseGeminiApiError } = require('./geminiError');
 
 const RPM_WINDOW_MS = 60 * 1000;
 const rpmHits = new Map();
@@ -61,6 +62,25 @@ async function assertWithinFreeTierQuota(modelId) {
             { modelId, limit: 'rpm', max: limits.rpm },
         );
     }
+}
+
+/**
+ * После 429 с дневной квотой free tier синхронизируем локальный учёт с лимитом,
+ * чтобы не слать десятки бесполезных запросов подряд.
+ * @returns {Promise<boolean>} true если учёт обновлён
+ */
+async function syncFromGoogle429(modelId, err) {
+    const p = parseGeminiApiError(err);
+    if (!p.isResourceExhausted || !p.isDailyFreeTierQuota) return false;
+    const limits = getLimitsForModel(modelId);
+    if (!limits) return false;
+    const fp = await getKeyFingerprint();
+    if (!fp) return false;
+    await quotaRepo.setUsageAtLeast(fp, utcDateString(), modelId, limits.rpd);
+    console.warn(
+        `[QUOTA] Синхронизация с ответом Google: дневной лимит free tier для ${modelId} (локально ≥ ${limits.rpd} запросов за UTC-сутки).`,
+    );
+    return true;
 }
 
 async function recordGeminiCall(modelId) {
@@ -126,6 +146,7 @@ module.exports = {
     getLimitsForModel,
     assertWithinFreeTierQuota,
     recordGeminiCall,
+    syncFromGoogle429,
     resetUsageForNewApiKey,
     getUsageSummaryPublic,
 };

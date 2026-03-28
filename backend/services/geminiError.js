@@ -1,0 +1,130 @@
+/**
+ * Разбор ошибок Gemini / Generative Language API (429, RESOURCE_EXHAUSTED, RetryInfo).
+ */
+
+const MAX_RETRY_WAIT_MS = 120_000;
+
+function tryParseJsonObject(s) {
+    if (!s || typeof s !== 'string') return null;
+    const t = s.trim();
+    if (!t.startsWith('{')) return null;
+    try {
+        return JSON.parse(t);
+    } catch {
+        return null;
+    }
+}
+
+function extractErrorPayload(err) {
+    if (!err) return null;
+    if (err.error && (err.error.code != null || err.error.status)) return err.error;
+    const fromMsg = tryParseJsonObject(err.message);
+    if (fromMsg) {
+        if (fromMsg.error) return fromMsg.error;
+        if (fromMsg.code != null || fromMsg.status) return fromMsg;
+    }
+    if (typeof err.message === 'string') {
+        const m = err.message.match(/\{[\s\S]*"code"\s*:\s*429[\s\S]*\}/);
+        if (m) {
+            const p = tryParseJsonObject(m[0]);
+            if (p?.error) return p.error;
+        }
+    }
+    return null;
+}
+
+function parseRetryDelaySeconds(detail) {
+    if (!detail || typeof detail !== 'object') return null;
+    const rd = detail.retryDelay;
+    if (rd == null) return null;
+    if (typeof rd === 'number' && !Number.isNaN(rd)) return rd;
+    if (typeof rd === 'string') {
+        const m = rd.match(/^(\d+(?:\.\d+)?)s$/);
+        if (m) return parseFloat(m[1], 10);
+        const n = parseFloat(rd, 10);
+        if (!Number.isNaN(n)) return n;
+    }
+    return null;
+}
+
+/**
+ * @param {unknown} err
+ * @returns {{
+ *   isResourceExhausted: boolean,
+ *   retryDelayMs: number | null,
+ *   isDailyFreeTierQuota: boolean,
+ *   quotaId: string | null,
+ * }}
+ */
+function parseGeminiApiError(err) {
+    const payload = extractErrorPayload(err);
+    const code = payload?.code;
+    const status = payload?.status;
+    const is429 = code === 429 || status === 'RESOURCE_EXHAUSTED';
+
+    let retryDelayMs = null;
+    let isDailyFreeTierQuota = false;
+    let quotaId = null;
+
+    const details = Array.isArray(payload?.details) ? payload.details : [];
+    for (const d of details) {
+        const t = d && d['@type'];
+        if (t && String(t).includes('RetryInfo')) {
+            const sec = parseRetryDelaySeconds(d);
+            if (sec != null && sec >= 0) {
+                const ms = Math.ceil(sec * 1000);
+                retryDelayMs = Math.min(MAX_RETRY_WAIT_MS, ms);
+            }
+        }
+        if (t && String(t).includes('QuotaFailure')) {
+            for (const v of d.violations || []) {
+                const qid = v.quotaId || v.quota_id;
+                if (qid) quotaId = String(qid);
+                if (/PerDay|per_day|DayPerProject/i.test(String(qid || ''))) {
+                    isDailyFreeTierQuota = true;
+                }
+                if (/free_tier|FreeTier/i.test(String(v.quotaMetric || ''))) {
+                    isDailyFreeTierQuota = true;
+                }
+            }
+        }
+    }
+
+    const msg = String(payload?.message || err?.message || '');
+    if (!isDailyFreeTierQuota && /per day|PerDay|сутк/i.test(msg)) {
+        isDailyFreeTierQuota = true;
+    }
+
+    return {
+        isResourceExhausted: Boolean(is429),
+        retryDelayMs,
+        isDailyFreeTierQuota,
+        quotaId,
+    };
+}
+
+/**
+ * @param {ReturnType<typeof parseGeminiApiError>} parsed
+ * @param {number} attempt 1-based
+ * @param {number} maxAttempts
+ */
+async function sleepForGeminiRetry(parsed, attempt, maxAttempts, sleepFn) {
+    const sleep = sleepFn || ((ms) => new Promise((r) => setTimeout(r, ms)));
+    if (attempt >= maxAttempts) return;
+    if (parsed.isDailyFreeTierQuota) {
+        const ms = parsed.retryDelayMs != null ? parsed.retryDelayMs : 0;
+        if (ms > 0) await sleep(ms);
+        return;
+    }
+    if (parsed.retryDelayMs != null && parsed.retryDelayMs > 0) {
+        await sleep(parsed.retryDelayMs);
+        return;
+    }
+    await sleep(1000 * Math.pow(2, attempt - 1));
+}
+
+module.exports = {
+    parseGeminiApiError,
+    sleepForGeminiRetry,
+    MAX_RETRY_WAIT_MS,
+};
