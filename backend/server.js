@@ -56,18 +56,38 @@ app.use('/api/logs', require('./routes/logs'));
 app.use('/api/jobs', require('./routes/jobs'));
 app.use('/api/_hidden/settings', require('./routes/settings'));
 
+/** Не даём /api/health зависнуть при «залипшем» Postgres — иначе Docker healthcheck падает по timeout. */
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            setTimeout(
+                () => reject(new Error(`${label || 'health'} timeout after ${ms}ms`)),
+                ms,
+            );
+        }),
+    ]);
+}
+
 app.get('/api/health', async (req, res) => {
+    const dbTimeoutMs = Math.min(8000, parseInt(process.env.HEALTH_DB_TIMEOUT_MS, 10) || 4000);
     let dbOk = false;
     try {
-        await pgPool.query('SELECT 1');
+        await withTimeout(pgPool.query('SELECT 1'), dbTimeoutMs, 'db_ping');
         dbOk = true;
-    } catch { /* ignore */ }
+    } catch { /* ignore — отдаём degraded */ }
 
     let hasKey = false;
     let quota = { tier: config.GEMINI_QUOTA_TIER || 'free', usageDateUtc: '', perModel: {} };
     try {
-        hasKey = await runtimeConfig.hasGeminiApiKey();
-        quota = await quotaGuard.getUsageSummaryPublic();
+        await withTimeout(
+            (async () => {
+                hasKey = await runtimeConfig.hasGeminiApiKey();
+                quota = await quotaGuard.getUsageSummaryPublic();
+            })(),
+            6000,
+            'health_optional',
+        );
     } catch (e) {
         console.warn('[HEALTH] optional checks failed:', e.message);
     }

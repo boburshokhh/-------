@@ -72,6 +72,15 @@
 3. **Nginx** (если стоит перед приложением): фрагмент access/error-лога за то же время — строки с `/api/upload` и `/api/jobs/` (статус 413, размер запроса).
 4. Уточните на сервере **`MAX_FILE_SIZE_MB`** в `.env** и **`client_max_body_size`** в реально подключённом конфиге nginx (не только копия из репозитория).
 
+### Docker: `dependency failed to start: container ai-testgen-app is unhealthy`
+Nginx в Compose ждёт `app` со статусом **healthy**. Пока процесс Node не слушает `:3002` или healthcheck не получает **HTTP 200** с `/api/health`, контейнер остаётся `unhealthy`.
+
+**Что сделать на сервере:**
+1. Логи приложения: `docker logs ai-testgen-app --tail 150` (или `docker compose logs app --tail 150`). Ищите `[INIT] PostgreSQL init failed`, `password authentication failed`, `Failed to start server`.
+2. Частая причина — **несовпадение пароля БД**: том Postgres создаётся при первом запуске с `POSTGRES_PASSWORD` из `.env`. Если пароль потом сменили только в `.env`, внутри БД он не обновится → миграции падают → `process.exit(1)` → контейнер перезапускается и не становится healthy. Выровняйте пароль с тем, что задан при создании тома, либо пересоздайте том (с потерей данных): `docker compose down -v` и снова `up`.
+3. Убедитесь, что в `.env` на хосте задан **`POSTGRES_PASSWORD`** (для сервисов `postgres` и `app` в compose он общий). Пустой `PGPASSWORD=` в `.env` не должен подменять пароль: в `docker-compose.yml` для `app` явно задаются `PGPASSWORD` и `DATABASE_URL: ""`.
+4. После правок: `docker compose up -d --build` и снова смотрите `docker logs ai-testgen-app`.
+
 ### Ошибка 502 Bad Gateway на `/api/...` и на статике (`*.css`, `*.js`)
 - **Причина**: **nginx** не получает ответ от контейнера `app` (процесс упал, ещё не поднялся, не прошёл healthcheck, нехватка памяти при OCR/LLM).
 - **Решение**:

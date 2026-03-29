@@ -78,12 +78,13 @@ services:
       - "${APP_HOST_PORT:-3002}:3002"
     expose:
       - "3002"
+    # start_period: миграции + cold start; timeout healthcheck > суммы таймаутов в /api/health (см. server.js)
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3002/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));"]
       interval: 15s
-      timeout: 10s
-      start_period: 90s
-      retries: 5
+      timeout: 20s
+      start_period: 120s
+      retries: 8
 
   # Nginx (reverse proxy, единая точка входа)
   nginx:
