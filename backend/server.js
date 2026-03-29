@@ -52,7 +52,22 @@ const uploadLimiter = rateLimit({
     message: { error: 'Слишком много загрузок, попробуйте позже' },
 });
 
-app.use('/api/upload', uploadLimiter, require('./routes/upload'));
+/**
+ * Тяжёлый граф (generator, rag, pdf-parse, indexer, Gemini SDK) не грузим при старте —
+ * иначе на VPS с малым RAM возможен OOM / немой краш сразу после [BOOT], без [INIT].
+ */
+function lazyRouter(modulePath) {
+    let router;
+    return (req, res, next) => {
+        if (!router) {
+            console.error('[LOAD]', modulePath, new Date().toISOString());
+            router = require(modulePath);
+        }
+        return router(req, res, next);
+    };
+}
+
+app.use('/api/upload', uploadLimiter, lazyRouter('./routes/upload'));
 app.use('/api/tests', apiLimiter, require('./routes/tests'));
 app.use('/api/results', apiLimiter, require('./routes/results'));
 app.use('/api/logs', require('./routes/logs'));
