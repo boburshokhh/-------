@@ -1,3 +1,5 @@
+import { getToken } from '@/lib/authSession';
+
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 const LOGS_API_TOKEN = import.meta.env.VITE_LOGS_API_TOKEN || '';
 const SETTINGS_API_TOKEN = import.meta.env.VITE_SETTINGS_API_TOKEN || '';
@@ -27,6 +29,7 @@ function mapHttpError(status, payload) {
     return payload?.details || payload?.error || 'Временная ошибка генерации. Повторите попытку.';
   }
   if (status === 404) return payload?.error || 'Запрошенные данные не найдены.';
+  if (status === 401) return payload?.error || 'Требуется войти или сессия истекла.';
   return fallback;
 }
 
@@ -37,9 +40,14 @@ async function request(path, options = {}) {
   if (timeoutMs > 0) {
     timer = setTimeout(() => ctrl.abort(), timeoutMs);
   }
+  const token = getToken();
+  const headers = { ...(fetchOpts.headers || {}) };
+  if (token && !headers.Authorization) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...fetchOpts, signal: ctrl.signal });
+    response = await fetch(`${API_BASE}${path}`, { ...fetchOpts, headers, signal: ctrl.signal });
   } catch (e) {
     if (e?.name === 'AbortError') {
       const err = new Error('Таймаут запроса к серверу');
@@ -154,5 +162,33 @@ export const API = {
 
   getResultDetail(id) {
     return request(`/results/detail/${encodeURIComponent(id)}`);
+  },
+
+  register({ email, password, fullName }) {
+    return request('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, fullName }),
+    });
+  },
+
+  login({ email, password }) {
+    return request('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
+  getMe() {
+    return request('/auth/me');
+  },
+
+  changePassword({ currentPassword, newPassword }) {
+    return request('/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
   },
 };

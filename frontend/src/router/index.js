@@ -8,9 +8,13 @@ import TestView from '@/views/TestView.vue'
 import ItogView from '@/views/ItogView.vue'
 import RazborView from '@/views/RazborView.vue'
 import HiddenSettingsView from '@/views/HiddenSettingsView.vue'
+import LoginView from '@/views/LoginView.vue'
+import RegisterView from '@/views/RegisterView.vue'
 
 const routes = [
   { path: '/', redirect: '/biblioteka' },
+  { path: '/login', component: LoginView },
+  { path: '/register', component: RegisterView },
   { path: '/biblioteka', component: BibliotekaView },
   { path: '/zagruzka', component: ZagruzkaView },
   { path: '/progress', component: ProgressView },

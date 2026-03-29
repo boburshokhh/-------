@@ -45,7 +45,7 @@ async function getQueryEmbedding(query, retries = 3) {
 async function getBatchEmbeddings(texts, retries = 3) {
     if (!texts || texts.length === 0) return [];
     const embeddings = [];
-    
+
     // Обрабатываем последовательно мелкими батчами, чтобы не упереться в лимиты API
     const chunkSize = 5;
     for (let i = 0; i < texts.length; i += chunkSize) {
@@ -54,7 +54,7 @@ async function getBatchEmbeddings(texts, retries = 3) {
         const batchResults = await Promise.all(promises);
         embeddings.push(...batchResults);
     }
-    
+
     return embeddings;
 }
 

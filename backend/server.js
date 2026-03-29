@@ -70,6 +70,7 @@ function lazyRouter(modulePath) {
 app.use('/api/upload', uploadLimiter, lazyRouter('./routes/upload'));
 app.use('/api/tests', apiLimiter, require('./routes/tests'));
 app.use('/api/results', apiLimiter, require('./routes/results'));
+app.use('/api/auth', apiLimiter, lazyRouter('./routes/auth'));
 app.use('/api/logs', require('./routes/logs'));
 app.use('/api/jobs', require('./routes/jobs'));
 app.use('/api/_hidden/settings', require('./routes/settings'));

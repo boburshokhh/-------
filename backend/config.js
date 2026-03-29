@@ -125,6 +125,13 @@ module.exports = {
     .filter(Boolean),
   LOGS_API_TOKEN: process.env.LOGS_API_TOKEN || '',
   SETTINGS_API_TOKEN: process.env.SETTINGS_API_TOKEN || '',
+  /** JWT для /api/auth; в production задайте JWT_SECRET в .env (≥32 символа) */
+  JWT_SECRET:
+    process.env.JWT_SECRET ||
+    (process.env.NODE_ENV === 'production'
+      ? ''
+      : 'local-dev-jwt-secret-min-32chars-long!!'),
+  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '7d',
   /** Полные тексты в SQLite (может сильно раздуть data.db) */
   STORE_DOCUMENT_TEXT_IN_DB: process.env.STORE_DOCUMENT_TEXT_IN_DB === 'true',
   /** Ниже этого chars/page для pdf-parse будет пробоваться pdf.js */
