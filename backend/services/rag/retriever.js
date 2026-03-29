@@ -44,37 +44,18 @@ async function getQueryEmbedding(query, retries = 3) {
 
 async function getBatchEmbeddings(texts, retries = 3) {
     if (!texts || texts.length === 0) return [];
+    const embeddings = [];
     
-    // Some endpoints may require limits per batch (e.g. 100), but we handle chunking at the caller if needed.
-    const embedModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
-    let lastError;
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            await quotaGuard.assertWithinFreeTierQuota(embedModel);
-            const ai = await getAiClient();
-            
-            const response = await ai.models.batchEmbedContents({
-                model: embedModel,
-                contents: texts,
-            });
-            await quotaGuard.recordGeminiCall(embedModel);
-            
-            if (response && response.embeddings && Array.isArray(response.embeddings)) {
-                return response.embeddings.map(e => e.values);
-            }
-            throw new Error('Invalid response format from batchEmbedContents');
-        } catch (err) {
-            lastError = err;
-            if (err.type === 'QUOTA_EXCEEDED') break;
-            const parsed = parseGeminiApiError(err);
-            if (parsed.isResourceExhausted) {
-                await quotaGuard.syncFromGoogle429(embedModel, err);
-            }
-            if (parsed.isDailyFreeTierQuota) break;
-            if (attempt < retries) await sleepForGeminiRetry(parsed, attempt, retries, sleep);
-        }
+    // Обрабатываем последовательно мелкими батчами, чтобы не упереться в лимиты API
+    const chunkSize = 5;
+    for (let i = 0; i < texts.length; i += chunkSize) {
+        const batch = texts.slice(i, i + chunkSize);
+        const promises = batch.map(text => getQueryEmbedding(text, retries));
+        const batchResults = await Promise.all(promises);
+        embeddings.push(...batchResults);
     }
-    throw lastError;
+    
+    return embeddings;
 }
 
 function mmrSelect(queryVec, candidates, k, lambda = 0.65, threshold = 0.0) {
