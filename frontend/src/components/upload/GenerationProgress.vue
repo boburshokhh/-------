@@ -1,17 +1,23 @@
 <template>
   <div class="max-w-3xl mx-auto w-full space-y-6">
 
-    <!-- ── Фазовые пилюли ─────────────────────────────────────────── -->
-    <div class="flex items-center justify-between gap-2 flex-wrap">
+    <!-- ── Фазовые шаги (светлый фон, без hover) ─────────────────── -->
+    <div
+      class="phase-pills-row flex items-center justify-between gap-2 flex-wrap"
+      role="list"
+      aria-label="Этапы обработки"
+    >
       <div
         v-for="pill in phasePills"
         :key="pill.id"
         class="pill"
         :class="pill.state"
+        role="listitem"
+        :aria-current="pill.state === 'active' ? 'step' : undefined"
       >
-        <span class="pill-dot"></span>
-        <span>{{ pill.label }}</span>
-        <span v-if="pill.state === 'done'" class="pill-check">✓</span>
+        <span class="pill-dot" aria-hidden="true"></span>
+        <span class="pill-label">{{ pill.label }}</span>
+        <span v-if="pill.state === 'done'" class="pill-check" aria-hidden="true">✓</span>
       </div>
     </div>
 
@@ -297,45 +303,71 @@ onMounted(() => syncLogFromProps())
 </script>
 
 <style scoped>
-/* ── Phase pills ────────────────────────────────────────────────── */
+/* ── Phase pills (белый фон: контур + лёгкая заливка, без hover) ─ */
+.phase-pills-row {
+  padding-bottom: 2px;
+}
 .pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 14px;
+  padding: 6px 12px;
+  min-height: 2rem;
   border-radius: 9999px;
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 5.5rem;
   justify-content: center;
+  box-sizing: border-box;
+  transition: none;
 }
+.pill-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Ожидание: нейтральный контур */
 .pill.waiting {
-  background: #1E293B;
-  color: #475569;
-  border: 1px solid #334155;
+  background: #FFFFFF;
+  color: #94A3B8;
+  border: 1px solid #E1E9EE;
 }
+.pill.waiting .pill-dot {
+  background: #CBD5E1;
+}
+/* Текущий этап: акцент бренда, заметно но без «неона» */
 .pill.active {
-  background: #1E3A8A;
-  color: #93C5FD;
-  border: 1px solid #3755C3;
-  box-shadow: 0 0 8px rgba(55, 85, 195, 0.25);
+  background: rgba(55, 85, 195, 0.08);
+  color: #3755C3;
+  border: 1.5px solid #3755C3;
 }
+.pill.active .pill-dot {
+  background: #3755C3;
+}
+/* Завершённые шаги */
 .pill.done {
-  background: #064E3B;
-  color: #6EE7B7;
-  border: 1px solid #10B981;
+  background: #F0FDF4;
+  color: #047857;
+  border: 1px solid #A7F3D0;
+}
+.pill.done .pill-dot {
+  background: #10B981;
 }
 .pill-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: currentColor;
   flex-shrink: 0;
 }
 .pill-check {
-  font-size: 0.65rem;
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: #059669;
+  line-height: 1;
 }
 
 /* ── Simple loader + percent ───────────────────────────────────── */

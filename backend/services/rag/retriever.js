@@ -90,12 +90,18 @@ function mmrSelect(queryVec, candidates, k, lambda = 0.65, threshold = 0.0) {
     return selected;
 }
 
+/** Экранирует строку для безопасного использования внутри RegExp (query может содержать URL, скобки и т.д.). */
+function escapeRegexChars(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function lexicalScore(query, text) {
-    const queryWords = new Set(query.toLowerCase().split(/\\W+/).filter(w => w.length > 2));
+    const queryWords = new Set(query.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
     const textLower = text.toLowerCase();
     let hits = 0;
     for (const w of queryWords) {
-        const re = new RegExp(`\\b${w}\\b`, 'g');
+        const safe = escapeRegexChars(w);
+        const re = new RegExp(`\\b${safe}\\b`, 'g');
         const matches = textLower.match(re);
         if (matches) hits += Math.log(1 + matches.length);
     }
