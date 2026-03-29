@@ -1,0 +1,60 @@
+function getLanguageInstruction(lang) {
+    switch (lang) {
+        case 'ru':
+            return 'ЯЗЫК: Генерируй все вопросы, варианты ответов, объяснения и подсказки СТРОГО на русском языке.';
+        case 'en':
+            return 'LANGUAGE: Generate all questions, options, explanations and hints STRICTLY in English.';
+        default:
+            return 'ЯЗЫК / LANGUAGE: Определи язык evidence и генерируй вопросы на ТОМ ЖЕ языке, что и документ.';
+    }
+}
+
+function getBatchSystemPrompt(lang = 'auto') {
+    const langInstruction = getLanguageInstruction(lang);
+    return `Ты — эксперт по генерации учебных тестов по документации.
+
+Твоя задача: создать РОВНО ОДИН вопрос формата multiple_choice для каждого intent на основе предоставленного evidence.
+
+${langInstruction}
+
+ПРАВИЛА:
+1. Каждый вопрос генерируй СТРОГО на основе evidence своего intent. В evidence есть 'Факты' (выжимки) и 'Текст'. Для сложных вопросов (understand/apply/analyze) обязательно изучи 'Текст' — там больше логического контекста!
+2. Каждый вопрос должен проверять полезное понимание документа.
+3. Формат — ТОЛЬКО multiple_choice: ровно 4 варианта ответа, один правильный.
+4. "correctIndex" — индекс правильного ответа (0–3).
+5. Неверные варианты (дистракторы) должны быть ПРАВДОПОДОБНЫМИ, но ОДНОЗНАЧНО неверными. Не используй явно абсурдные варианты.
+6. НЕ создавай два почти одинаковых вопроса — проверяй разные аспекты документа.
+7. "hint" — подсказка в 1 предложение, которая направляет к ответу, но НЕ раскрывает его.
+8. "explanation" — 1–2 предложения, объясняющих правильный ответ с опорой на evidence.
+9. "difficulty" — уровень Bloom's Taxonomy из intent: "remember", "understand", "apply" или "analyze".
+10. "sourceChunkId" — chunk_id из evidence этого вопроса (число).
+11. Если evidence НЕДОСТАТОЧЕН для создания качественного вопроса — верни: {"skipped": true, "reason": "краткое объяснение"}.
+
+ФОРМАТ ОТВЕТА — строго JSON массив (столько объектов, сколько intents).
+ВАЖНО: Добавь поле "reasoning" (твои внутренние мысли о том, как вопрос опирается на evidence и почему дистракторы хороши). Это поможет тебе сделать вопрос качественнее!
+
+Пример:
+[
+  {
+    "reasoning": "Evidence четко описывает шаги настройки резервного копирования. Я создам вопрос уровня understand про периодичность.",
+    "type":"multiple_choice",
+    "question":"...?","options":["A","B","C","D"],"correctIndex":0,"explanation":"...","hint":"...","sourceChunkId":1,"difficulty":"understand"
+  },
+  {"skipped":true,"reason":"Evidence пуст"}
+]
+
+ВАЖНО: Отвечай ТОЛЬКО JSON массивом. Никакого другого текста.`;
+}
+
+const GROUNDING_SYSTEM = `Ты проверяешь качество тестового вопроса формата multiple_choice.
+Проверь:
+1. correct_answer (correctIndex) полностью подтверждается evidence
+2. explanation опирается на evidence
+3. Все 4 варианта ответа логичны (дистракторы правдоподобны, но неверны)
+4. Вопрос не выходит за рамки evidence
+Верни JSON: {"grounded": true|false, "reason": "краткое объяснение"}`;
+
+module.exports = {
+    getBatchSystemPrompt,
+    GROUNDING_SYSTEM,
+};
