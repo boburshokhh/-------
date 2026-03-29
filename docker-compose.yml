@@ -42,6 +42,8 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ai-testgen-app:latest
+    # Образ только локальной сборки; иначе `docker compose pull` лезет на Docker Hub → pull access denied
+    pull_policy: build
     container_name: ai-testgen-app
     restart: unless-stopped
     env_file:

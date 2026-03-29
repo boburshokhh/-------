@@ -67,6 +67,8 @@ cd ~/edu_atg_ai_testgen   # или ваш путь к проекту
 docker compose up -d --build
 ```
 
+**Не полагайтесь на `docker compose pull` для сервиса `app`:** образ `ai-testgen-app:latest` **собирается только локально** из Dockerfile. Команда `docker compose pull` без сборки даст `pull access denied for ai-testgen-app` (такого репозитория на Docker Hub нет). Обновление приложения: `git pull` → `docker compose build app` → `docker compose up -d`. Базовые образы `postgres` и `nginx` при желании подтягиваются так: `docker compose pull postgres nginx`.
+
 ### 4. Проверить
 
 ```bash

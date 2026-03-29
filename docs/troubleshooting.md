@@ -72,6 +72,9 @@
 3. **Nginx** (если стоит перед приложением): фрагмент access/error-лога за то же время — строки с `/api/upload` и `/api/jobs/` (статус 413, размер запроса).
 4. Уточните на сервере **`MAX_FILE_SIZE_MB`** в `.env** и **`client_max_body_size`** в реально подключённом конфиге nginx (не только копия из репозитория).
 
+### Docker: `pull access denied for ai-testgen-app`
+Образ приложения **не хранится в публичном registry** — он собирается командой `docker compose build` / `docker compose up --build`. Не выполняйте отдельно `docker compose pull` без сборки `app`, если не обновляете только `postgres`/`nginx`: используйте `docker compose pull postgres nginx` и `docker compose build app` (в `docker-compose.yml` для `app` задано `pull_policy: build`).
+
 ### Docker: `dependency failed to start: container ai-testgen-app is unhealthy`
 Nginx в Compose ждёт `app` со статусом **healthy**. Пока процесс Node не слушает `:3002` или healthcheck не получает **HTTP 200** с `/api/health`, контейнер остаётся `unhealthy`.
 
