@@ -6,6 +6,10 @@ const quotaGuard = require('./quotaGuard');
 const { parseGeminiApiError, sleepForGeminiRetry, withTimeout } = require('./geminiError');
 const { getQueryEmbedding, getBatchEmbeddings, hybridRetrieve, mmrSelect, lexicalScore } = require('./rag/retriever');
 const { detectSectionHint, resolveChunkEvidence, buildSummaryDigest, buildEvidencePackets, formatEvidenceForPrompt } = require('./rag/evidenceBuilder');
+const {
+    estimateThemeCount, buildLocalThemesFromSections, buildThemesAndBlueprint, extractThemes,
+    buildQuestionBlueprint, computeIntentsPerTheme, buildBlueprintFallbackLocal
+} = require('./generation/blueprintService');
 const { cosineSimilarity } = require('./nlp/similarity');
 
 async function getAiClient() {
@@ -51,14 +55,6 @@ function throwAfterGeminiRetriesFailed(stepHuman, lastError) {
     e.details = lastError.message;
     throw e;
 }
-
-const { getQueryEmbedding, getBatchEmbeddings, hybridRetrieve, mmrSelect, lexicalScore } = require('./rag/retriever');
-const { detectSectionHint, resolveChunkEvidence, buildSummaryDigest, buildEvidencePackets, formatEvidenceForPrompt } = require('./rag/evidenceBuilder');
-const {
-    estimateThemeCount, buildLocalThemesFromSections, buildThemesAndBlueprint, extractThemes,
-    buildQuestionBlueprint, computeIntentsPerTheme, buildBlueprintFallbackLocal
-} = require('./generation/blueprintService');
-const { cosineSimilarity } = require('./nlp/similarity');
 
 
 // Логика Blueprint вынесена в generation/blueprintService.js
