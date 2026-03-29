@@ -470,7 +470,7 @@ function buildLocalThemesFromSections(indexedChunks) {
 async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, targetCount = null, options = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const llmModel = model || config.LLM_MODEL;
+    const llmModel = config.LLM_FAST_MODEL || config.LLM_MODEL;
 
     const structuralEstimate = estimateThemeCount(indexedChunks, fullText);
     const targetThemes = targetCount ? Math.max(structuralEstimate, Math.min(10, Math.ceil(targetCount / 3))) : structuralEstimate;
@@ -552,7 +552,7 @@ ${digest}
 async function extractThemes(indexedChunks, fullText, model = null, targetCount = null, options = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const llmModel = model || config.LLM_MODEL;
+    const llmModel = config.LLM_FAST_MODEL || config.LLM_MODEL;
 
     const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
     const OLD_TO_BLOOM = { easy: 'remember', medium: 'understand', hard: 'analyze' };
@@ -717,7 +717,7 @@ function computeIntentsPerTheme(richThemes, totalTarget) {
 async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null, options = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const llmModel = model || config.LLM_MODEL;
+    const llmModel = config.LLM_FAST_MODEL || config.LLM_MODEL;
     const richThemes = themes.map(t => typeof t === 'string'
         ? { topic: t, section: 'Документ', importance: 2, suggestedCount: 3, difficultyCandidates: ['understand'] }
         : t

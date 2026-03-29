@@ -97,7 +97,7 @@ function getBatchSystemPrompt(lang = 'auto') {
 ${langInstruction}
 
 ПРАВИЛА:
-1. Каждый вопрос генерируй СТРОГО на основе evidence своего intent. НЕ ВЫДУМЫВАЙ факты вне evidence.
+1. Каждый вопрос генерируй СТРОГО на основе evidence своего intent. В evidence есть 'Факты' (выжимки) и 'Текст'. Для сложных вопросов (understand/apply/analyze) обязательно изучи 'Текст' — там больше логического контекста!
 2. Каждый вопрос должен проверять полезное понимание документа.
 3. Формат — ТОЛЬКО multiple_choice: ровно 4 варианта ответа, один правильный.
 4. "correctIndex" — индекс правильного ответа (0–3).
@@ -106,17 +106,20 @@ ${langInstruction}
 7. "hint" — подсказка в 1 предложение, которая направляет к ответу, но НЕ раскрывает его.
 8. "explanation" — 1–2 предложения, объясняющих правильный ответ с опорой на evidence.
 9. "difficulty" — уровень Bloom's Taxonomy из intent: "remember", "understand", "apply" или "analyze".
-   - remember: вопрос на запоминание конкретного факта
-   - understand: вопрос на понимание концепции/процесса
-   - apply: вопрос на применение знания к ситуации
-   - analyze: вопрос на сравнение, причинно-следственные связи, выводы
 10. "sourceChunkId" — chunk_id из evidence этого вопроса (число).
-11. Если evidence НЕДОСТАТОЧЕН для создания качественного вопроса (слишком общий, неконкретный, или нет фактов) — верни для этого intent объект: {"skipped": true, "reason": "краткое объяснение"}.
+11. Если evidence НЕДОСТАТОЧЕН для создания качественного вопроса — верни: {"skipped": true, "reason": "краткое объяснение"}.
 
-ФОРМАТ ОТВЕТА — строго JSON массив (столько объектов, сколько intents):
+ФОРМАТ ОТВЕТА — строго JSON массив (столько объектов, сколько intents).
+ВАЖНО: Добавь поле "reasoning" (твои внутренние мысли о том, как вопрос опирается на evidence и почему дистракторы хороши). Это поможет тебе сделать вопрос качественнее!
+
+Пример:
 [
-  {"type":"multiple_choice","question":"...?","options":["A","B","C","D"],"correctIndex":0,"explanation":"...","hint":"...","sourceChunkId":1,"difficulty":"understand"},
-  {"skipped":true,"reason":"Evidence не содержит конкретных фактов для вопроса"}
+  {
+    "reasoning": "Evidence четко описывает шаги настройки резервного копирования. Я создам вопрос уровня understand про периодичность.",
+    "type":"multiple_choice",
+    "question":"...?","options":["A","B","C","D"],"correctIndex":0,"explanation":"...","hint":"...","sourceChunkId":1,"difficulty":"understand"
+  },
+  {"skipped":true,"reason":"Evidence пуст"}
 ]
 
 ВАЖНО: Отвечай ТОЛЬКО JSON массивом. Никакого другого текста.`;
@@ -253,8 +256,14 @@ function buildOfflineMcqFromChunks(fullText, indexedChunks, targetMin, targetMax
     return validateQuestions(raw);
 }
 
-function buildBatchPrompt(intents, evidenceList, maxEvidenceChars = 2500) {
+function buildBatchPrompt(intents, evidenceList) {
     const lines = [`Создай ${intents.length} вопрос(а/ов) формата multiple_choice — по одному на каждый intent.\n`];
+    // Dynamic evidence limit to prevent giant prompts
+    let maxEvidenceChars = 2500;
+    if (intents.length === 1) maxEvidenceChars = 3500;
+    else if (intents.length === 2) maxEvidenceChars = 2000;
+    else maxEvidenceChars = 1500;
+    
     for (let i = 0; i < intents.length; i++) {
         const intent = intents[i];
         let evidence = evidenceList[i] || '';

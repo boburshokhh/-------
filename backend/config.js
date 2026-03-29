@@ -44,6 +44,7 @@ module.exports = {
   QUESTIONS_PER_CHUNK: parseInt(process.env.QUESTIONS_PER_CHUNK, 10) || 4,
   CHAR_LENGTH_PER_QUESTION: parseInt(process.env.CHAR_LENGTH_PER_QUESTION, 10) || 2000,
   LLM_MODEL: process.env.LLM_MODEL || 'gemini-2.5-flash',
+  LLM_FAST_MODEL: process.env.LLM_FAST_MODEL || 'gemini-1.5-flash',
   /** Free tier (ориентир для защиты от злоупотреблений; сверяйте с AI Studio для своего ключа) */
   GEMINI_QUOTA_TIER: 'free',
   // Только Text-out модели с доступными лимитами (RPM/TPM/RPD)
@@ -103,7 +104,7 @@ module.exports = {
   MMR_LAMBDA: parseFloat(process.env.MMR_LAMBDA) || 0.65,
   EMBED_BATCH_SIZE: parseInt(process.env.EMBED_BATCH_SIZE) || 5,
   EMBED_CONCURRENCY: parseInt(process.env.EMBED_CONCURRENCY) || 2,
-  LLM_BATCH_SIZE: parseInt(process.env.LLM_BATCH_SIZE) || 4,
+  LLM_BATCH_SIZE: parseInt(process.env.LLM_BATCH_SIZE) || 2,
   BACKFILL_MAX_ROUNDS: parseInt(process.env.BACKFILL_MAX_ROUNDS) || 3,
   ENABLE_GROUNDING: process.env.ENABLE_GROUNDING !== 'false',
   DEDUP_THRESHOLD: parseFloat(process.env.DEDUP_THRESHOLD) || 0.88,
