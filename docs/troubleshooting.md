@@ -68,7 +68,7 @@
 ### Сбор логов для разбора (приложение и nginx)
 Чтобы передать контекст для диагностики:
 1. **Приложение (Node):** в Docker — `docker compose logs app --since 1h` (или `--tail 500`); без Docker — stdout/journald процесса, где запущен `node`.
-2. **Ищите в логах JSON-строки** с полями `event`: `upload_job_stub_registered`, `job_poll_miss`, `job_state_expired`, а также `[PROGRESS]`, `[UPLOAD]`, `[ERROR]`.
+2. **Ищите в логах JSON-строки** с полями `event`: `upload_job_stub_registered`, `job_poll_miss`, `job_state_expired`, `indexing_complete`, `generate_test_invoked`, `document_language_detected` (метрики эвристики языка), `generate_phase_begin` / `generate_phase_end` (шаги `extract_themes`, `build_blueprint`), `generate_phase_failed` (падение на одном из шагов), а также `[PROGRESS]`, `[UPLOAD]`, `[ERROR]`. Последнее успешное `generate_phase_end` и следующее за ним событие показывают, на чём остановилась генерация.
 3. **Nginx** (если стоит перед приложением): фрагмент access/error-лога за то же время — строки с `/api/upload` и `/api/jobs/` (статус 413, размер запроса).
 4. Уточните на сервере **`MAX_FILE_SIZE_MB`** в `.env** и **`client_max_body_size`** в реально подключённом конфиге nginx (не только копия из репозитория).
 

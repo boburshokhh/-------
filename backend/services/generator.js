@@ -24,20 +24,52 @@ async function getAiClient() {
 
 const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
 
-function detectLanguage(text) {
-    const sample = text.slice(0, 3000);
+/**
+ * Эвристика языка документа + диагностика для логов (не вызывает сеть).
+ * @returns {{ lang: 'ru'|'en'|'auto', diagnostics: Record<string, number|string> }}
+ */
+function detectLanguageWithDiagnostics(text) {
+    const fullTextLength = typeof text === 'string' ? text.length : 0;
+    const sample = (text || '').slice(0, 3000);
     const cyrillicCount = (sample.match(/[а-яёА-ЯЁ]/g) || []).length;
     const latinCount = (sample.match(/[a-zA-Z]/g) || []).length;
-    if (cyrillicCount > latinCount * 1.5) return 'ru';
-    if (latinCount > cyrillicCount * 1.5) return 'en';
     const ruWords = ['и', 'в', 'на', 'что', 'это', 'для', 'не', 'по', 'как', 'из', 'при'];
     const enWords = ['the', 'and', 'is', 'in', 'to', 'of', 'for', 'with', 'that', 'on', 'are'];
     const lowerSample = sample.toLowerCase();
     const ruHits = ruWords.filter(w => new RegExp(`\\b${w}\\b`, 'g').test(lowerSample)).length;
     const enHits = enWords.filter(w => new RegExp(`\\b${w}\\b`, 'g').test(lowerSample)).length;
-    if (ruHits > enHits) return 'ru';
-    if (enHits > ruHits) return 'en';
-    return 'auto';
+
+    let lang;
+    let resolvedBy;
+    if (cyrillicCount > latinCount * 1.5) {
+        lang = 'ru';
+        resolvedBy = 'cyrillic_ratio';
+    } else if (latinCount > cyrillicCount * 1.5) {
+        lang = 'en';
+        resolvedBy = 'latin_ratio';
+    } else if (ruHits > enHits) {
+        lang = 'ru';
+        resolvedBy = 'stopwords_ru';
+    } else if (enHits > ruHits) {
+        lang = 'en';
+        resolvedBy = 'stopwords_en';
+    } else {
+        lang = 'auto';
+        resolvedBy = 'undetermined';
+    }
+
+    return {
+        lang,
+        diagnostics: {
+            full_text_length: fullTextLength,
+            sample_chars: sample.length,
+            cyrillic_count: cyrillicCount,
+            latin_count: latinCount,
+            ru_word_hits: ruHits,
+            en_word_hits: enHits,
+            resolved_by: resolvedBy,
+        },
+    };
 }
 
 function getLanguageInstruction(lang) {
@@ -473,7 +505,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
 
     // Create generation_run record
     let runId = null;
-    const detectedLang = detectLanguage(fullText);
+    const { lang: detectedLang, diagnostics: langDiagnostics } = detectLanguageWithDiagnostics(fullText);
 
     if (!indexedChunks || indexedChunks.length === 0) {
         const chunks = chunkText(fullText);
@@ -521,8 +553,27 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         metrics: { model, run_id: runId },
     });
 
-    console.log(`[GENERATOR] Определён язык документа: ${detectedLang}`);
+    console.log(`[GENERATOR] Определён язык документа: ${detectedLang} (${langDiagnostics.resolved_by})`);
     progress({ phase: 'generate', stage: 'language', workDelta: PW.GEN_LANG, detail: `Язык: ${detectedLang}` });
+
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'document_language_detected',
+        metrics: {
+            lang: detectedLang,
+            indexed_chunk_count: indexedChunks.length,
+            full_text_length: langDiagnostics.full_text_length,
+            sample_chars: langDiagnostics.sample_chars,
+            cyrillic_count: langDiagnostics.cyrillic_count,
+            latin_count: langDiagnostics.latin_count,
+            ru_word_hits: langDiagnostics.ru_word_hits,
+            en_word_hits: langDiagnostics.en_word_hits,
+        },
+        metadata: { resolved_by: String(langDiagnostics.resolved_by) },
+    });
 
     budgetPlan.logs.forEach(l => console.log(`[BUDGET] ${l}`));
     if (budgetPlan.reductionReasons.length > 0) {
@@ -672,12 +723,80 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     }
 
     console.log('[GENERATOR] Извлечение тем из summaries чанков...');
-    const themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount);
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'generate_phase_begin',
+        metadata: { step: 'extract_themes', model },
+    });
+    let themes;
+    try {
+        themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount);
+    } catch (err) {
+        logStructured({
+            level: 'error',
+            traceId,
+            documentId,
+            phase: 'generate',
+            event: 'generate_phase_failed',
+            defectClass: DEFECT_CLASSES.SYSTEM_ERROR,
+            metadata: {
+                step: 'extract_themes',
+                error_message: err && err.message ? String(err.message).slice(0, 500) : 'unknown',
+            },
+        });
+        throw err;
+    }
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'generate_phase_end',
+        metrics: { theme_count: themes.length },
+        metadata: { step: 'extract_themes' },
+    });
     console.log(`[GENERATOR] Тем: ${themes.length}`, themes.map(t => `[${t.section}] ${t.topic || t}`).join(', '));
     progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Тем извлечено: ${themes.length}` });
 
     console.log('[GENERATOR] Построение blueprint...');
-    const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'generate_phase_begin',
+        metadata: { step: 'build_blueprint', model },
+    });
+    let blueprint;
+    try {
+        blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
+    } catch (err) {
+        logStructured({
+            level: 'error',
+            traceId,
+            documentId,
+            phase: 'generate',
+            event: 'generate_phase_failed',
+            defectClass: DEFECT_CLASSES.SYSTEM_ERROR,
+            metadata: {
+                step: 'build_blueprint',
+                error_message: err && err.message ? String(err.message).slice(0, 500) : 'unknown',
+            },
+        });
+        throw err;
+    }
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'generate_phase_end',
+        metrics: { blueprint_intent_count: blueprint.length },
+        metadata: { step: 'build_blueprint' },
+    });
     console.log(`[GENERATOR] Blueprint: ${blueprint.length} intent-ов`);
     progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT, detail: `План: ${blueprint.length} intent-ов` });
 

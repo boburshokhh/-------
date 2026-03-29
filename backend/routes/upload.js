@@ -201,6 +201,14 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         console.log(`[UPLOAD] Индексация документа #${documentId}...`);
         const indexedChunks = await indexDocument(documentId, text, report, { baseWorkDone: baseWorkAfterDb });
         console.log(`[UPLOAD] Индекс готов: ${indexedChunks.length} чанков`);
+        logStructured({
+            level: 'info',
+            traceId: jobId,
+            documentId: Number(documentId),
+            phase: 'index',
+            event: 'indexing_complete',
+            metrics: { chunk_count: indexedChunks.length, text_length: text.length },
+        });
 
         const modelId = req.body.model && typeof req.body.model === 'string' ? req.body.model.trim() : null;
         const allowedIds = (config.LLM_MODELS || []).map((m) => m.id);
@@ -210,6 +218,14 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         }
 
         console.log(`[UPLOAD] Генерация теста с моделью: ${model}`);
+        logStructured({
+            level: 'info',
+            traceId: jobId,
+            documentId: Number(documentId),
+            phase: 'generate',
+            event: 'generate_test_invoked',
+            metadata: { model },
+        });
         const testData = await generateTest(text, displayName, indexedChunks, report, {
             model,
             extractionQuality: diagnostics.extractionQuality,
