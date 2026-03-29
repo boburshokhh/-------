@@ -1,3 +1,6 @@
+/* Самый ранний лог: если пусто в `docker logs`, смотрите предыдущий инстанс: docker logs ai-testgen-app --previous */
+console.error('[BOOT]', new Date().toISOString(), 'cwd=', process.cwd(), 'NODE_ENV=', process.env.NODE_ENV || '');
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');

@@ -75,6 +75,13 @@
 ### Docker: `pull access denied for ai-testgen-app`
 Образ приложения **не хранится в публичном registry** — он собирается командой `docker compose build` / `docker compose up --build`. Не выполняйте отдельно `docker compose pull` без сборки `app`, если не обновляете только `postgres`/`nginx`: используйте `docker compose pull postgres nginx` и `docker compose build app` (в `docker-compose.yml` для `app` задано `pull_policy: build`).
 
+### Docker: пустой вывод `docker logs ai-testgen-app`
+1. Лог **предыдущего** (упавшего) запуска: `docker logs ai-testgen-app --previous 2>&1 | tail -80`
+2. Состояние и код выхода: `docker inspect ai-testgen-app --format '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} err={{.State.Error}}'`
+3. Запуск Node в том же окружении (postgres уже должен быть `Up`):  
+   `docker compose run --rm --no-deps app node server.js`  
+   Ошибка миграций или `Cannot find module` будет сразу в терминале.
+
 ### Docker: `dependency failed to start: container ai-testgen-app is unhealthy`
 Nginx в Compose ждёт `app` со статусом **healthy**. Пока процесс Node не слушает `:3002` или healthcheck не получает **HTTP 200** с `/api/health`, контейнер остаётся `unhealthy`.
 
