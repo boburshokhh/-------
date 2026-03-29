@@ -1,3 +1,5 @@
+const { logStructured } = require('../utils/observability');
+
 /**
  * In-memory прогресс длительных задач (загрузка → индекс → генерация).
  * Клиент передаёт X-Job-Id и опрашивает GET /api/jobs/:jobId
@@ -134,6 +136,16 @@ function getJob(jobId) {
     const e = store.get(jobId);
     if (!e) return null;
     if (Date.now() - e.updatedAt > TTL_MS) {
+        logStructured({
+            level: 'warn',
+            traceId: jobId,
+            phase: e.phase || null,
+            event: 'job_state_expired',
+            metadata: {
+                last_updated_at: e.updatedAt,
+                ttl_ms: TTL_MS,
+            },
+        });
         cleanupJob(jobId);
         return null;
     }

@@ -29,6 +29,16 @@ function registerUploadJobStub(req, res, next) {
             stage: 'receiving',
             detail: 'Приём файла на сервер…',
         });
+        const cl = req.get('content-length');
+        logStructured({
+            level: 'info',
+            traceId: incomingJobId,
+            phase: 'upload',
+            event: 'upload_job_stub_registered',
+            metadata: {
+                content_length: cl != null && cl !== '' ? cl : null,
+            },
+        });
     }
     next();
 }
