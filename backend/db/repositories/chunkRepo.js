@@ -41,12 +41,23 @@ async function insertEmbeddings(embeddings, embeddingModel) {
     });
 }
 
-async function insertSummary(chunkId, facts) {
+/**
+ * @param {number} chunkId
+ * @param {string[]} facts        - array of fact strings (may be empty for quota_skip)
+ * @param {string}  source        - 'llm' | 'cheap_llm' | 'extractive' | 'none'
+ * @param {string}  status        - 'ok' | 'quota_skip' | 'error' | 'empty'
+ * @param {string|null} errorReason
+ */
+async function insertSummary(chunkId, facts, source = 'llm', status = 'ok', errorReason = null) {
     await pg.query(`
-        INSERT INTO chunk_summaries (chunk_id, summary_text)
-        VALUES ($1, $2)
-        ON CONFLICT (chunk_id) DO UPDATE SET summary_text = $2
-    `, [chunkId, JSON.stringify(facts)]);
+        INSERT INTO chunk_summaries (chunk_id, summary_text, summary_source, summary_status, summary_error_reason)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (chunk_id) DO UPDATE
+          SET summary_text         = EXCLUDED.summary_text,
+              summary_source       = EXCLUDED.summary_source,
+              summary_status       = EXCLUDED.summary_status,
+              summary_error_reason = EXCLUDED.summary_error_reason
+    `, [chunkId, JSON.stringify(facts), source, status, errorReason]);
 }
 
 async function loadIndexedChunks(documentId) {
@@ -64,7 +75,10 @@ async function loadIndexedChunks(documentId) {
             c.heading,
             ce.embedding,
             ce.embedding_model,
-            cs.summary_text
+            cs.summary_text,
+            cs.summary_source,
+            cs.summary_status,
+            cs.summary_error_reason
         FROM chunks c
         LEFT JOIN chunk_embeddings ce ON ce.chunk_id = c.id AND ce.embedding_model = $1
         LEFT JOIN chunk_summaries cs ON cs.chunk_id = c.id
@@ -73,17 +87,19 @@ async function loadIndexedChunks(documentId) {
     `, [embeddingModel, documentId]);
 
     return rows.map(row => ({
-        id:           row.id,
-        document_id:  row.document_id,
-        chunk_index:  row.chunk_index,
-        text:         row.text,
-        token_count:  row.token_count,
-        content_hash: row.content_hash,
-        page:         row.page ?? null,
-        section:      row.section ?? null,
-        heading:      row.heading ?? null,
-        embedding:    row.embedding || null,
-        summary:      row.summary_text || [],
+        id:              row.id,
+        document_id:     row.document_id,
+        chunk_index:     row.chunk_index,
+        text:            row.text,
+        token_count:     row.token_count,
+        content_hash:    row.content_hash,
+        page:            row.page ?? null,
+        section:         row.section ?? null,
+        heading:         row.heading ?? null,
+        embedding:       row.embedding || null,
+        summary:         row.summary_text || [],
+        summary_source:  row.summary_source || null,
+        summary_status:  row.summary_status || null,
     }));
 }
 

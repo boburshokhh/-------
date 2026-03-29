@@ -11,13 +11,11 @@ function getEncoder() {
     return encoder;
 }
 
-/**
- * Подсчёт токенов в тексте.
- * @param {string} text
- * @returns {number}
- */
 function countTokens(text) {
-    return getEncoder().encode(text).length;
+    const gptTokens = getEncoder().encode(text).length;
+    // BPE (gpt-4o) tokenizer significantly undercounts tokens for Cyrillic compared to Gemini's SentencePiece.
+    // We apply a safe 1.25x multiplier to prevent '400 Bad Request Payload too large' errors.
+    return Math.ceil(gptTokens * 1.25);
 }
 
 // ─── Section-aware helpers ─────────────────────────────────────────────────
@@ -139,10 +137,10 @@ function splitIntoSections(text) {
  */
 function chunkText(text) {
     const maxTokens = config.CHUNK_TOKEN_LIMIT;
-    const overlap  = config.CHUNK_OVERLAP_TOKENS;
+    const overlap = config.CHUNK_OVERLAP_TOKENS;
     const CHARS_PER_PAGE = 2500; // приблизительно
 
-    const sections  = splitIntoSections(text);
+    const sections = splitIntoSections(text);
     const allChunks = [];
 
     for (const section of sections) {
@@ -153,18 +151,17 @@ function chunkText(text) {
 
         if (paragraphs.length === 0) continue;
 
-        const approxPage = Math.max(1, Math.ceil((section.startChar + 1) / CHARS_PER_PAGE));
-
         let currentParagraphs = [];
         let currentTokens = 0;
+        let currentCharOffset = section.startChar || 0;
 
-        const flush = () => {
+        const flush = (pageNo) => {
             if (currentParagraphs.length === 0) return;
             allChunks.push({
                 index: allChunks.length,
-                text:  currentParagraphs.join('\n\n'),
+                text: currentParagraphs.join('\n\n'),
                 tokens: currentTokens,
-                page:   approxPage,
+                page: pageNo,
                 section: section.section,
                 heading: section.heading,
             });
@@ -172,77 +169,53 @@ function chunkText(text) {
             currentTokens = 0;
         };
 
+        const performOverlap = (pageNo) => {
+            flush(pageNo);
+            const overlapParagraphs = [];
+            let overlapTokens = 0;
+            for (let i = allChunks[allChunks.length - 1].text.split('\n\n').length - 1; i >= 0; i--) {
+                const parts = allChunks[allChunks.length - 1].text.split('\n\n');
+                if (i >= parts.length) continue;
+                const pt = countTokens(parts[i]);
+                if (overlapTokens + pt > overlap) break;
+                overlapParagraphs.unshift(parts[i]);
+                overlapTokens += pt;
+            }
+            currentParagraphs = overlapParagraphs;
+            currentTokens = overlapTokens;
+        };
+
         for (const paragraph of paragraphs) {
+            const approxPage = Math.max(1, Math.ceil((currentCharOffset + 1) / CHARS_PER_PAGE));
             const pTokens = countTokens(paragraph);
 
             // Абзац сам по себе длиннее лимита — делим по предложениям
             if (pTokens > maxTokens) {
-                flush();
                 const sentences = paragraph.split(/(?<=[.!?。])\s+/);
-                let sentBuf = [];
-                let sentTokens = 0;
-
+                
                 for (const sentence of sentences) {
                     const st = countTokens(sentence);
-                    if (sentTokens + st > maxTokens && sentBuf.length > 0) {
-                        allChunks.push({
-                            index:   allChunks.length,
-                            text:    sentBuf.join(' '),
-                            tokens:  sentTokens,
-                            page:    approxPage,
-                            section: section.section,
-                            heading: section.heading,
-                        });
-                        sentBuf    = [];
-                        sentTokens = 0;
+                    if (currentTokens + st > maxTokens && currentParagraphs.length > 0) {
+                        performOverlap(approxPage);
                     }
-                    sentBuf.push(sentence);
-                    sentTokens += st;
+                    currentParagraphs.push(sentence);
+                    currentTokens += st;
                 }
-                if (sentBuf.length > 0) {
-                    allChunks.push({
-                        index:   allChunks.length,
-                        text:    sentBuf.join(' '),
-                        tokens:  sentTokens,
-                        page:    approxPage,
-                        section: section.section,
-                        heading: section.heading,
-                    });
-                }
+                currentCharOffset += paragraph.length + 2;
                 continue;
             }
 
             // Добавление абзаца выходит за лимит — сбрасываем с перекрытием
             if (currentTokens + pTokens > maxTokens && currentParagraphs.length > 0) {
-                // Сохраняем текущий чанк
-                allChunks.push({
-                    index:   allChunks.length,
-                    text:    currentParagraphs.join('\n\n'),
-                    tokens:  currentTokens,
-                    page:    approxPage,
-                    section: section.section,
-                    heading: section.heading,
-                });
-
-                // Перекрытие: берём последние абзацы, не превышая overlap
-                const overlapParagraphs = [];
-                let overlapTokens = 0;
-                for (let i = currentParagraphs.length - 1; i >= 0; i--) {
-                    const pt = countTokens(currentParagraphs[i]);
-                    if (overlapTokens + pt > overlap) break;
-                    overlapParagraphs.unshift(currentParagraphs[i]);
-                    overlapTokens += pt;
-                }
-
-                currentParagraphs = overlapParagraphs;
-                currentTokens     = overlapTokens;
+                performOverlap(approxPage);
             }
 
             currentParagraphs.push(paragraph);
             currentTokens += pTokens;
+            currentCharOffset += paragraph.length + 2;
         }
 
-        flush();
+        flush(Math.max(1, Math.ceil((currentCharOffset + 1) / CHARS_PER_PAGE)));
     }
 
     return allChunks;

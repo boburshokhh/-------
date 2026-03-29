@@ -50,7 +50,6 @@ module.exports = {
   LLM_MODELS: [
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (7 RPM, 250K TPM, 20 RPD)' },
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (10 RPM, 250K TPM, 20 RPD)' },
-    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (5 RPM, 250K TPM, 20 RPD)' },
   ],
   /**
    * Локальные лимиты по модели (free tier). Используются для учёта и блокировки до лимита Google.
@@ -59,16 +58,41 @@ module.exports = {
   FREE_TIER_QUOTAS: {
     'gemini-2.5-flash': { rpm: 7, tpm: 250000, rpd: 20 },
     'gemini-2.5-flash-lite': { rpm: 10, tpm: 250000, rpd: 20 },
-    'gemini-3-flash-preview': { rpm: 5, tpm: 250000, rpd: 20 },
     'gemini-embedding-001': { rpm: 100, tpm: 100000, rpd: 1500 },
   },
   /** Если model id не в FREE_TIER_QUOTAS — консервативный дефолт */
   FREE_TIER_QUOTA_DEFAULT: { rpm: 5, tpm: 250000, rpd: 20 },
   LLM_MAX_RETRIES: 3,
+  /**
+   * Summary generation strategy for the indexer.
+   * - llm:        use LLM_MODEL (default model, costs most quota)
+   * - cheap_llm:  use SUMMARY_CHEAP_MODEL (lower RPD cost; still LLM)
+   * - extractive: sentence-based, zero LLM calls
+   * - none:       skip summaries entirely (fastest, no LLM usage)
+   */
+  /**
+   * Summary generation strategy for the indexer.
+   * - extractive: sentence-based, zero LLM calls (default — saves RPD quota)
+   * - llm:        use LLM_MODEL (costs most quota)
+   * - cheap_llm:  use SUMMARY_CHEAP_MODEL with LLM_SUMMARY_BATCH_SIZE batching
+   * - none:       skip summaries entirely (fastest, no LLM usage)
+   */
+  SUMMARY_MODE: process.env.SUMMARY_MODE || 'extractive',
+  /** Model used when SUMMARY_MODE=cheap_llm (should have high RPD on free tier) */
+  SUMMARY_CHEAP_MODEL: process.env.SUMMARY_CHEAP_MODEL || 'gemini-2.5-flash-lite',
+  /** Max sentences kept by extractive summariser per chunk */
+  SUMMARY_EXTRACTIVE_SENTENCES: parseInt(process.env.SUMMARY_EXTRACTIVE_SENTENCES, 10) || 5,
+  /**
+   * How many chunks to pack into a single LLM call for summary generation.
+   * Only applies when SUMMARY_MODE=cheap_llm or llm.
+   * Higher = fewer LLM calls but larger prompt. Recommended: 5–8.
+   */
+  LLM_SUMMARY_BATCH_SIZE: parseInt(process.env.LLM_SUMMARY_BATCH_SIZE, 10) || 6,
   /** Таймаут одного вызова generateContent/embed (мс); 0 = без ограничения */
   GEMINI_REQUEST_TIMEOUT_MS: parseInt(process.env.GEMINI_REQUEST_TIMEOUT_MS, 10) || 180000,
   /** Макс. ожидание освобождения RPM-слота при индексации (мс) */
-  QUOTA_RPM_WAIT_MAX_MS: parseInt(process.env.QUOTA_RPM_WAIT_MAX_MS, 10) || 600000,
+  /** Макс. ожидание освобождения RPM-слота (мс). 90s — безопасный лимит до HTTP-таймаута клиента */
+  QUOTA_RPM_WAIT_MAX_MS: parseInt(process.env.QUOTA_RPM_WAIT_MAX_MS, 10) || 90000,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || 'gemini-embedding-001',
   // RAG настройки
   TARGET_QUESTIONS_MIN: parseInt(process.env.TARGET_QUESTIONS_MIN) || 20,

@@ -364,43 +364,51 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
     return { results: [], stats: { llmSkipped: 0, validationFailed: 0 } };
 }
 
-async function checkGrounding(question, evidenceText, model = null) {
+async function checkGroundingBatched(questions, evidences, model = null) {
+    if (questions.length === 0) return [];
     const llmModel = model || config.LLM_MODEL;
     try {
-        const correctOption = Array.isArray(question.options) && question.correctIndex != null
-            ? question.options[question.correctIndex]
-            : JSON.stringify(question.correctIndex);
-        const prompt = `Вопрос: ${question.question}\nПравильный ответ: ${correctOption}\nОбъяснение: ${question.explanation}\n\nEvidence:\n${evidenceText}`;
+        const payload = questions.map((q, i) => {
+            const correctOption = Array.isArray(q.options) && q.correctIndex != null
+                ? q.options[q.correctIndex]
+                : JSON.stringify(q.correctIndex);
+            return `Вопрос ${i + 1}:\nQ: ${q.question}\nA: ${correctOption}\nExpl: ${q.explanation || ''}\nEvidence: ${evidences[i] || 'Нет текста'}\n`;
+        }).join('\n---\n');
+
+        const prompt = `Проверь фактологическую точность нескольких вопросов на основе их текстов (Evidence).\nДля каждого вопроса верни 'true', если ответ полностью подтверждается текстом, иначе 'false'.\n\n${payload}\n\nВерни ТОЛЬКО JSON-массив булевых значений (размером ровно ${questions.length}): [true, false, true, ...]`;
         await quotaGuard.assertWithinFreeTierQuota(llmModel);
         const ai = await getAiClient();
         const response = await ai.models.generateContent({
             model: llmModel,
             contents: prompt,
             config: {
-                systemInstruction: GROUNDING_SYSTEM,
+                systemInstruction: 'Ты оцениваешь корректность вопросов по тексту. Отвечай только строгим JSON массивом.',
                 temperature: 0.0,
                 responseMimeType: 'application/json',
             },
         });
         await quotaGuard.recordGeminiCall(llmModel);
-        const parsed = extractJSON(response.text);
-        return parsed.grounded !== false;
-    } catch {
-        return true;
+        let parsed = extractJSON(response.text);
+        if (!Array.isArray(parsed) || parsed.length !== questions.length) {
+            return new Array(questions.length).fill(true);
+        }
+        return parsed.map(v => v !== false);
+    } catch (e) {
+        console.warn(`[GENERATOR] batch grounding error: ${e.message}`);
+        return new Array(questions.length).fill(true);
     }
 }
 
 async function semanticDedup(questions, threshold = 0.88) {
     if (questions.length === 0) return questions;
-    const embeddings = [];
-    for (const q of questions) {
-        try {
-            const emb = await rag.getQueryEmbedding(q.question);
-            embeddings.push(emb);
-        } catch {
-            embeddings.push(null);
-        }
-        await sleep(200);
+    let embeddings = [];
+    
+    try {
+        const texts = questions.map(q => q.question);
+        embeddings = await rag.getBatchEmbeddings(texts);
+    } catch (err) {
+        console.warn(`[GENERATOR] semanticDedup batch embedding failed: ${err.message}. Векторная фильтрация работает в degraded (text-only) режиме.`);
+        embeddings = new Array(questions.length).fill(null);
     }
 
     const unique = [];
@@ -459,20 +467,25 @@ function createBackfillIntents(poolChunks, count, typeOffset = 0) {
     const intents = [];
     for (let i = 0; i < count; i++) {
         const chunk = poolChunks[i % poolChunks.length];
+        // Use resolveChunkEvidence so intent is grounded even without LLM summary
+        const ev = rag.resolveChunkEvidence(chunk, { excerptChars: 200, maxFacts: 3 });
         let intentText;
-        if (Array.isArray(chunk.summary) && chunk.summary.length > 0) {
-            const factIdx = Math.floor(i / poolChunks.length) % chunk.summary.length;
-            intentText = `Проверить знание факта: "${chunk.summary[factIdx]}"`;
-        } else if (chunk.section && chunk.section !== 'Документ') {
-            intentText = `Проверить ключевые понятия раздела "${chunk.section}"`;
+        if (ev.source === 'summary' && ev.facts.length > 0) {
+            const factIdx = Math.floor(i / poolChunks.length) % ev.facts.length;
+            intentText = `Проверить знание факта: "${ev.facts[factIdx]}"`;
+        } else if (ev.source === 'text' && ev.facts.length > 0) {
+            // Use extractive fact as intent seed
+            intentText = `Проверить понимание: "${ev.facts[0].slice(0, 120)}"`;
+        } else if (ev.heading) {
+            intentText = `Проверить ключевые понятия раздела "${ev.heading}"`;
         } else {
             intentText = `Проверить понимание фрагмента документа (чанк ${chunk.chunk_index + 1})`;
         }
         intents.push({
-            theme: chunk.section || 'Документ',
-            section: chunk.section || 'Документ',
-            intent: intentText,
-            type: 'multiple_choice',
+            theme:     chunk.section || 'Документ',
+            section:   chunk.section || 'Документ',
+            intent:    intentText,
+            type:      'multiple_choice',
             _chunkRef: chunk,
         });
     }
@@ -586,7 +599,30 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     }
 
     const atomicFactsExtracted = indexedChunks.reduce((s, c) => s + (Array.isArray(c.summary) ? c.summary.length : 0), 0);
-    const chunksWithFacts = indexedChunks.filter(c => Array.isArray(c.summary) && c.summary.length > 0).length;
+    const chunksWithFacts      = indexedChunks.filter(c => Array.isArray(c.summary) && c.summary.length > 0).length;
+    const chunksWithTextOnly   = indexedChunks.length - chunksWithFacts;
+
+    // Compute downstream_source flag for observability
+    const downstreamSource = chunksWithFacts === indexedChunks.length ? 'summary'
+        : chunksWithFacts === 0                                        ? 'text'
+        : 'mixed';
+
+    const pipelineContext = {
+        executionMode: 'normal',
+        degradedReasons: [],
+        degradedStages: []
+    };
+    
+    const hasIndexerIssues = (indexedChunks || []).some(c => c.summary_status === 'quota_skip' || c.summary_status === 'error' || c.summary_source === 'extractive');
+    if (hasIndexerIssues) {
+        pipelineContext.executionMode = 'degraded';
+        pipelineContext.degradedReasons.push('indexer_fallback');
+        pipelineContext.degradedStages.push('indexer');
+    }
+
+    if (chunksWithFacts < indexedChunks.length) {
+        console.log(`[GENERATOR] downstream_source=${downstreamSource}: ${chunksWithFacts} summary-чанков, ${chunksWithTextOnly} text-only-чанков`);
+    }
 
     logStructured({
         level: 'info', traceId, documentId,
@@ -595,6 +631,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             budget_target: targetCount, target_min: targetMin, target_max: targetMax,
             chunk_count: indexedChunks.length, atomic_facts_extracted: atomicFactsExtracted,
             chunks_with_facts: chunksWithFacts,
+            downstream_source: downstreamSource,
         },
         metadata: budgetPlan.reductionReasons.length ? { reduction_reasons: budgetPlan.reductionReasons } : undefined,
     });
@@ -727,85 +764,29 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         };
     }
 
-    console.log('[GENERATOR] Извлечение тем из summaries чанков...');
-    logStructured({
-        level: 'info',
-        traceId,
-        documentId,
-        phase: 'generate',
-        event: 'generate_phase_begin',
-        metadata: { step: 'extract_themes', model },
-    });
-    let themes;
-    try {
-        themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount, {
-            onRetry: ({ attempt, maxAttempts, parsed }) => {
-                let detail = `Повтор запроса к модели (${attempt}/${maxAttempts})…`;
-                if (parsed.isTransientUnavailable) {
-                    detail = `Модель перегружена (Google), ждём и повторяем… (${attempt}/${maxAttempts})`;
-                } else if (parsed.isResourceExhausted) {
-                    detail = `Лимит запросов к API, пауза перед повтором… (${attempt}/${maxAttempts})`;
-                }
-                progress({
-                    phase: 'generate',
-                    stage: 'themes',
-                    detail,
-                });
-            },
-        });
-    } catch (err) {
-        logStructured({
-            level: 'error',
-            traceId,
-            documentId,
-            phase: 'generate',
-            event: 'generate_phase_failed',
-            defectClass: DEFECT_CLASSES.SYSTEM_ERROR,
-            metadata: {
-                step: 'extract_themes',
-                error_message: err && err.message ? String(err.message).slice(0, 500) : 'unknown',
-            },
-        });
-        throw err;
-    }
-    logStructured({
-        level: 'info',
-        traceId,
-        documentId,
-        phase: 'generate',
-        event: 'generate_phase_end',
-        metrics: { theme_count: themes.length },
-        metadata: { step: 'extract_themes' },
-    });
-    console.log(`[GENERATOR] Тем: ${themes.length}`, themes.map(t => `[${t.section}] ${t.topic || t}`).join(', '));
-    progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Тем извлечено: ${themes.length}` });
+    const count = Math.round((targetMin + targetMax) / 2);
 
-    console.log('[GENERATOR] Построение blueprint...');
+    console.log('[GENERATOR] Формирование тем и плана вопросов...');
     logStructured({
         level: 'info',
         traceId,
         documentId,
         phase: 'generate',
         event: 'generate_phase_begin',
-        metadata: { step: 'build_blueprint', model },
+        metadata: { step: 'build_themes_and_blueprint', model },
     });
+
     let blueprint;
     try {
-        blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model, {
+        blueprint = await rag.buildThemesAndBlueprint(indexedChunks, fullText, model, count, {
             onRetry: ({ attempt, maxAttempts, parsed }) => {
-                let detail = `Повтор запроса для плана вопросов (${attempt}/${maxAttempts})…`;
-                if (parsed.isTransientUnavailable) {
-                    detail = `Модель перегружена, ждём и повторяем план… (${attempt}/${maxAttempts})`;
-                } else if (parsed.isResourceExhausted) {
-                    detail = `Лимит API, пауза перед повтором плана… (${attempt}/${maxAttempts})`;
-                }
-                progress({
-                    phase: 'generate',
-                    stage: 'blueprint',
-                    detail,
-                });
+                let detail = `Повтор запроса к модели (${attempt}/${maxAttempts})…`;
+                if (parsed.isTransientUnavailable) detail = `Модель перегружена (Google), ждём… (${attempt}/${maxAttempts})`;
+                else if (parsed.isResourceExhausted) detail = `Лимит запросов к API, ждём… (${attempt}/${maxAttempts})`;
+                progress({ phase: 'generate', stage: 'blueprint', detail });
             },
         });
+        progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Темы извлечены` });
     } catch (err) {
         logStructured({
             level: 'error',
@@ -814,13 +795,23 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             phase: 'generate',
             event: 'generate_phase_failed',
             defectClass: DEFECT_CLASSES.SYSTEM_ERROR,
-            metadata: {
-                step: 'build_blueprint',
-                error_message: err && err.message ? String(err.message).slice(0, 500) : 'unknown',
-            },
+            metadata: { step: 'build_themes_and_blueprint', error_message: String(err.message || '').slice(0, 500) },
         });
-        throw err;
+        console.warn(`[GENERATOR] buildThemesAndBlueprint throw: ${err.message}. Переход на fallback.`);
+        pipelineContext.executionMode = err.type === 'QUOTA_EXCEEDED' ? 'degraded' : 'emergency_fallback';
+        pipelineContext.degradedReasons.push('blueprint_fallback');
+        pipelineContext.degradedStages.push('blueprint');
+        
+        const localThemes = rag.buildLocalThemesFromSections(indexedChunks);
+        progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Темы собраны из заголовков (fallback)` });
+
+        const richThemes = localThemes.map(t => typeof t === 'string'
+            ? { topic: t, section: 'Документ', importance: 2, suggestedCount: 3 } : t
+        );
+        const perTheme = rag.computeIntentsPerTheme(richThemes, count);
+        blueprint = rag.buildBlueprintFallbackLocal(richThemes, perTheme);
     }
+
     logStructured({
         level: 'info',
         traceId,
@@ -828,9 +819,9 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         phase: 'generate',
         event: 'generate_phase_end',
         metrics: { blueprint_intent_count: blueprint.length },
-        metadata: { step: 'build_blueprint' },
+        metadata: { step: 'build_themes_and_blueprint' },
     });
-    console.log(`[GENERATOR] Blueprint: ${blueprint.length} intent-ов`);
+    console.log(`[GENERATOR] Blueprint (совмещённый план): ${blueprint.length} intent-ов`);
     progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT, detail: `План: ${blueprint.length} intent-ов` });
 
     // Persist intents
@@ -916,14 +907,19 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         statsSkippedLLM += batchStats.llmSkipped;
         statsValidationFailed += batchStats.validationFailed;
 
-        for (const { question, intentIdx } of batchResults) {
-            if (enableGrounding) {
-                const grounded = await checkGrounding(question, evidenceList[intentIdx], model);
-                if (!grounded) {
-                    statsGroundingFailed++;
-                    console.warn(`[GENERATOR] Batch ${batchNum}, intent[${intentIdx + 1}]: не прошёл groundedness`);
-                    continue;
-                }
+        let groundedMask = new Array(batchResults.length).fill(true);
+        if (enableGrounding && pipelineContext.executionMode === 'normal') {
+            const bQuestions = batchResults.map(r => r.question);
+            const bEvidences = batchResults.map(r => evidenceList[r.intentIdx]);
+            groundedMask = await checkGroundingBatched(bQuestions, bEvidences, model);
+        }
+
+        for (let i = 0; i < batchResults.length; i++) {
+            const { question, intentIdx } = batchResults[i];
+            if (!groundedMask[i]) {
+                statsGroundingFailed++;
+                console.warn(`[GENERATOR] Batch ${batchNum}, intent[${intentIdx + 1}]: не прошёл groundedness`);
+                continue;
             }
             allQuestions.push(question);
         }
@@ -938,6 +934,19 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
 
     console.log(`[GENERATOR] Покрытие: ${rag.formatCoverageReport(coverageMap)}`);
     console.log(`[GENERATOR] Статистика: blueprint=${blueprintWithDifficulty.length}, skipped_evidence=${statsSkippedEvidence}, validated=${statsValidated}, grounded=${allQuestions.length}, target=${targetMin}`);
+
+    if (allQuestions.length === 0) {
+        console.warn('[GENERATOR] Главный цикл не сгенерировал ни одного вопроса. Переход в emergency_fallback (offline MCQ).');
+        pipelineContext.executionMode = 'emergency_fallback';
+        pipelineContext.degradedReasons.push('llm_generation_failed');
+        pipelineContext.degradedStages.push('generation');
+        try {
+            const offlineQs = buildOfflineMcqFromChunks(fullText, indexedChunks, targetMin, targetMax);
+            offlineQs.forEach(q => allQuestions.push(q));
+        } catch (err) {
+            console.error('[GENERATOR] Offline MCQ тоже вернул ошибку:', err.message);
+        }
+    }
 
     const preDedupCount = allQuestions.length;
     const groundedPreDedup = allQuestions.length;
@@ -1007,11 +1016,16 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
             statsSkippedLLM += bfStats.llmSkipped;
             statsValidationFailed += bfStats.validationFailed;
 
-            for (const { question, intentIdx } of batchResults) {
-                if (enableGrounding) {
-                    const grounded = await checkGrounding(question, bfEvidenceList[intentIdx], model);
-                    if (!grounded) { statsGroundingFailed++; continue; }
-                }
+            let bfGroundedMask = new Array(batchResults.length).fill(true);
+            if (enableGrounding && pipelineContext.executionMode === 'normal') {
+                const bQuestions = batchResults.map(r => r.question);
+                const bEvidences = batchResults.map(r => bfEvidenceList[r.intentIdx]);
+                bfGroundedMask = await checkGroundingBatched(bQuestions, bEvidences, model);
+            }
+
+            for (let i = 0; i < batchResults.length; i++) {
+                const { question, intentIdx } = batchResults[i];
+                if (!bfGroundedMask[i]) { statsGroundingFailed++; continue; }
                 newRawQuestions.push(question);
                 backfillGroundedAccepted++;
             }
@@ -1077,6 +1091,9 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         batchValidated: statsValidated, llmSkipped: statsSkippedLLM, validationFailed: statsValidationFailed,
         preDedupCount, postDedupCount: initialDedup.length, finalCount: finalQuestions.length,
         backfillRounds: backfillRoundsUsed, backfillQuestionsAdded, evidenceScores,
+        executionMode: pipelineContext.executionMode,
+        degradedReasons: pipelineContext.degradedReasons,
+        degradedStages: pipelineContext.degradedStages,
     });
 
     // Persist questions and update run

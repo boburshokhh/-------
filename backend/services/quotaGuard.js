@@ -1,13 +1,15 @@
 const crypto = require('crypto');
 const quotaRepo = require('../db/repositories/quotaRepo');
 const config = require('../config');
-const runtimeConfig = require('./runtimeConfig');
 const { parseGeminiApiError } = require('./geminiError');
 
 const RPM_WINDOW_MS = 60 * 1000;
 const rpmHits = new Map();
+const rpdCache = new Map();
+const RPD_CACHE_TTL_MS = 15000;
 
 async function getKeyFingerprint() {
+    const runtimeConfig = require('./runtimeConfig');
     const key = await runtimeConfig.getGeminiApiKey();
     if (!key) return '';
     return crypto.createHash('sha256').update(key, 'utf8').digest('hex');
@@ -51,14 +53,8 @@ async function assertWithinFreeTierQuota(modelId) {
     if (!fp) return;
 
     const date = utcDateString();
-    const usedDay = await quotaRepo.getUsage(fp, date, modelId);
-    if (usedDay >= limits.rpd) {
-        throw createQuotaError(
-            `Достигнут дневной лимит free tier для этой модели (${limits.rpd} запросов/сутки, UTC). Завтра лимит обновится, либо задайте другой API-ключ в настройках.`,
-            { modelId, limit: 'rpd', max: limits.rpd, used: usedDay },
-        );
-    }
-
+    
+    // 1. Check & Update RPM optimistically
     const arr = pruneRpm(modelId);
     if (arr.length >= limits.rpm) {
         throw createQuotaError(
@@ -66,6 +62,32 @@ async function assertWithinFreeTierQuota(modelId) {
             { modelId, limit: 'rpm', max: limits.rpm },
         );
     }
+    // Optimistic lock for RPM
+    arr.push(Date.now());
+    rpmHits.set(modelId, arr);
+
+    // 2. Check & Update RPD optimistically with cache
+    const cacheKey = `${fp}_${modelId}_${date}`;
+    let cached = rpdCache.get(cacheKey);
+    const now = Date.now();
+
+    if (!cached || now - cached.ts > RPD_CACHE_TTL_MS) {
+        const usedDay = await quotaRepo.getUsage(fp, date, modelId);
+        cached = { used: usedDay, ts: now };
+        rpdCache.set(cacheKey, cached);
+    }
+
+    if (cached.used >= limits.rpd) {
+        // Rollback optimistic RPM lock since RPD blocked it
+        arr.pop();
+        throw createQuotaError(
+            `Достигнут дневной лимит free tier для этой модели (${limits.rpd} запросов/сутки, UTC). Завтра лимит обновится, либо задайте другой API-ключ в настройках.`,
+            { modelId, limit: 'rpd', max: limits.rpd, used: cached.used },
+        );
+    }
+
+    // Optimistic lock for RPD
+    cached.used++;
 }
 
 /**
@@ -86,7 +108,7 @@ async function isRpdExhaustedForModel(modelId) {
 }
 
 async function waitUntilQuotaAllows(modelId, options = {}) {
-    const maxWaitMs = options.maxWaitMs ?? (config.QUOTA_RPM_WAIT_MAX_MS || 600000);
+    const maxWaitMs = options.maxWaitMs ?? (config.QUOTA_RPM_WAIT_MAX_MS || 60000);
     const pollMs = options.pollMs ?? 500;
     const deadline = Date.now() + maxWaitMs;
     let lastRpm = null;
@@ -130,12 +152,30 @@ async function waitUntilQuotaAllows(modelId, options = {}) {
  */
 async function syncFromGoogle429(modelId, err) {
     const p = parseGeminiApiError(err);
-    if (!p.isResourceExhausted || !p.isDailyFreeTierQuota) return false;
+    if (!p.isResourceExhausted) return false;
+    
+    if (!p.isDailyFreeTierQuota) {
+        // Cluster RPM exhausted (Google hit RPM limit but our local didn't block it)
+        const limits = getLimitsForModel(modelId);
+        if (limits) {
+            const arr = new Array(limits.rpm).fill(Date.now());
+            rpmHits.set(modelId, arr);
+            console.warn(`[QUOTA] Синхронизация с 429: исчерпан кластерный RPM для ${modelId}, worker приостановлен.`);
+        }
+        return false;
+    }
+
     const limits = getLimitsForModel(modelId);
     if (!limits) return false;
     const fp = await getKeyFingerprint();
     if (!fp) return false;
-    await quotaRepo.setUsageAtLeast(fp, utcDateString(), modelId, limits.rpd);
+    const date = utcDateString();
+    
+    await quotaRepo.setUsageAtLeast(fp, date, modelId, limits.rpd);
+    
+    const cacheKey = `${fp}_${modelId}_${date}`;
+    rpdCache.set(cacheKey, { used: limits.rpd, ts: Date.now() });
+    
     console.warn(
         `[QUOTA] Синхронизация с ответом Google: дневной лимит free tier для ${modelId} (локально ≥ ${limits.rpd} запросов за UTC-сутки).`,
     );
@@ -152,15 +192,19 @@ async function recordGeminiCall(modelId) {
 
     const date = utcDateString();
     await quotaRepo.recordUsage(fp, date, modelId);
-
-    const arr = pruneRpm(modelId);
-    arr.push(Date.now());
-    rpmHits.set(modelId, arr);
+    
+    // Note: Local optimistic lock was already applied during assert.
+    // We don't need to add another timestamp to rpmHits here.
 }
 
-async function resetUsageForNewApiKey() {
+async function resetUsageForNewApiKey(fp) {
     try {
-        await quotaRepo.resetUsage();
+        if (fp) {
+            await quotaRepo.resetUsage(fp);
+        } else {
+            const currentFp = await getKeyFingerprint();
+            if (currentFp) await quotaRepo.resetUsage(currentFp);
+        }
     } catch (e) {
         console.warn('[QUOTA] Не удалось очистить gemini_usage:', e.message);
     }
@@ -208,6 +252,6 @@ module.exports = {
     waitUntilQuotaAllows,
     recordGeminiCall,
     syncFromGoogle429,
-    resetUsageForNewApiKey,
     getUsageSummaryPublic,
+    getKeyFingerprint,
 };

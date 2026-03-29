@@ -28,8 +28,12 @@ async function setUsageAtLeast(fingerprint, date, modelId, minRequests) {
     `, [fingerprint, date, modelId, n]);
 }
 
-async function resetUsage() {
-    await pg.query('DELETE FROM gemini_usage');
+async function resetUsage(fingerprint) {
+    if (fingerprint) {
+        await pg.query('DELETE FROM gemini_usage WHERE key_fingerprint = $1', [fingerprint]);
+    } else {
+        console.warn('[QUOTA] resetUsage called without fingerprint, ignoring to prevent wiping all users.');
+    }
 }
 
 async function getUsageSummary(fingerprint, date) {

@@ -119,11 +119,9 @@ function parseGeminiApiError(err) {
 async function sleepForGeminiRetry(parsed, attempt, maxAttempts, sleepFn) {
     const sleep = sleepFn || ((ms) => new Promise((r) => setTimeout(r, ms)));
     if (attempt >= maxAttempts) return;
-    if (parsed.isDailyFreeTierQuota) {
-        const ms = parsed.retryDelayMs != null ? parsed.retryDelayMs : 0;
-        if (ms > 0) await sleep(ms);
-        return;
-    }
+    // Daily quota is NOT a transient error — Google will not serve us until tomorrow.
+    // Retrying immediately wastes calls and time. Break out immediately.
+    if (parsed.isDailyFreeTierQuota) return;
     if (parsed.retryDelayMs != null && parsed.retryDelayMs > 0) {
         await sleep(parsed.retryDelayMs);
         return;
@@ -137,21 +135,40 @@ async function sleepForGeminiRetry(parsed, attempt, maxAttempts, sleepFn) {
 }
 
 /**
- * Обрывает ожидание по таймауту (запрос к API может ещё висеть в фоне).
- * @param {Promise<T>} promise
+ * Оборачивает промис таймаутом.
+ * При использовании AbortSignal оригинальный HTTP-запрос к Google реально отменяется
+ * (нет orphaned connections при большом числе параллельных вызовов).
+ *
+ * @param {(signal?: AbortSignal) => Promise<T>} promiseFactory - фабрика, принимающая signal
  * @param {number} ms
  * @param {string} label
  * @returns {Promise<T>}
  */
-function withTimeout(promise, ms, label = 'Gemini') {
-    if (!ms || ms <= 0) return promise;
+function withTimeout(promiseFactory, ms, label = 'Gemini') {
+    // Backward-compat: если передан готовый Promise (а не фабрика) — обернуть как раньше
+    // без AbortController. Новые вызовы должны передавать фабрику.
+    if (ms <= 0 || !ms) {
+        const p = typeof promiseFactory === 'function' ? promiseFactory() : promiseFactory;
+        return p;
+    }
+    if (typeof promiseFactory !== 'function') {
+        // Legacy: plain promise — старое поведение (таймер, без abort)
+        let timer;
+        const timeoutPromise = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label}: превышен таймаут ${ms} мс`)), ms);
+        });
+        return Promise.race([promiseFactory, timeoutPromise]).finally(() => clearTimeout(timer));
+    }
+    const controller = new AbortController();
     let timer;
     const timeoutPromise = new Promise((_, reject) => {
         timer = setTimeout(() => {
+            controller.abort();
             reject(new Error(`${label}: превышен таймаут ${ms} мс`));
         }, ms);
     });
-    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+    const work = promiseFactory(controller.signal);
+    return Promise.race([work, timeoutPromise]).finally(() => clearTimeout(timer));
 }
 
 module.exports = {

@@ -82,10 +82,10 @@ function validateSingleQuestion(q) {
     result.options = q.options.map(o => String(o).trim());
 
     // Поддерживаем оба формата: correctIndex (новый) и correct_answer (старый)
-    let correctIdx = q.correctIndex != null ? q.correctIndex : q.correct_answer;
+    let correctIdx = Number(q.correctIndex != null ? q.correctIndex : q.correct_answer);
 
-    if (typeof correctIdx !== 'number' || correctIdx < 0 || correctIdx > 3) {
-        throw new Error('correctIndex должен быть числом 0-3');
+    if (typeof correctIdx !== 'number' || !Number.isFinite(correctIdx) || correctIdx < 0 || correctIdx > 3) {
+        throw new Error(`correctIndex должен быть числом 0-3, получено: ${rawIdx}`);
     }
 
     result.correctIndex = correctIdx;
