@@ -72,6 +72,11 @@ function detectLanguageWithDiagnostics(text) {
     };
 }
 
+/** Публичный API / тесты: только код языка (внутри используется detectLanguageWithDiagnostics). */
+function detectLanguage(text) {
+    return detectLanguageWithDiagnostics(text).lang;
+}
+
 function getLanguageInstruction(lang) {
     switch (lang) {
         case 'ru':
