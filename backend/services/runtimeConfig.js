@@ -31,8 +31,7 @@ async function setGeminiApiKey(value) {
     cachedApiKey = normalized;
     cacheTs = Date.now();
     const quotaGuard = require('./quotaGuard');
-    const fp = await quotaGuard.getKeyFingerprint ? await quotaGuard.getKeyFingerprint() : null;
-    await quotaGuard.resetUsageForNewApiKey(fp);
+    quotaGuard.resetUsageForNewApiKey();
 }
 
 async function hasGeminiApiKey() {

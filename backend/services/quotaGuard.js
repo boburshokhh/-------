@@ -197,17 +197,11 @@ async function recordGeminiCall(modelId) {
     // We don't need to add another timestamp to rpmHits here.
 }
 
-async function resetUsageForNewApiKey(fp) {
-    try {
-        if (fp) {
-            await quotaRepo.resetUsage(fp);
-        } else {
-            const currentFp = await getKeyFingerprint();
-            if (currentFp) await quotaRepo.resetUsage(currentFp);
-        }
-    } catch (e) {
-        console.warn('[QUOTA] Не удалось очистить gemini_usage:', e.message);
-    }
+function resetUsageForNewApiKey() {
+    // Внимание: мы больше НЕ сбрасываем историю в базе данных!
+    // Каждая запись в БД привязана к fingerprint ключа. При ротации ключа
+    // новый ключ начнёт с нуля, а старый сохранит свою историю.
+    // Если пользователь вернёт старый ключ сегодня, его лимит не будет превышен обманным путём.
     rpmHits.clear();
 }
 
@@ -254,4 +248,5 @@ module.exports = {
     syncFromGoogle429,
     getUsageSummaryPublic,
     getKeyFingerprint,
+    resetUsageForNewApiKey,
 };
