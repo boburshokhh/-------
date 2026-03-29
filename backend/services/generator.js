@@ -522,7 +522,8 @@ function applyFallbackDecisions(stats, ctx) {
 
 async function generateTest(fullText, docName, indexedChunks, onProgress, opts = {}) {
     const startTime = Date.now();
-    const model = opts.model || config.LLM_MODEL;
+    let requestedModel = opts.model || config.LLM_MODEL;
+    const model = await quotaGuard.getAvailableModel(requestedModel);
     const traceId = opts.traceId || `gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const documentId = opts.documentId != null ? opts.documentId : null;
 

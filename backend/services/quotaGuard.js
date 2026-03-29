@@ -53,7 +53,7 @@ async function assertWithinFreeTierQuota(modelId) {
     if (!fp) return;
 
     const date = utcDateString();
-    
+
     // 1. Check & Update RPM optimistically
     const arr = pruneRpm(modelId);
     if (arr.length >= limits.rpm) {
@@ -153,7 +153,7 @@ async function waitUntilQuotaAllows(modelId, options = {}) {
 async function syncFromGoogle429(modelId, err) {
     const p = parseGeminiApiError(err);
     if (!p.isResourceExhausted) return false;
-    
+
     if (!p.isDailyFreeTierQuota) {
         // Cluster RPM exhausted (Google hit RPM limit but our local didn't block it)
         const limits = getLimitsForModel(modelId);
@@ -170,12 +170,12 @@ async function syncFromGoogle429(modelId, err) {
     const fp = await getKeyFingerprint();
     if (!fp) return false;
     const date = utcDateString();
-    
+
     await quotaRepo.setUsageAtLeast(fp, date, modelId, limits.rpd);
-    
+
     const cacheKey = `${fp}_${modelId}_${date}`;
     rpdCache.set(cacheKey, { used: limits.rpd, ts: Date.now() });
-    
+
     console.warn(
         `[QUOTA] Синхронизация с ответом Google: дневной лимит free tier для ${modelId} (локально ≥ ${limits.rpd} запросов за UTC-сутки).`,
     );
@@ -192,7 +192,7 @@ async function recordGeminiCall(modelId) {
 
     const date = utcDateString();
     await quotaRepo.recordUsage(fp, date, modelId);
-    
+
     // Note: Local optimistic lock was already applied during assert.
     // We don't need to add another timestamp to rpmHits here.
 }
@@ -239,6 +239,32 @@ async function getUsageSummaryPublic() {
     };
 }
 
+async function getAvailableModel(preferredModelId) {
+    if (!preferredModelId) return null;
+
+        // Check primary model
+        if (!(await isRpdExhaustedForModel(preferredModelId))) {
+            return preferredModelId;
+        }
+
+        console.warn(`[QUOTA] Дневной лимит (RPD) для основной модели ${preferredModelId} исчерпан. Поиск доступного fallback...`);
+
+        // Check fallback chain
+        const chain = config.LLM_FALLBACK_CHAIN && config.LLM_FALLBACK_CHAIN[preferredModelId]
+            ? config.LLM_FALLBACK_CHAIN[preferredModelId]
+            : [];
+
+        for (const fallbackModel of chain) {
+            if (!(await isRpdExhaustedForModel(fallbackModel))) {
+                console.warn(`[QUOTA] Fallback успешен: переключение на ${fallbackModel}`);
+                return fallbackModel;
+            }
+        }
+
+    console.warn(`[QUOTA] Ни одна запасная модель из Fallback-цепочки недоступна (RPD исчерпаны).`);
+    return null;
+}
+
 module.exports = {
     getLimitsForModel,
     assertWithinFreeTierQuota,
@@ -249,4 +275,5 @@ module.exports = {
     getUsageSummaryPublic,
     getKeyFingerprint,
     resetUsageForNewApiKey,
+    getAvailableModel,
 };

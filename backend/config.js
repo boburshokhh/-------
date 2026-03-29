@@ -49,14 +49,21 @@ module.exports = {
   GEMINI_QUOTA_TIER: 'free',
   // Только Text-out модели с доступными лимитами (RPM/TPM/RPD)
   LLM_MODELS: [
+    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (15 RPM, 1M TPM, 1500 RPD)' },
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (7 RPM, 250K TPM, 20 RPD)' },
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (10 RPM, 250K TPM, 20 RPD)' },
   ],
+  LLM_FALLBACK_CHAIN: {
+    'gemini-1.5-flash': ['gemini-2.5-flash-lite', 'gemini-2.5-flash'],
+    'gemini-2.5-flash-lite': ['gemini-1.5-flash', 'gemini-2.5-flash'],
+    'gemini-2.5-flash': ['gemini-1.5-flash', 'gemini-2.5-flash-lite'],
+  },
   /**
    * Локальные лимиты по модели (free tier). Используются для учёта и блокировки до лимита Google.
    * tpm — для отображения; жёстко не режем (сложно без точного usageMetadata на каждом ответе).
    */
   FREE_TIER_QUOTAS: {
+    'gemini-1.5-flash': { rpm: 15, tpm: 1000000, rpd: 1500 },
     'gemini-2.5-flash': { rpm: 7, tpm: 250000, rpd: 20 },
     'gemini-2.5-flash-lite': { rpm: 10, tpm: 250000, rpd: 20 },
     'gemini-embedding-001': { rpm: 100, tpm: 100000, rpd: 1500 },
