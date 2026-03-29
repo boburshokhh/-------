@@ -9,6 +9,46 @@ async function getAiClient() {
     return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
 }
 
+/**
+ * После исчерпания повторов к Gemini — явная ошибка для API/UI (без молчаливого fallback).
+ * @param {string} stepHuman
+ * @param {unknown} lastError
+ */
+function throwAfterGeminiRetriesFailed(stepHuman, lastError) {
+    console.error(`[RAG] ${stepHuman}: попытки исчерпаны`, lastError && lastError.message);
+    if (lastError && lastError.type === 'QUOTA_EXCEEDED') {
+        throw lastError;
+    }
+    if (!lastError) {
+        const e = new Error('Не удалось связаться с моделью генерации. Повторите попытку позже.');
+        e.type = 'LLM_ERROR';
+        throw e;
+    }
+    const g = parseGeminiApiError(lastError);
+    if (g.isDailyFreeTierQuota) {
+        const e = new Error('Достигнут дневной лимит запросов к модели (UTC). Попробуйте завтра или укажите другой API-ключ в настройках.');
+        e.type = 'QUOTA_EXCEEDED';
+        e.details = lastError.message;
+        throw e;
+    }
+    if (g.isTransientUnavailable) {
+        const e = new Error('Выбранная модель временно перегружена или недоступна (Google). Подождите несколько минут или выберите другую модель, например gemini-2.5-flash.');
+        e.type = 'LLM_ERROR';
+        e.details = lastError.message;
+        throw e;
+    }
+    if (g.isResourceExhausted) {
+        const e = new Error('Превышен лимит запросов к API модели. Подождите около минуты и повторите попытку.');
+        e.type = 'LLM_ERROR';
+        e.details = lastError.message;
+        throw e;
+    }
+    const e = new Error('Модель не вернула корректный ответ. Повторите попытку.');
+    e.type = 'LLM_ERROR';
+    e.details = lastError.message;
+    throw e;
+}
+
 function cosineSimilarity(vecA, vecB) {
     let dot = 0, normA = 0, normB = 0;
     for (let i = 0; i < vecA.length; i++) {
@@ -174,7 +214,9 @@ function estimateThemeCount(indexedChunks, fullText) {
     return Math.min(8, Math.max(Math.min(5, lenBasedMin), Math.floor(fullText.length / 3000)));
 }
 
-async function extractThemes(indexedChunks, fullText, model = null, targetCount = null) {
+async function extractThemes(indexedChunks, fullText, model = null, targetCount = null, options = null) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
     const llmModel = model || config.LLM_MODEL;
     const digest = buildSummaryDigest(indexedChunks, fullText);
     const targetThemes = targetCount
@@ -196,8 +238,9 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
     }
 
     const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
+    const maxAttempts = 5;
     let lastError;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
             await quotaGuard.assertWithinFreeTierQuota(llmModel);
             const ai = await getAiClient();
@@ -236,13 +279,22 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
             if (err.type === 'QUOTA_EXCEEDED') break;
             const g = parseGeminiApiError(err);
             if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, err);
-            console.warn(`[RAG] extractThemes попытка ${attempt}/3: ${err.message}`);
+            console.warn(`[RAG] extractThemes попытка ${attempt}/${maxAttempts}: ${err.message}`);
             if (g.isDailyFreeTierQuota) break;
-            if (attempt < 3) await sleepForGeminiRetry(g, attempt, 3, sleep);
+            if (attempt < maxAttempts) {
+                if (onRetry) {
+                    onRetry({
+                        attempt,
+                        maxAttempts,
+                        parsed: g,
+                        message: String(err.message || ''),
+                    });
+                }
+                await sleepForGeminiRetry(g, attempt, maxAttempts, sleep);
+            }
         }
     }
-    console.error('[RAG] extractThemes не удался:', lastError.message);
-    return [{ topic: 'Основные концепции документа', section: 'Документ', importance: 2, suggestedCount: 3, difficultyCandidates: ['understand'] }];
+    throwAfterGeminiRetriesFailed('extractThemes', lastError);
 }
 
 function buildBlueprintFallbackLocal(richThemes, perTheme) {
@@ -276,7 +328,9 @@ function computeIntentsPerTheme(richThemes, totalTarget) {
     return counts;
 }
 
-async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null) {
+async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null, options = null) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
     const llmModel = model || config.LLM_MODEL;
     const richThemes = themes.map(t => typeof t === 'string'
         ? { topic: t, section: 'Документ', importance: 2, suggestedCount: 3, difficultyCandidates: ['understand'] }
@@ -295,8 +349,9 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
     }
 
     const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
+    const maxAttempts = 5;
     let lastError;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
             await quotaGuard.assertWithinFreeTierQuota(llmModel);
             const ai = await getAiClient();
@@ -324,14 +379,23 @@ async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null
             if (err.type === 'QUOTA_EXCEEDED') break;
             const g = parseGeminiApiError(err);
             if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, err);
-            console.warn(`[RAG] buildBlueprint попытка ${attempt}/3: ${err.message}`);
+            console.warn(`[RAG] buildBlueprint попытка ${attempt}/${maxAttempts}: ${err.message}`);
             if (g.isDailyFreeTierQuota) break;
-            if (attempt < 3) await sleepForGeminiRetry(g, attempt, 3, sleep);
+            if (attempt < maxAttempts) {
+                if (onRetry) {
+                    onRetry({
+                        attempt,
+                        maxAttempts,
+                        parsed: g,
+                        message: String(err.message || ''),
+                    });
+                }
+                await sleepForGeminiRetry(g, attempt, maxAttempts, sleep);
+            }
         }
     }
 
-    console.error('[RAG] buildBlueprint не удался, используем fallback');
-    return buildBlueprintFallbackLocal(richThemes, perTheme);
+    throwAfterGeminiRetriesFailed('buildQuestionBlueprint', lastError);
 }
 
 function buildEvidencePackets(chunks, _intent, opts = {}) {

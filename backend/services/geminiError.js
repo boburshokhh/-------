@@ -54,6 +54,7 @@ function parseRetryDelaySeconds(detail) {
  *   retryDelayMs: number | null,
  *   isDailyFreeTierQuota: boolean,
  *   quotaId: string | null,
+ *   isTransientUnavailable: boolean,
  * }}
  */
 function parseGeminiApiError(err) {
@@ -95,11 +96,18 @@ function parseGeminiApiError(err) {
         isDailyFreeTierQuota = true;
     }
 
+    const st = String(status || '').toUpperCase();
+    const isTransientUnavailable = code === 503
+        || st === 'UNAVAILABLE'
+        || /\b503\b|UNAVAILABLE|high demand|temporarily unavailable|overload/i.test(msg);
+
     return {
         isResourceExhausted: Boolean(is429),
         retryDelayMs,
         isDailyFreeTierQuota,
         quotaId,
+        /** Перегрузка / недоступность модели на стороне Google — не квота, нужны длинные паузы между повторами */
+        isTransientUnavailable: Boolean(isTransientUnavailable),
     };
 }
 
@@ -118,6 +126,11 @@ async function sleepForGeminiRetry(parsed, attempt, maxAttempts, sleepFn) {
     }
     if (parsed.retryDelayMs != null && parsed.retryDelayMs > 0) {
         await sleep(parsed.retryDelayMs);
+        return;
+    }
+    if (parsed.isTransientUnavailable) {
+        const ms = Math.min(MAX_RETRY_WAIT_MS, 8000 * Math.pow(2, attempt - 1));
+        await sleep(ms);
         return;
     }
     await sleep(1000 * Math.pow(2, attempt - 1));

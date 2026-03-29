@@ -45,6 +45,7 @@ module.exports = function errorHandler(err, req, res, next) {
     }
 
     if (err.type === 'QUOTA_EXCEEDED') {
+        markUploadJobError(req, err.message || 'Превышен лимит запросов');
         return res.status(429).json({
             error: err.message || 'Превышен лимит запросов',
             details: err.details,
@@ -59,9 +60,10 @@ module.exports = function errorHandler(err, req, res, next) {
     }
 
     if (err.type === 'LLM_ERROR') {
+        markUploadJobError(req, err.message || 'Ошибка генерации');
         return res.status(502).json({
             error: 'Ошибка генерации теста',
-            details: err.message
+            details: err.message,
         });
     }
 

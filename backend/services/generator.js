@@ -619,7 +619,7 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
         }];
         progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: `Тем: ${themes.length} (режим без LLM)` });
 
-        const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
+        const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model, {});
         progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT, detail: `План: ${blueprint.length} intent-ов (без LLM)` });
 
         if (runId) {
@@ -738,7 +738,21 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     });
     let themes;
     try {
-        themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount);
+        themes = await rag.extractThemes(indexedChunks, fullText, model, targetCount, {
+            onRetry: ({ attempt, maxAttempts, parsed }) => {
+                let detail = `Повтор запроса к модели (${attempt}/${maxAttempts})…`;
+                if (parsed.isTransientUnavailable) {
+                    detail = `Модель перегружена (Google), ждём и повторяем… (${attempt}/${maxAttempts})`;
+                } else if (parsed.isResourceExhausted) {
+                    detail = `Лимит запросов к API, пауза перед повтором… (${attempt}/${maxAttempts})`;
+                }
+                progress({
+                    phase: 'generate',
+                    stage: 'themes',
+                    detail,
+                });
+            },
+        });
     } catch (err) {
         logStructured({
             level: 'error',
@@ -777,7 +791,21 @@ async function generateTest(fullText, docName, indexedChunks, onProgress, opts =
     });
     let blueprint;
     try {
-        blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model);
+        blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model, {
+            onRetry: ({ attempt, maxAttempts, parsed }) => {
+                let detail = `Повтор запроса для плана вопросов (${attempt}/${maxAttempts})…`;
+                if (parsed.isTransientUnavailable) {
+                    detail = `Модель перегружена, ждём и повторяем план… (${attempt}/${maxAttempts})`;
+                } else if (parsed.isResourceExhausted) {
+                    detail = `Лимит API, пауза перед повтором плана… (${attempt}/${maxAttempts})`;
+                }
+                progress({
+                    phase: 'generate',
+                    stage: 'blueprint',
+                    detail,
+                });
+            },
+        });
     } catch (err) {
         logStructured({
             level: 'error',

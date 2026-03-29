@@ -23,7 +23,9 @@ function mapHttpError(status, payload) {
   if (status === 415) return 'Неподдерживаемый формат файла. Используйте PDF.';
   if (status === 422) return 'Документ не удалось обработать. Проверьте содержимое файла.';
   if (status === 429) return payload?.error || 'Слишком много запросов. Повторите попытку чуть позже.';
-  if (status === 502) return 'Временная ошибка генерации. Повторите попытку.';
+  if (status === 502) {
+    return payload?.details || payload?.error || 'Временная ошибка генерации. Повторите попытку.';
+  }
   if (status === 404) return payload?.error || 'Запрошенные данные не найдены.';
   return fallback;
 }
