@@ -60,6 +60,13 @@ module.exports = function errorHandler(err, req, res, next) {
         });
     }
 
+    if (err.type === 'BUDGET_GUARD') {
+        return res.status(429).json({
+            error: err.message || 'Ограничение бюджета модели',
+            details: err.details,
+        });
+    }
+
     if (err.type === 'PARSE_ERROR') {
         return res.status(422).json({
             error: 'Ошибка обработки документа',

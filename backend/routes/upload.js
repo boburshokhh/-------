@@ -212,12 +212,20 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
 
         const modelId = req.body.model && typeof req.body.model === 'string' ? req.body.model.trim() : null;
         const allowedIds = (config.LLM_MODELS || []).map((m) => m.id);
-        const model = (modelId && allowedIds.includes(modelId)) ? modelId : config.LLM_MODEL;
+        const hasValidPick = !!(modelId && allowedIds.includes(modelId));
+        const model = hasValidPick ? modelId : config.LLM_MODEL;
         if (modelId && model !== modelId) {
             console.warn(`[UPLOAD] Неизвестная модель "${modelId}", использована ${model}`);
         }
 
-        console.log(`[UPLOAD] Генерация теста с моделью: ${model}`);
+        const routingModeRaw = req.body.routingMode && typeof req.body.routingMode === 'string'
+            ? req.body.routingMode.trim().toLowerCase()
+            : '';
+        const routingMode = ['auto', 'economy', 'balanced', 'quality', 'manual'].includes(routingModeRaw)
+            ? routingModeRaw
+            : (hasValidPick ? 'manual' : 'auto');
+
+        console.log(`[UPLOAD] Генерация теста с моделью: ${model} (routingMode=${routingMode})`);
         logStructured({
             level: 'info',
             traceId: jobId,
@@ -226,12 +234,25 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
             event: 'generate_test_invoked',
             metadata: { model },
         });
+        const complexityScore = req.body.complexityScore != null && req.body.complexityScore !== ''
+            ? Number(req.body.complexityScore)
+            : undefined;
+
         const testData = await generateTest(text, displayName, indexedChunks, report, {
             model,
+            routingMode,
+            pageCount,
+            lowTextQuality: !!diagnostics.lowTextQuality,
+            documentMetadata: {
+                page_count: pageCount,
+                low_text_quality: !!diagnostics.lowTextQuality,
+                extraction_quality: diagnostics.extractionQuality ?? null,
+            },
+            complexityScore: Number.isFinite(complexityScore) ? complexityScore : undefined,
             extractionQuality: diagnostics.extractionQuality,
             traceId: jobId,
             documentId: Number(documentId),
-            forceOffline: req.body.forceOffline === 'true' || req.body.forceOffline === true
+            forceOffline: req.body.forceOffline === 'true' || req.body.forceOffline === true,
         });
 
         const testRow = await testRepo.insertTest({

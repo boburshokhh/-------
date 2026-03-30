@@ -274,11 +274,17 @@ onUnmounted(() => {
   document.body.style.overflow = ''
 })
 
-const navLinks = [
-  { to: '/biblioteka', label: 'Библиотека', match: ['/biblioteka'] },
-  { to: '/zagruzka', label: 'Загрузка', match: ['/zagruzka', '/progress'] },
-  { to: '/itog', label: 'Результаты', match: ['/itog', '/razbor'] },
-]
+const navLinks = computed(() => {
+  const base = [
+    { to: '/biblioteka', label: 'Библиотека', match: ['/biblioteka'] },
+    { to: '/zagruzka', label: 'Загрузка', match: ['/zagruzka', '/progress'] },
+    { to: '/itog', label: 'Результаты', match: ['/itog', '/razbor'] },
+  ]
+  if (state.user?.role === 'admin') {
+    base.push({ to: '/admin/ai/models', label: 'AI Admin', match: ['/admin/ai'] })
+  }
+  return base
+})
 
 function isActive(link) {
   return link.match.some(m => route.path.startsWith(m))

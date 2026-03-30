@@ -10,6 +10,12 @@ import RazborView from '@/views/RazborView.vue'
 import HiddenSettingsView from '@/views/HiddenSettingsView.vue'
 import LoginView from '@/views/LoginView.vue'
 import RegisterView from '@/views/RegisterView.vue'
+import { useAuthStore } from '@/stores/authStore'
+import AdminModelsView from '@/views/AdminModelsView.vue'
+import AdminRoutingView from '@/views/AdminRoutingView.vue'
+import AdminUsageView from '@/views/AdminUsageView.vue'
+import AdminPoliciesView from '@/views/AdminPoliciesView.vue'
+import AdminDebugDecisionsView from '@/views/AdminDebugDecisionsView.vue'
 
 const routes = [
   { path: '/', redirect: '/biblioteka' },
@@ -22,6 +28,12 @@ const routes = [
   { path: '/itog', component: ItogView },
   { path: '/razbor', component: RazborView },
   { path: '/_hidden/runtime-settings', component: HiddenSettingsView },
+  { path: '/admin/ai', redirect: '/admin/ai/models', meta: { adminOnly: true } },
+  { path: '/admin/ai/models', component: AdminModelsView, meta: { adminOnly: true } },
+  { path: '/admin/ai/routing', component: AdminRoutingView, meta: { adminOnly: true } },
+  { path: '/admin/ai/usage', component: AdminUsageView, meta: { adminOnly: true } },
+  { path: '/admin/ai/policies', component: AdminPoliciesView, meta: { adminOnly: true } },
+  { path: '/admin/ai/debug', component: AdminDebugDecisionsView, meta: { adminOnly: true } },
 ]
 
 const router = createRouter({
@@ -32,6 +44,11 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const store = useAppStore()
+  const auth = useAuthStore()
+  if (to.meta?.adminOnly) {
+    const role = auth.state.user?.role
+    if (!auth.state.token || role !== 'admin') return '/login'
+  }
   if (to.path === '/test') {
     const hasId = Boolean(to.query?.testId || store.state.upload.testId)
     if (!hasId) return '/biblioteka'

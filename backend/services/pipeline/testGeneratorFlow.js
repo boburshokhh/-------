@@ -17,9 +17,11 @@
 'use strict';
 
 const config       = require('../../config');
+const { AGENT_ROLES, AGENT_RESOLUTION_ORDER } = require('../../config/agentRoles');
 const { chunkText } = require('../chunker');
 const { calculateQuestionBudget } = require('../budgetCalculator');
 const quotaGuard   = require('../quotaGuard');
+const modelRouter  = require('../modelRouter');
 const { resolveExecutionMode, estimateQuotaBudget } = require('../quotaBudget');
 const jobProgress  = require('../jobProgress');
 const runRepo      = require('../../db/repositories/runRepo');
@@ -53,10 +55,65 @@ const {
 
 const PW = jobProgress.WEIGHT;
 
+/**
+ * Резолвинг моделей по агентным ролям (БД rules + legacy routeModel).
+ * @returns {{ decisions: Record<string, object>, modelsByAgent: Record<string, string|null> }}
+ */
+async function resolvePipelineAgentModels({
+    routingMode,
+    documentMetadata,
+    complexityNorm,
+    quotaSnapshot,
+    adminOverrides,
+    traceId,
+    documentId,
+}) {
+    const base = {
+        requestedMode: routingMode,
+        documentMetadata,
+        complexityScore: complexityNorm,
+        quotaSnapshot,
+        adminOverrides,
+        traceId,
+        documentId,
+        executionMode: 'normal',
+    };
+    const decisions = {};
+    const modelsByAgent = {};
+    for (const agentRole of AGENT_RESOLUTION_ORDER) {
+        const d = await modelRouter.routeModelForAgent({ ...base, agentRole });
+        decisions[agentRole] = d;
+        let m = null;
+        if (d.selectedModel != null) {
+            m = await quotaGuard.getAvailableModel(d.selectedModel);
+            if (!m && d.fallbackModel) m = await quotaGuard.getAvailableModel(d.fallbackModel);
+            if (!m) m = d.selectedModel;
+        }
+        modelsByAgent[agentRole] = m;
+    }
+    return { decisions, modelsByAgent };
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function derivePipelineComplexity(opts, indexedChunks, documentMetadata) {
+    if (typeof opts.complexityScore === 'number' && !Number.isNaN(opts.complexityScore)) {
+        return modelRouter.normalizeComplexity(opts.complexityScore);
+    }
+    const n = (indexedChunks || []).length;
+    const meta = documentMetadata || {};
+    const pages = Number(meta.page_count) || 0;
+    let score = 0.35;
+    if (n > 25) score += 0.2;
+    if (pages > (config.MODEL_ROUTING?.maxPagesForEasyDoc ?? 15)) score += 0.15;
+    if (meta.low_text_quality) score += 0.2;
+    const ext = opts.extractionQuality || meta.extraction_quality;
+    if (ext === 'low' || ext === 'poor') score += 0.15;
+    return Math.min(1, score);
 }
 
 /**
@@ -87,7 +144,7 @@ function applyFallbackDecisions(stats, ctx) {
  * Строит blueprint из заголовков и формирует вопросы из чанков без LLM.
  */
 async function runOfflinePipeline({
-    fullText, indexedChunks, model, targetCount, targetMin, targetMax,
+    fullText, indexedChunks, model, modelBlueprint, modelsByAgent, targetCount, targetMin, targetMax,
     detectedLang, startTime, runId, traceId, documentId, opts, progress,
 }) {
     progress({ phase: 'generate', stage: 'quota_offline',
@@ -103,7 +160,8 @@ async function runOfflinePipeline({
     progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES,
         detail: `Тем: ${themes.length} (режим без LLM)` });
 
-    const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, model, {});
+    const bpModel = modelBlueprint || model;
+    const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, bpModel, {});
     progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT,
         detail: `План: ${blueprint.length} intent-ов (без LLM)` });
 
@@ -139,6 +197,7 @@ async function runOfflinePipeline({
         finalCount: finalQuestions.length,
         backfillRounds: 0, backfillQuestionsAdded: 0, evidenceScores: [],
         quotaOffline: true,
+        modelsByAgent: modelsByAgent || undefined,
     });
 
     const fallbackDecision = applyFallbackDecisions({
@@ -230,7 +289,8 @@ async function buildBlueprint({
 // ─── main batch loop ─────────────────────────────────────────────────────────
 
 async function runMainBatchLoop({
-    blueprintWithDifficulty, indexedChunks, coverageMap, model, detectedLang,
+    blueprintWithDifficulty, indexedChunks, coverageMap, modelGenerate, modelGround, embedModel,
+    detectedLang,
     enableGrounding, pipelineContext, batchSize, topK, traceId, documentId, progress,
     totalBatches,
 }) {
@@ -254,7 +314,8 @@ async function runMainBatchLoop({
 
         for (const intent of batch) {
             const relevantChunks = await rag.hybridRetrieve(
-                `${intent.theme}: ${intent.intent}`, indexedChunks, topK
+                `${intent.theme}: ${intent.intent}`, indexedChunks, topK,
+                { embedModel: embedModel || null },
             );
             const packets      = rag.buildEvidencePackets(relevantChunks, intent.intent);
             const evidenceText = rag.formatEvidenceForPrompt(packets);
@@ -290,7 +351,7 @@ async function runMainBatchLoop({
         }
 
         const { results: batchResults, stats: batchStats } = await generateBatchQuestions(
-            filteredBatch, evidenceList, chunkIdsList, null, model, detectedLang
+            filteredBatch, evidenceList, chunkIdsList, null, modelGenerate, detectedLang
         );
         statsValidated        += batchResults.length;
         statsSkippedLLM       += batchStats.llmSkipped;
@@ -300,7 +361,7 @@ async function runMainBatchLoop({
         if (enableGrounding && pipelineContext.executionMode === 'normal') {
             const bQuestions = batchResults.map(r => r.question);
             const bEvidences = batchResults.map(r => evidenceList[r.intentIdx]);
-            groundedMask = await checkGroundingBatched(bQuestions, bEvidences, model);
+            groundedMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround);
         }
 
         for (let i = 0; i < batchResults.length; i++) {
@@ -331,7 +392,8 @@ async function runMainBatchLoop({
 // ─── backfill loop ───────────────────────────────────────────────────────────
 
 async function runBackfillLoop({
-    initialDedup, indexedChunks, coverageMap, model, detectedLang,
+    initialDedup, indexedChunks, coverageMap, modelGenerate, modelGround, embedModel,
+    detectedLang,
     enableGrounding, pipelineContext, batchSize, targetMin,
     maxBackfillRounds, traceId, documentId, progress,
 }) {
@@ -384,7 +446,7 @@ async function runBackfillLoop({
             if (bfFiltered.length === 0) continue;
 
             const { results: batchResults, stats: bfStats } = await generateBatchQuestions(
-                bfFiltered, bfEvidenceList, bfChunkIdsList, null, model, detectedLang
+                bfFiltered, bfEvidenceList, bfChunkIdsList, null, modelGenerate, detectedLang
             );
             statsSkippedLLM       += bfStats.llmSkipped;
             statsValidationFailed += bfStats.validationFailed;
@@ -393,7 +455,7 @@ async function runBackfillLoop({
             if (enableGrounding && pipelineContext.executionMode === 'normal') {
                 const bQuestions = batchResults.map(r => r.question);
                 const bEvidences = batchResults.map(r => bfEvidenceList[r.intentIdx]);
-                bfMask = await checkGroundingBatched(bQuestions, bEvidences, model);
+                bfMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround);
             }
 
             for (let i = 0; i < batchResults.length; i++) {
@@ -409,8 +471,9 @@ async function runBackfillLoop({
 
         if (newRawQuestions.length === 0) { console.warn(`[PIPELINE] Backfill round ${round}: нет новых вопросов`); break; }
 
+        const embedBatch = (texts) => rag.getBatchEmbeddings(texts, 3, embedModel || null);
         const dedupedNew = newRawQuestions.length > 1
-            ? await semanticDedup(newRawQuestions, rag.getBatchEmbeddings, config.DEDUP_THRESHOLD || 0.88)
+            ? await semanticDedup(newRawQuestions, embedBatch, config.DEDUP_THRESHOLD || 0.88)
             : newRawQuestions;
 
         const filtered = dedupedNew.filter(q =>
@@ -446,7 +509,6 @@ async function runBackfillLoop({
  */
 async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress, opts = {}) {
     const startTime  = Date.now();
-    const model      = await quotaGuard.getAvailableModel(opts.model || config.LLM_MODEL);
     const traceId    = opts.traceId    || `gen-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const documentId = opts.documentId != null ? opts.documentId : null;
     const progress   = p => { if (typeof onProgress === 'function') onProgress(p); };
@@ -475,6 +537,38 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
             embedding: null, summary: [],
         }));
     }
+
+    const routingMode = opts.routingMode || 'auto';
+    const documentMetadata = {
+        ...opts.documentMetadata,
+        page_count: opts.documentMetadata?.page_count ?? opts.pageCount,
+        low_text_quality: opts.documentMetadata?.low_text_quality ?? opts.lowTextQuality,
+        extraction_quality: opts.documentMetadata?.extraction_quality ?? opts.extractionQuality,
+    };
+    const complexityNorm = derivePipelineComplexity(opts, indexedChunks, documentMetadata);
+    const quotaSnapshot = await quotaGuard.getUsageSnapshot();
+    const adminOverrides = routingMode === 'manual' && opts.model
+        ? { model: opts.model }
+        : {};
+
+    const { decisions: agentDecisions, modelsByAgent } = await resolvePipelineAgentModels({
+        routingMode,
+        documentMetadata,
+        complexityNorm,
+        quotaSnapshot,
+        adminOverrides,
+        traceId,
+        documentId,
+    });
+
+    const modelGenerator = modelsByAgent[AGENT_ROLES.generator] || config.LLM_MODEL || 'gemini-2.5-flash';
+    const modelBlueprint = modelsByAgent[AGENT_ROLES.blueprint] || modelGenerator;
+    const modelQuality = modelsByAgent[AGENT_ROLES.quality] || modelGenerator;
+    const modelBackfill = modelsByAgent[AGENT_ROLES.backfill] || modelGenerator;
+    const embedModel = modelsByAgent[AGENT_ROLES.evidence] || config.EMBEDDING_MODEL || 'gemini-embedding-001';
+
+    /** Основная LLM для run row / обратная совместимость логов */
+    const model = modelGenerator;
 
     // ── 3. Budget ────────────────────────────────────────────────────────────
     const budgetPlan = calculateQuestionBudget(fullText, indexedChunks, {
@@ -509,7 +603,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     });
     console.log(`[PIPELINE] Оценка бюджета API: ~${estimatedBudget.llmCalls} LLM, ~${estimatedBudget.embedCalls} Embed`);
 
-    const executionModeRes = await resolveExecutionMode(model, config.EMBEDDING_MODEL, estimatedBudget);
+    const executionModeRes = await resolveExecutionMode(modelGenerator, embedModel, estimatedBudget);
     if (executionModeRes.mode === 'quota_exhausted') {
         console.warn(`[PIPELINE] ${executionModeRes.reason}`);
         if (!opts.forceOffline) {
@@ -555,16 +649,32 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         console.warn(`[PIPELINE] Could not create generation_run: ${e.message}`);
     }
 
-    logStructured({ level: 'info', traceId, documentId, phase: 'generate', event: 'generation_start',
-        metrics: { model, run_id: runId } });
-    console.log(`[PIPELINE] Цель: ${targetMin}–${targetMax} | чанков: ${indexedChunks.length} | модель: ${model}`);
+    for (const agentRole of AGENT_RESOLUTION_ORDER) {
+        const dec = agentDecisions[agentRole];
+        if (dec) await modelRouter.emitRouterDecisionToPipeline(runId, documentId, traceId, dec);
+    }
+
+    logStructured({
+        level: 'info', traceId, documentId, phase: 'generate', event: 'generation_start',
+        metrics: {
+            model: modelGenerator,
+            model_blueprint: modelBlueprint,
+            model_quality: modelQuality,
+            model_backfill: modelBackfill,
+            embedding_model: embedModel,
+            run_id: runId,
+        },
+    });
+    console.log(`[PIPELINE] Цель: ${targetMin}–${targetMax} | чанков: ${indexedChunks.length} | `
+        + `gen=${modelGenerator} blueprint=${modelBlueprint} ground=${modelQuality} embed=${embedModel}`);
 
     // ── 6. Offline branch ────────────────────────────────────────────────────
     const llmRpdExhausted = await quotaGuard.isRpdExhaustedForModel(model);
     if (llmRpdExhausted) {
         console.warn('[PIPELINE] Дневной лимит isчерпан — offline mode');
         const result = await runOfflinePipeline({
-            fullText, indexedChunks, model, targetCount, targetMin, targetMax,
+            fullText, indexedChunks, model: modelGenerator, modelBlueprint, modelsByAgent,
+            targetCount, targetMin, targetMax,
             detectedLang, startTime, runId, traceId, documentId, opts, progress,
         });
         const cleanName = docName.replace(/\.(pdf|docx?)$/i, '');
@@ -578,7 +688,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
 
     // ── 7. Blueprint ─────────────────────────────────────────────────────────
     const blueprint = await buildBlueprint({
-        indexedChunks, fullText, model, count, pipelineContext, progress, traceId, documentId,
+        indexedChunks, fullText, model: modelBlueprint, count, pipelineContext, progress, traceId, documentId,
     });
 
     if (runId) {
@@ -598,7 +708,9 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     if (opts.traceId) jobProgress.refineMainBatchPlan(String(opts.traceId), totalBatches);
 
     const mainLoop = await runMainBatchLoop({
-        blueprintWithDifficulty, indexedChunks, coverageMap, model, detectedLang,
+        blueprintWithDifficulty, indexedChunks, coverageMap,
+        modelGenerate: modelGenerator, modelGround: modelQuality, embedModel,
+        detectedLang,
         enableGrounding, pipelineContext, batchSize, topK, traceId, documentId, progress, totalBatches,
     });
     const {
@@ -629,7 +741,8 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     const preDedupCount  = allQuestions.length;
     const groundedPreDedup = allQuestions.length;
     console.log('[PIPELINE] Семантическая дедупликация...');
-    const initialDedup = await semanticDedup(allQuestions, rag.getBatchEmbeddings, config.DEDUP_THRESHOLD || 0.88);
+    const embedBatchMain = (texts) => rag.getBatchEmbeddings(texts, 3, embedModel || null);
+    const initialDedup = await semanticDedup(allQuestions, embedBatchMain, config.DEDUP_THRESHOLD || 0.88);
     console.log(`[PIPELINE] После dedup: ${initialDedup.length} (было ${allQuestions.length})`);
     const dedupDropped = preDedupCount - initialDedup.length;
     if (dedupDropped > 0) {
@@ -643,7 +756,9 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
 
     // ── 11. Backfill ─────────────────────────────────────────────────────────
     const backfillResult = await runBackfillLoop({
-        initialDedup, indexedChunks, coverageMap, model, detectedLang,
+        initialDedup, indexedChunks, coverageMap,
+        modelGenerate: modelBackfill, modelGround: modelQuality, embedModel,
+        detectedLang,
         enableGrounding, pipelineContext, batchSize, targetMin,
         maxBackfillRounds: config.BACKFILL_MAX_ROUNDS || 3,
         traceId, documentId, progress,
@@ -665,6 +780,11 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         finalCount: finalQuestions.length, blueprintIntents: blueprintWithDifficulty.length,
     }, { traceId, documentId });
 
+    const modelsByAgentFlat = {};
+    for (const role of AGENT_RESOLUTION_ORDER) {
+        modelsByAgentFlat[role] = modelsByAgent[role] ?? null;
+    }
+
     const generationMetrics = buildGenerationMetrics({
         traceId, sessionId: opts.sessionId, documentId, model, durationMs,
         targetCount, targetMin, targetMax,
@@ -684,6 +804,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         executionMode: pipelineContext.executionMode,
         degradedReasons: pipelineContext.degradedReasons,
         degradedStages: pipelineContext.degradedStages,
+        modelsByAgent: modelsByAgentFlat,
     });
 
     // ── 13. Persist results ──────────────────────────────────────────────────

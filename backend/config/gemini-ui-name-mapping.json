@@ -1,0 +1,14 @@
+{
+  "gemini-embedding-001": { "ui_name": "Gemini Embedding 1", "category": "other" },
+  "gemini-2.5-flash-lite": { "ui_name": "Gemini 2.5 Flash Lite", "category": "text_out" },
+  "gemini-2.5-flash": { "ui_name": "Gemini 2.5 Flash", "category": "text_out" },
+  "gemini-2.5-pro": { "ui_name": "Gemini 2.5 Pro", "category": "text_out" },
+  "gemini-2.0-flash": { "ui_name": "Gemini 2 Flash", "category": "text_out" },
+  "gemini-2.0-flash-lite": { "ui_name": "Gemini 2 Flash Lite", "category": "text_out" },
+  "gemini-2.5-flash-preview-tts": { "ui_name": "Gemini 2.5 Flash TTS", "category": "tts" },
+  "gemini-2.5-pro-preview-tts": { "ui_name": "Gemini 2.5 Pro TTS", "category": "tts" },
+  "gemini-3-flash-preview": { "ui_name": "Gemini 3 Flash", "category": "text_out" },
+  "deep-research-pro-preview-12-2025": { "ui_name": "Deep Research Pro Preview", "category": "agent" },
+  "gemini-2.5-flash-native-audio-preview-12-2025": { "ui_name": "Gemini 2.5 Flash Native Audio Dialog", "category": "live_api" },
+  "gemini-3-pro-image-preview": { "ui_name": "Nano Banana Pro (Gemini 3 Pro Image)", "category": "image" }
+}

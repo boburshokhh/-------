@@ -13,8 +13,8 @@ async function getAiClient() {
     return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
 }
 
-async function getQueryEmbedding(query, retries = 3) {
-    const embedModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
+async function getQueryEmbedding(query, retries = 3, embedModelOverride = null) {
+    const embedModel = embedModelOverride || config.EMBEDDING_MODEL || 'gemini-embedding-001';
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
@@ -42,7 +42,7 @@ async function getQueryEmbedding(query, retries = 3) {
     throw lastError;
 }
 
-async function getBatchEmbeddings(texts, retries = 3) {
+async function getBatchEmbeddings(texts, retries = 3, embedModelOverride = null) {
     if (!texts || texts.length === 0) return [];
     const embeddings = [];
 
@@ -50,7 +50,7 @@ async function getBatchEmbeddings(texts, retries = 3) {
     const chunkSize = 5;
     for (let i = 0; i < texts.length; i += chunkSize) {
         const batch = texts.slice(i, i + chunkSize);
-        const promises = batch.map(text => getQueryEmbedding(text, retries));
+        const promises = batch.map(text => getQueryEmbedding(text, retries, embedModelOverride));
         const batchResults = await Promise.all(promises);
         embeddings.push(...batchResults);
     }
@@ -115,9 +115,10 @@ async function hybridRetrieve(query, indexedChunks, k, opts = {}) {
         wLex = 0.25,
         lambda = config.MMR_LAMBDA || 0.65,
         threshold = config.RAG_THRESHOLD || 0.0,
+        embedModel = null,
     } = opts;
 
-    const queryVec = await getQueryEmbedding(query);
+    const queryVec = await getQueryEmbedding(query, 3, embedModel);
     const scored = indexedChunks.map(c => {
         const vecSim = Array.isArray(c.embedding) ? cosineSimilarity(queryVec, c.embedding) : 0;
         const lexSim = lexicalScore(query, c.text);

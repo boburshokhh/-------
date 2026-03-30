@@ -117,6 +117,96 @@ async function listModelsWithLimitsClean({
     return rows;
 }
 
+/**
+ * Partial update by primary key (for admin PATCH and sync-by-id).
+ * metadata: merged with existing row via JSONB || when mergeMetadata is true (default).
+ */
+async function updateModelById(modelId, patch, { mergeMetadata = true } = {}) {
+    const row = await getModelById(modelId);
+    if (!row) return null;
+
+    const fields = {
+        ui_name: 'ui_name',
+        category: 'category',
+        model_role: 'model_role',
+        api_model_id: 'api_model_id',
+        is_preview: 'is_preview',
+        is_enabled: 'is_enabled',
+        base_model_id: 'base_model_id',
+    };
+
+    const sets = [];
+    const vals = [];
+    let n = 1;
+
+    for (const [key, col] of Object.entries(fields)) {
+        if (Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== undefined) {
+            sets.push(`${col} = $${n}`);
+            vals.push(patch[key]);
+            n += 1;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'metadata') && patch.metadata !== undefined) {
+        if (mergeMetadata) {
+            sets.push(`metadata = COALESCE(metadata, '{}'::jsonb) || $${n}::jsonb`);
+        } else {
+            sets.push(`metadata = $${n}::jsonb`);
+        }
+        vals.push(JSON.stringify(patch.metadata));
+        n += 1;
+    }
+
+    if (!sets.length) {
+        return row;
+    }
+
+    sets.push('updated_at = now()');
+    vals.push(modelId);
+    const idPlaceholder = vals.length;
+
+    const sql = `
+        UPDATE ai_models
+        SET ${sets.join(', ')}
+        WHERE id = $${idPlaceholder}
+        RETURNING *
+    `;
+
+    try {
+        const { rows } = await pg.query(sql, vals);
+        return rows[0] || null;
+    } catch (e) {
+        if (e.code === '23505') {
+            const err = new Error('Конфликт уникального ключа (provider, category, ui_name, is_preview)');
+            err.status = 409;
+            throw err;
+        }
+        throw e;
+    }
+}
+
+/**
+ * Rows previously synced from Gemini (for optional disable-if-missing).
+ */
+async function listSyncManagedModels({
+    provider = 'google',
+} = {}) {
+    const { rows } = await pg.query(
+        `
+        SELECT *
+        FROM ai_models
+        WHERE provider = $1
+          AND api_model_id IS NOT NULL
+          AND (
+              metadata->>'source' = 'gemini_sync'
+              OR (metadata->>'sync_managed') = 'true'
+          )
+        `,
+        [provider],
+    );
+    return rows;
+}
+
 async function listModels({
     provider = 'google',
     includeDisabled = false,
@@ -159,5 +249,7 @@ module.exports = {
     findModelIdByApiModelId,
     listModels,
     listModelsWithLimits: listModelsWithLimitsClean,
+    updateModelById,
+    listSyncManagedModels,
 };
 

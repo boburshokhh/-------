@@ -2,6 +2,9 @@ const aiModelsRepo = require('../db/repositories/aiModelsRepo');
 const aiModelLimitsRepo = require('../db/repositories/aiModelLimitsRepo');
 const aiRoutingRulesRepo = require('../db/repositories/aiRoutingRulesRepo');
 const aiModelUsageRepo = require('../db/repositories/aiModelUsageRepo');
+const aiRoutingConfigRepo = require('../db/repositories/aiRoutingConfigRepo');
+const aiManualOverridesRepo = require('../db/repositories/aiManualOverridesRepo');
+const aiAdminAuditRepo = require('../db/repositories/aiAdminAuditRepo');
 
 const CACHE_TTL_MS = 30_000;
 
@@ -64,7 +67,14 @@ async function getRegistrySnapshot({
 }
 
 async function listRoutingRules(phase, { enabledOnly = true } = {}) {
-    return aiRoutingRulesRepo.listRulesByPhase(phase, { enabledOnly });
+    if (phase) return aiRoutingRulesRepo.listRulesByPhase(phase, { enabledOnly });
+    return aiRoutingRulesRepo.listRules({ enabledOnly });
+}
+
+function bumpModelRouterRulesCache() {
+    try {
+        require('./modelRouter').invalidateRoutingRulesCache();
+    } catch (_) { /* optional dep at cold start */ }
 }
 
 async function createRoutingRule({
@@ -75,7 +85,7 @@ async function createRoutingRule({
     conditions = {},
     actions = {},
 }) {
-    return aiRoutingRulesRepo.createRule({
+    const id = await aiRoutingRulesRepo.createRule({
         name,
         phase,
         priority,
@@ -83,6 +93,8 @@ async function createRoutingRule({
         conditions,
         actions,
     });
+    bumpModelRouterRulesCache();
+    return id;
 }
 
 async function updateRoutingRule(ruleId, {
@@ -93,7 +105,7 @@ async function updateRoutingRule(ruleId, {
     conditions,
     actions,
 } = {}) {
-    return aiRoutingRulesRepo.updateRule(ruleId, {
+    await aiRoutingRulesRepo.updateRule(ruleId, {
         name,
         phase,
         priority,
@@ -101,10 +113,12 @@ async function updateRoutingRule(ruleId, {
         conditions,
         actions,
     });
+    bumpModelRouterRulesCache();
 }
 
 async function enableRoutingRule(ruleId, isEnabled) {
-    return aiRoutingRulesRepo.enableRule(ruleId, isEnabled);
+    await aiRoutingRulesRepo.enableRule(ruleId, isEnabled);
+    bumpModelRouterRulesCache();
 }
 
 async function setModelEnabled(modelId, isEnabled) {
@@ -254,15 +268,119 @@ async function recordUsageByApiModelId({
     });
 }
 
+async function listUsage({
+    fromDate = null,
+    toDate = null,
+    phase = null,
+    apiModelId = null,
+    keyFingerprint = null,
+    limit = 100,
+    offset = 0,
+} = {}) {
+    return aiModelUsageRepo.listUsage({
+        fromDate,
+        toDate,
+        phase,
+        apiModelId,
+        keyFingerprint,
+        limit,
+        offset,
+    });
+}
+
+async function getRoutingMode() {
+    const row = await aiRoutingConfigRepo.getRoutingConfig();
+    return row || { id: 1, routing_mode: 'auto', metadata: {}, updated_by: null };
+}
+
+async function setRoutingMode({ routingMode, updatedBy = null, metadata = {} }) {
+    const row = await aiRoutingConfigRepo.setRoutingMode({ routingMode, updatedBy, metadata });
+    try {
+        require('./modelRouter').invalidateRoutingConfigCache();
+    } catch (_) { /* optional dep at cold start */ }
+    return row;
+}
+
+async function listManualOverrides({
+    includeDisabled = false,
+    scope = null,
+    activeOnly = false,
+    limit = 100,
+    offset = 0,
+} = {}) {
+    return aiManualOverridesRepo.listOverrides({
+        includeDisabled,
+        scope,
+        activeOnly,
+        limit,
+        offset,
+    });
+}
+
+async function getManualOverrideById(id) {
+    return aiManualOverridesRepo.getOverrideById(id);
+}
+
+async function createManualOverride(payload) {
+    const row = await aiManualOverridesRepo.createOverride(payload);
+    try {
+        require('./modelRouter').invalidateManualOverridesCache();
+    } catch (_) { /* optional dep at cold start */ }
+    return row;
+}
+
+async function updateManualOverride(id, payload) {
+    const row = await aiManualOverridesRepo.updateOverride(id, payload);
+    try {
+        require('./modelRouter').invalidateManualOverridesCache();
+    } catch (_) { /* optional dep at cold start */ }
+    return row;
+}
+
+async function appendAuditEvent(input) {
+    return aiAdminAuditRepo.appendAuditEvent(input);
+}
+
+async function listAudit({
+    entityType = null,
+    actorUserId = null,
+    limit = 100,
+    offset = 0,
+} = {}) {
+    return aiAdminAuditRepo.listAudit({
+        entityType,
+        actorUserId,
+        limit,
+        offset,
+    });
+}
+
+function invalidateRegistryCache() {
+    cacheValue = null;
+    cacheKey = '';
+}
+
 module.exports = {
     getRegistrySnapshot,
     listRoutingRules,
     createRoutingRule,
     updateRoutingRule,
     enableRoutingRule,
+    listUsage,
+    getRoutingMode,
+    setRoutingMode,
+    listManualOverrides,
+    getManualOverrideById,
+    createManualOverride,
+    updateManualOverride,
+    appendAuditEvent,
+    listAudit,
     setModelEnabled,
     upsertModelWithLimits,
     importFromModelsJson,
     recordUsageByApiModelId,
+    invalidateRegistryCache,
+    inferIsPreview,
+    inferModelRole,
 };
 

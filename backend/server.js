@@ -84,6 +84,7 @@ app.use('/api/auth', apiLimiter, lazyRouter('./routes/auth'));
 app.use('/api/logs', require('./routes/logs'));
 app.use('/api/jobs', require('./routes/jobs'));
 app.use('/api/_hidden/settings', require('./routes/settings'));
+app.use('/api/admin/ai', apiLimiter, lazyRouter('./routes/adminAi'));
 
 /** Не даём /api/health зависнуть при «залипшем» Postgres — иначе Docker healthcheck падает по timeout. */
 function withTimeout(promise, ms, label) {

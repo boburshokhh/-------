@@ -77,11 +77,34 @@ async function listRulesByPhase(phase, { enabledOnly = true } = {}) {
     return rows;
 }
 
+async function listRules({ phase = null, enabledOnly = true } = {}) {
+    const where = [];
+    const params = [];
+    let i = 1;
+    if (phase) {
+        where.push(`phase = $${i++}`);
+        params.push(phase);
+    }
+    if (enabledOnly) where.push('is_enabled = true');
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const { rows } = await pg.query(
+        `
+        SELECT *
+        FROM ai_routing_rules
+        ${whereSql}
+        ORDER BY phase ASC, priority DESC, id ASC
+        `,
+        params,
+    );
+    return rows;
+}
+
 module.exports = {
     createRule,
     updateRule,
     enableRule,
     getRuleById,
     listRulesByPhase,
+    listRules,
 };
 

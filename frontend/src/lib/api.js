@@ -204,4 +204,110 @@ export const API = {
       body: JSON.stringify({ currentPassword, newPassword }),
     });
   },
+
+  // ── Admin AI routing ─────────────────────────────────────────────────────
+  adminGetModels() {
+    return request('/admin/ai/models');
+  },
+
+  adminSyncModels({ disableMissingFromApi = false } = {}) {
+    return request('/admin/ai/models/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disableMissingFromApi }),
+    });
+  },
+
+  adminPatchModel(id, patch) {
+    return request(`/admin/ai/models/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch || {}),
+    });
+  },
+
+  adminGetRoutingRules(phase, { enabledOnly = false } = {}) {
+    const qs = new URLSearchParams();
+    qs.set('enabled_only', enabledOnly ? 'true' : 'false');
+    return request(`/admin/ai/routing-rules/${encodeURIComponent(phase)}?${qs.toString()}`);
+  },
+
+  adminCreateRoutingRule(payload) {
+    return request('/admin/ai/routing-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  adminUpdateRoutingRule(id, patch) {
+    return request(`/admin/ai/routing-rules/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch || {}),
+    });
+  },
+
+  adminSetRoutingRuleEnabled(id, isEnabled) {
+    return request(`/admin/ai/routing-rules/${encodeURIComponent(id)}/enabled`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_enabled: !!isEnabled }),
+    });
+  },
+
+  adminGetUsage(params = {}) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v != null && v !== '') qs.set(k, String(v));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/ai/usage${suffix}`);
+  },
+
+  adminGetRoutingMode() {
+    return request('/admin/ai/routing-mode');
+  },
+
+  adminSetRoutingMode(routingMode, metadata = {}) {
+    return request('/admin/ai/routing-mode', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routing_mode: routingMode, metadata }),
+    });
+  },
+
+  adminGetManualOverrides(params = {}) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v != null && v !== '') qs.set(k, String(v));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/ai/manual-overrides${suffix}`);
+  },
+
+  adminCreateManualOverride(payload) {
+    return request('/admin/ai/manual-overrides', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  adminUpdateManualOverride(id, patch) {
+    return request(`/admin/ai/manual-overrides/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch || {}),
+    });
+  },
+
+  adminGetAudit(params = {}) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v != null && v !== '') qs.set(k, String(v));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/ai/audit${suffix}`);
+  },
 };

@@ -130,4 +130,43 @@ module.exports = {
   STORE_DOCUMENT_TEXT_IN_DB: process.env.STORE_DOCUMENT_TEXT_IN_DB === 'true',
   /** Ниже этого chars/page для pdf-parse будет пробоваться pdf.js */
   PDF_MIN_CHARS_PER_PAGE_SKIP_FALLBACK: parseInt(process.env.PDF_MIN_CHARS_PER_PAGE_SKIP_FALLBACK, 10) || 120,
+
+  /** Модель «премиум» для budget guard и сложных стадий */
+  LLM_PREMIUM_MODEL: process.env.LLM_PREMIUM_MODEL || 'gemini-2.5-pro',
+
+  /**
+   * Мягкие бюджеты по данным ai_model_usage (дополнение к gemini_usage / quotaGuard).
+   * Отключить: AI_BUDGET_GUARDS_ENABLED=false
+   */
+  AI_BUDGET_GUARDS: {
+    enabled: process.env.AI_BUDGET_GUARDS_ENABLED !== 'false',
+    /** Доля от soft-RPD premium: выше — не маршрутизируем premium на обычные стадии */
+    premiumUsageRatioThreshold: parseFloat(process.env.AI_BUDGET_PREMIUM_RATIO_THRESHOLD) || 0.35,
+    /** Доля soft-RPD стандартного Flash: выше — дешёвые задачи на lite */
+    flashUsageRatioThreshold: parseFloat(process.env.AI_BUDGET_FLASH_RATIO_THRESHOLD) || 0.65,
+    /** Premium requests / standard requests — выше порога premium «тесный» для обычных задач */
+    premiumVsStandardMaxRatio: parseFloat(process.env.AI_BUDGET_PREMIUM_VS_STANDARD_MAX) || 0.4,
+    /** Порог для ветки cheap: flash vs soft limit */
+    flashForCheapMaxRatio: parseFloat(process.env.AI_BUDGET_FLASH_FOR_CHEAP_MAX) || 0.5,
+    /** Доля RPD из FREE_TIER_QUOTAS, считающаяся «soft cap» */
+    rpdSoftFraction: parseFloat(process.env.AI_BUDGET_RPD_SOFT_FRACTION) || 0.85,
+    /** Доля ошибок preview (failed / (failed+ok)) — выше порога preview исключаются из auto-routing */
+    previewErrorRateThreshold: parseFloat(process.env.AI_BUDGET_PREVIEW_ERROR_THRESHOLD) || 0.2,
+    /** Минимум выборок preview перед блокировкой маршрутизации */
+    previewMinSamples: parseInt(process.env.AI_BUDGET_PREVIEW_MIN_SAMPLES, 10) || 5,
+  },
+
+  /**
+   * Model routing (pipeline modelRouter): режимы auto / economy / balanced / quality / manual.
+   */
+  MODEL_ROUTING: {
+    /** complexityScore 0..1: выше — допуск premium на «тяжёлых» стадиях (режим auto) */
+    complexityPremiumThreshold: parseFloat(process.env.MODEL_ROUTING_COMPLEXITY_PREMIUM) || 0.65,
+    /** Режим quality: минимальная сложность для приоритета premium на тяжёлых стадиях */
+    qualityMinComplexityForPremium: parseFloat(process.env.MODEL_ROUTING_QUALITY_MIN_COMPLEXITY) || 0.45,
+    /** Страниц выше этого порога — документ считается «тяжёлым» для эвристики */
+    maxPagesForEasyDoc: parseInt(process.env.MODEL_ROUTING_MAX_PAGES_EASY, 10) || 15,
+    /** Стадии, на которых допустим premium при quality/auto (api stage names) */
+    heavyStages: ['pipeline', 'generation', 'grounding', 'backfill', 'blueprint'],
+  },
 };

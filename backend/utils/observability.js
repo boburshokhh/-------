@@ -142,6 +142,7 @@ function _percentile(sorted, p) {
  * @param {number}   [raw.backfillQuestionsAdded]
  * @param {number[]} [raw.evidenceScores]    — NEW: накопленные scores из scoreEvidenceQuality
  * @param {number}   [raw.uniqueConcepts]    — NEW: optional unique concept count
+ * @param {Record<string, string|null>} [raw.modelsByAgent] — api_model_id по агентной роли
  */
 function buildGenerationMetrics(raw) {
     const {
@@ -274,6 +275,9 @@ function buildGenerationMetrics(raw) {
         low_confidence:          lowConfidence,
 
         schema_version: 2,
+        ...(raw.modelsByAgent && Object.keys(raw.modelsByAgent).length
+            ? { models_by_agent: raw.modelsByAgent }
+            : {}),
         ...(raw.quotaOffline ? { quota_offline: true } : {}),
     };
 }

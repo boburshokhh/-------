@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const quotaRepo = require('../db/repositories/quotaRepo');
 const config = require('../config');
 const { parseGeminiApiError } = require('./geminiError');
+const aiBudgetGuard = require('./aiBudgetGuard');
 
 const RPM_WINDOW_MS = 60 * 1000;
 const phaseCounters = new Map(); // traceId -> { phase: count }
@@ -36,7 +37,7 @@ function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
 
-async function assertWithinFreeTierQuota(modelId) {
+async function assertWithinFreeTierQuota(modelId, opts = {}) {
     if (!modelId) return;
     const limits = getLimitsForModel(modelId);
     if (!limits) return;
@@ -65,6 +66,10 @@ async function assertWithinFreeTierQuota(modelId) {
             `Достигнут дневной лимит free tier для этой модели (${limits.rpd} запросов/сутки, UTC). Завтра лимит обновится, либо задайте другой API-ключ в настройках.`,
             { modelId, limit: 'rpd', max: limits.rpd, used: usedDay },
         );
+    }
+
+    if (config.AI_BUDGET_GUARDS?.enabled !== false && opts.checkBudget !== false) {
+        await aiBudgetGuard.assertBudgetAllows(modelId, opts);
     }
 }
 
@@ -177,6 +182,19 @@ async function recordGeminiCall(modelId, opts = {}) {
         }
         entry[opts.phase] = (entry[opts.phase] || 0) + 1;
     }
+
+    if (config.AI_BUDGET_GUARDS?.enabled !== false && opts.recordAiUsage !== false) {
+        await aiBudgetGuard.recordAiModelUsageSuccess(modelId, opts);
+    }
+}
+
+/**
+ * Учёт неуспешного вызова (для preview error rate и soft budget).
+ */
+async function recordGeminiFailure(modelId, opts = {}) {
+    if (!modelId) return;
+    if (config.AI_BUDGET_GUARDS?.enabled === false) return;
+    await aiBudgetGuard.recordAiModelUsageFailure(modelId, opts);
 }
 
 function getPhaseUsage(traceId) {
@@ -257,10 +275,15 @@ module.exports = {
     isRpdExhaustedForModel,
     waitUntilQuotaAllows,
     recordGeminiCall,
+    recordGeminiFailure,
     syncFromGoogle429,
     getUsageSummaryPublic,
     getKeyFingerprint,
     resetUsageForNewApiKey,
     getAvailableModel,
     getPhaseUsage,
+    canUseModelForStage: aiBudgetGuard.canUseModelForStage,
+    getFallbackModel: aiBudgetGuard.getFallbackModel,
+    getUsageSnapshot: aiBudgetGuard.getUsageSnapshot,
+    inferBudgetPhaseFromModel: aiBudgetGuard.inferBudgetPhaseFromModel,
 };
