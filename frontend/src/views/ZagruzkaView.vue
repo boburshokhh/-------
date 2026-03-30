@@ -1,32 +1,49 @@
 <template>
   <AcademicLayout>
     <div class="flex-grow">
-      <!-- Hero-секция -->
-      <section class="max-w-7xl mx-auto px-6 pt-16 pb-12 text-center">
-        <h1 class="font-headline font-extrabold text-4xl md:text-6xl text-[#2A3439] mb-6 tracking-tight max-w-3xl mx-auto">
+      <!-- Hero: заголовок + компактное описание снизу -->
+      <section class="max-w-7xl mx-auto px-6 pt-12 pb-8 text-center md:pt-14 md:pb-10">
+        <h1 class="font-headline font-extrabold text-3xl sm:text-4xl md:text-5xl text-[#2A3439] tracking-tight max-w-3xl mx-auto leading-tight">
           Превратите документы в <span class="text-[#3755C3]">интерактивные тесты</span>
         </h1>
+        <p
+          class="mx-auto mt-4 max-w-md text-[11px] leading-snug text-[#566166] sm:text-xs sm:max-w-lg sm:leading-relaxed"
+        >
+          Загрузите PDF или DOCX: система проиндексирует документ и сгенерирует тест. Ниже — файл и модель генерации.
+        </p>
       </section>
 
-      <!-- Зона загрузки / inline-прогресс -->
-      <section class="max-w-4xl mx-auto px-6 pb-24">
-        <div class="grid grid-cols-1 gap-12">
-          <!-- Выбор модели LLM -->
+      <!-- Два блока рядом: загрузка | модель; при прогрессе — на всю ширину -->
+      <section class="max-w-7xl mx-auto px-6 pb-24">
+        <div
+          v-if="!showProgressInline"
+          class="grid grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:gap-8"
+        >
+          <div class="min-w-0">
+            <UploadZone
+              :disabled="isBusy"
+              :error="store.state.upload.error"
+              :file-name="store.state.upload.file?.name || ''"
+              :accept="uploadAccept"
+              :limits-text="uploadLimitsText"
+              @file-selected="handleUpload"
+            />
+          </div>
+
           <div
-            v-if="!showProgressInline"
-            class="bg-[#FFFFFF] rounded-xl border border-[#A9B4B9]/25 p-5 md:p-6 tonal-sculpt-shadow"
+            class="flex min-w-0 flex-col rounded-xl border border-[#A9B4B9]/25 bg-[#FFFFFF] p-5 tonal-sculpt-shadow md:p-6 lg:min-h-0 lg:self-stretch"
           >
-            <label for="model-select" class="block font-headline font-bold text-[#2A3439] text-sm mb-2">
+            <label for="model-select" class="mb-2 block font-headline text-sm font-bold text-[#2A3439]">
               Модель для генерации
             </label>
-            <p v-if="quotaTierLabel" class="text-xs text-[#566166] mb-3">
+            <p v-if="quotaTierLabel" class="mb-3 text-xs text-[#566166]">
               Квота: {{ quotaTierLabel }}
             </p>
             <select
               id="model-select"
               v-model="selectedModelId"
               :disabled="isBusy || !modelOptions.length"
-              class="w-full max-w-xl rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm text-[#2A3439] font-medium focus:outline-none focus:ring-2 focus:ring-[#3755C3] focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+              class="w-full rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option v-if="!modelOptions.length" value="" disabled>
                 Загрузка списка моделей…
@@ -39,46 +56,36 @@
                 {{ m.label }}
               </option>
             </select>
-            <p v-if="selectedModelLimits" class="text-xs text-[#566166] mt-3 leading-relaxed">
+            <p v-if="selectedModelLimits" class="mt-auto pt-4 text-xs leading-relaxed text-[#566166]">
               Free tier (локальный учёт): до {{ selectedModelLimits.rpd }} запросов/сутки (UTC),
               до {{ selectedModelLimits.rpm }} запросов/мин.
             </p>
           </div>
+        </div>
 
-          <UploadZone
-            v-if="!showProgressInline"
-            :disabled="isBusy"
-            :error="store.state.upload.error"
-            :file-name="store.state.upload.file?.name || ''"
-            :accept="uploadAccept"
-            :limits-text="uploadLimitsText"
-            @file-selected="handleUpload"
-          />
+        <GenerationProgress
+          v-else
+          :percent="store.state.upload.progress.percent"
+          :phase="store.state.upload.progress.phase"
+          :stage="store.state.upload.progress.stage"
+          :detail="store.state.upload.progress.detail"
+          :updated-at="store.state.upload.progress.updatedAt"
+          :volume-ready="store.state.upload.progress.volumeReady"
+          :progress-history="store.state.upload.progress.history"
+          :model-label="selectedModelLabel"
+        />
 
-          <GenerationProgress
-            v-else
-            :percent="store.state.upload.progress.percent"
-            :phase="store.state.upload.progress.phase"
-            :stage="store.state.upload.progress.stage"
-            :detail="store.state.upload.progress.detail"
-            :updated-at="store.state.upload.progress.updatedAt"
-            :volume-ready="store.state.upload.progress.volumeReady"
-            :progress-history="store.state.upload.progress.history"
-            :model-label="selectedModelLabel"
-          />
-
-          <div v-if="canGoToTest" class="flex justify-center">
-            <button
-              class="bg-gradient-to-r from-[#3755C3] to-[#2848B7] text-[#F8F7FF] px-8 py-3 rounded-xl font-bold text-sm tracking-wide shadow-lg hover:opacity-90 active:scale-95 transition-all"
-              @click="goToTest"
-            >
-              Перейти к тесту
-            </button>
-          </div>
+        <div v-if="canGoToTest" class="mt-10 flex justify-center">
+          <button
+            class="rounded-xl bg-gradient-to-r from-[#3755C3] to-[#2848B7] px-8 py-3 text-sm font-bold tracking-wide text-[#F8F7FF] shadow-lg transition-all hover:opacity-90 active:scale-95"
+            @click="goToTest"
+          >
+            Перейти к тесту
+          </button>
         </div>
       </section>
 
-      <section class="max-w-4xl mx-auto px-6 pb-12">
+      <section class="max-w-7xl mx-auto px-6 pb-12">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div class="bg-[#FFFFFF] rounded-xl border border-[#A9B4B9]/25 p-5">
             <div class="flex items-center justify-between mb-2">
