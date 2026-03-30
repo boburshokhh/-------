@@ -231,6 +231,7 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
             extractionQuality: diagnostics.extractionQuality,
             traceId: jobId,
             documentId: Number(documentId),
+            forceOffline: req.body.forceOffline === 'true' || req.body.forceOffline === true
         });
 
         const testRow = await testRepo.insertTest({

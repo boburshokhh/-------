@@ -44,4 +44,30 @@ async function getUsageSummary(fingerprint, date) {
     return rows;
 }
 
-module.exports = { getUsage, recordUsage, setUsageAtLeast, resetUsage, getUsageSummary };
+async function getRpmCount(fingerprint, modelId, windowMs) {
+    const cutoff = new Date(Date.now() - windowMs).toISOString();
+    const { rows } = await pg.query(`
+        SELECT COUNT(*) as count FROM gemini_rpm_hits
+        WHERE key_fingerprint = $1 AND model_id = $2 AND hit_at >= $3
+    `, [fingerprint, modelId, cutoff]);
+    return parseInt(rows[0].count, 10) || 0;
+}
+
+async function recordRpmHit(fingerprint, modelId) {
+    await pg.query(`
+        INSERT INTO gemini_rpm_hits (key_fingerprint, model_id, hit_at)
+        VALUES ($1, $2, now())
+    `, [fingerprint, modelId]);
+}
+
+async function pruneOldRpm(maxAgeMs = 120000) {
+    const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+    await pg.query(`
+        DELETE FROM gemini_rpm_hits WHERE hit_at < $1
+    `, [cutoff]);
+}
+
+module.exports = { 
+    getUsage, recordUsage, setUsageAtLeast, resetUsage, getUsageSummary,
+    getRpmCount, recordRpmHit, pruneOldRpm
+};

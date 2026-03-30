@@ -319,6 +319,7 @@ async function handleUpload(file) {
   const uploadPromise = API.upload(file, {
     jobId,
     modelId: store.state.selectedModel || null,
+    forceOffline: file._forceOffline === true,
   })
   startPolling()
   try {
@@ -327,6 +328,15 @@ async function handleUpload(file) {
     stopPolling()
   } catch (error) {
     stopPolling()
+    if (error?.requiresOfflineConsent) {
+      if (confirm(error.message || 'У вас закончилась дневная квота. Перейти в оффлайн-режим (генерация только по тексту, без сложной ИИ аналитики)?')) {
+        file._forceOffline = true;
+        handleUpload(file);
+      } else {
+        store.actions.failUpload('Отменено пользователем (недостаточно квоты).');
+      }
+      return;
+    }
     store.actions.failUpload(error?.message || 'Не удалось загрузить файл')
   }
 }

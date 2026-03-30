@@ -43,6 +43,14 @@ module.exports = function errorHandler(err, req, res, next) {
             details: err.message || 'Поддерживаются только PDF файлы'
         });
     }
+    if (err.requiresOfflineConsent) {
+        markUploadJobError(req, err.message || 'Требуется согласие на офлайн-сборку');
+        return res.status(err.status || 402).json({
+            error: err.message || 'Дневной лимит квоты исчерпан. Перейти в оффлайн-режим?',
+            requiresOfflineConsent: true,
+            details: err.details,
+        });
+    }
 
     if (err.type === 'QUOTA_EXCEEDED') {
         markUploadJobError(req, err.message || 'Превышен лимит запросов');

@@ -8,6 +8,7 @@ function createError(message, status, payload) {
   const err = new Error(message);
   err.status = status;
   err.payload = payload;
+  err.requiresOfflineConsent = payload?.requiresOfflineConsent || false;
   return err;
 }
 
@@ -24,6 +25,7 @@ function mapHttpError(status, payload) {
   if (status === 413) return 'Файл слишком большой или превышен лимит страниц.';
   if (status === 415) return 'Неподдерживаемый формат файла. Используйте PDF.';
   if (status === 422) return 'Документ не удалось обработать. Проверьте содержимое файла.';
+  if (status === 402) return payload?.error || 'Дневная квота исчерпана.';
   if (status === 429) return payload?.error || 'Слишком много запросов. Повторите попытку чуть позже.';
   if (status === 502) {
     return payload?.details || payload?.error || 'Временная ошибка генерации. Повторите попытку.';
@@ -79,6 +81,7 @@ export const API = {
     const formData = new FormData();
     formData.append('file', file);
     if (opts.modelId) formData.append('model', opts.modelId);
+    if (opts.forceOffline) formData.append('forceOffline', 'true');
 
     const headers = {};
     if (opts.jobId) headers['X-Job-Id'] = opts.jobId;

@@ -108,7 +108,7 @@ module.exports = {
   LLM_BATCH_SIZE: parseInt(process.env.LLM_BATCH_SIZE) || 2,
   BACKFILL_MAX_ROUNDS: parseInt(process.env.BACKFILL_MAX_ROUNDS) || 3,
   ENABLE_GROUNDING: process.env.ENABLE_GROUNDING !== 'false',
-  DEDUP_THRESHOLD: parseFloat(process.env.DEDUP_THRESHOLD) || 0.88,
+  DEDUP_THRESHOLD: parseFloat(process.env.DEDUP_THRESHOLD) || 0.85,
   ENABLE_PDF_OCR: process.env.ENABLE_PDF_OCR !== 'false',
   MAX_OCR_PAGES: parseInt(process.env.MAX_OCR_PAGES, 10) || 10,
   MIN_TEXT_LENGTH: parseInt(process.env.MIN_TEXT_LENGTH, 10) || 50,

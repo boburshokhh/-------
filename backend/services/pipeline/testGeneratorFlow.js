@@ -20,6 +20,7 @@ const config       = require('../../config');
 const { chunkText } = require('../chunker');
 const { calculateQuestionBudget } = require('../budgetCalculator');
 const quotaGuard   = require('../quotaGuard');
+const { resolveExecutionMode, estimateQuotaBudget } = require('../quotaBudget');
 const jobProgress  = require('../jobProgress');
 const runRepo      = require('../../db/repositories/runRepo');
 
@@ -481,9 +482,11 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         questionTypes: ['multiple_choice'],
     });
     const targetCount = budgetPlan.targetCount;
-    const targetMin   = config.TARGET_QUESTIONS_MIN || 20;
+    
+    // Don't artificially inflate targetMin to 20 if budget is lower!
+    const targetMin   = Math.min(targetCount, config.TARGET_QUESTIONS_MIN || 20);
     const targetMax   = config.TARGET_QUESTIONS_MAX || 30;
-    const count       = Math.round((targetMin + targetMax) / 2);
+    const count       = targetCount; // Base blueprint count exactly on the calculated budget
 
     budgetPlan.logs.forEach(l => console.log(`[BUDGET] ${l}`));
     if (budgetPlan.reductionReasons.length > 0)
@@ -497,6 +500,25 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         : chunksWithLlmFacts === nChunks ? 'summary'
         : chunksWithLlmFacts === 0 ? 'extractive'
         : 'mixed';
+
+    const estimatedBudget = estimateQuotaBudget({
+        chunkCount: nChunks,
+        summaryMode: config.SUMMARY_MODE,
+        enableGrounding: config.ENABLE_GROUNDING,
+        targetCount: count,
+    });
+    console.log(`[PIPELINE] Оценка бюджета API: ~${estimatedBudget.llmCalls} LLM, ~${estimatedBudget.embedCalls} Embed`);
+
+    const executionModeRes = await resolveExecutionMode(model, config.EMBEDDING_MODEL, estimatedBudget);
+    if (executionModeRes.mode === 'quota_exhausted') {
+        console.warn(`[PIPELINE] ${executionModeRes.reason}`);
+        if (!opts.forceOffline) {
+            const err = new Error(executionModeRes.reason || 'Дневной лимит квоты исчерпан.');
+            err.requiresOfflineConsent = true;
+            err.status = 402;
+            throw err;
+        }
+    }
 
     logStructured({
         level: 'info', traceId, documentId, phase: 'generate', event: 'budget_calculated',

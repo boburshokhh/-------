@@ -18,6 +18,16 @@ const app = express();
 
 logCollector.init();
 
+// Периодическая очистка устаревших RPM-записей в БД (каждые 2 минуты)
+const quotaRepo = require('./db/repositories/quotaRepo');
+setInterval(async () => {
+    try {
+        await quotaRepo.pruneOldRpm();
+    } catch (e) {
+        console.error('[RPM_PRUNE] Prune error:', e.message);
+    }
+}, 2 * 60 * 1000);
+
 app.set('trust proxy', 1);
 
 app.use((req, res, next) => {
