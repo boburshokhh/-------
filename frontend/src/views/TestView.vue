@@ -104,10 +104,20 @@ import AIStudyPrompt from '@/components/quiz/AIStudyPrompt.vue'
 import { API } from '@/lib/api'
 import { mapTestDetail, mapSubmitAnswersPayload, mapResultSummary } from '@/lib/mappers'
 import { useAppStore } from '@/stores/appStore'
+import { useAuthStore } from '@/stores/authStore'
 
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
+const authStore = useAuthStore()
+
+/** Имя для сохранения результата — совпадает с фильтром дашборда (email/ФИО из профиля или введённое имя) */
+const participantDisplayName = computed(() => {
+  const u = authStore.state.user
+  const fromAuth = (u?.fullName || u?.email || '').trim()
+  if (fromAuth) return fromAuth
+  return (store.state.userName || '').trim() || 'Пользователь'
+})
 
 const currentIndex = ref(0)
 const loading = ref(false)
@@ -197,10 +207,10 @@ async function submitResult() {
     const payload = mapSubmitAnswersPayload(store.state.activeTest, store.state.answers)
     const response = await API.submitResults(
       payload.testId,
-      store.state.userName || 'Пользователь',
+      participantDisplayName.value,
       payload.answers,
     )
-    const summary = mapResultSummary(response, store.state.activeTest, store.state.userName || 'Пользователь')
+    const summary = mapResultSummary(response, store.state.activeTest, participantDisplayName.value)
     store.actions.setResultSummary(summary)
     router.push({
       path: '/itog',

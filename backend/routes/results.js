@@ -104,10 +104,30 @@ router.post('/', async (req, res, next) => {
     }
 });
 
-router.get('/:testId', async (req, res, next) => {
+router.get('/overview', async (req, res, next) => {
     try {
-        const results = await resultRepo.getResultsByTestId(req.params.testId);
-        res.json({ results });
+        const raw = typeof req.query.userName === 'string' ? req.query.userName.trim() : '';
+        const rows = await resultRepo.getResultsDashboard(raw || null);
+        const items = rows.map((r) => ({
+            testId: r.test_id,
+            testTitle: r.test_title,
+            latestResultId: r.latest_result_id,
+            percentage: r.percentage != null ? Math.round(Number(r.percentage) * 10) / 10 : null,
+            score: r.score != null ? Number(r.score) : null,
+            maxScore: r.max_score != null ? Number(r.max_score) : null,
+            completedAt: r.completed_at,
+            userName: r.result_user_name || null,
+        }));
+        const done = items.filter((x) => x.latestResultId != null && x.percentage != null);
+        const averagePercentage = done.length
+            ? Math.round((done.reduce((s, x) => s + x.percentage, 0) / done.length) * 10) / 10
+            : null;
+        res.json({
+            averagePercentage,
+            completedCount: done.length,
+            totalTests: items.length,
+            items,
+        });
     } catch (e) {
         next(e);
     }
@@ -136,6 +156,15 @@ router.get('/detail/:id', async (req, res, next) => {
             questions,
             completedAt: result.completed_at,
         });
+    } catch (e) {
+        next(e);
+    }
+});
+
+router.get('/:testId', async (req, res, next) => {
+    try {
+        const results = await resultRepo.getResultsByTestId(req.params.testId);
+        res.json({ results });
     } catch (e) {
         next(e);
     }

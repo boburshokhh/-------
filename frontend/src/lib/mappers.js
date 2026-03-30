@@ -111,6 +111,7 @@ export function mapResultSummary(payload, testDetail, userName = 'Пользов
   const wrong = Math.max(0, maxScore - correct);
   return {
     resultId: payload.resultId,
+    testId: testDetail?.id != null ? Number(testDetail.id) : null,
     score: payload.percentage || 0,
     label: 'Достигнутый балл',
     name: userName,

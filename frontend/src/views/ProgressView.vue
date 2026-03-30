@@ -40,7 +40,6 @@
       <BentoFeatures />
     </div>
 
-    <FloatingStatus />
   </AcademicLayout>
 </template>
 
@@ -51,7 +50,6 @@ import AcademicLayout from '@/layouts/AcademicLayout.vue'
 import UploadZone from '@/components/upload/UploadZone.vue'
 import GenerationProgress from '@/components/upload/GenerationProgress.vue'
 import BentoFeatures from '@/components/upload/BentoFeatures.vue'
-import FloatingStatus from '@/components/upload/FloatingStatus.vue'
 import { API } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
 

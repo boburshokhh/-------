@@ -163,6 +163,16 @@ export const API = {
     return request(`/results/${encodeURIComponent(testId)}`);
   },
 
+  /** Дашборд: средний % и последняя попытка по каждому тесту. userName — фильтр по имени при сохранении результата */
+  getResultsDashboard(userName) {
+    const q = new URLSearchParams();
+    if (userName && String(userName).trim()) {
+      q.set('userName', String(userName).trim());
+    }
+    const qs = q.toString();
+    return request(`/results/overview${qs ? `?${qs}` : ''}`);
+  },
+
   getResultDetail(id) {
     return request(`/results/detail/${encodeURIComponent(id)}`);
   },
