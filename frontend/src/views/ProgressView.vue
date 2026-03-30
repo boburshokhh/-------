@@ -20,6 +20,7 @@
           <UploadZone
             :disabled="true"
             :error="store.state.upload.error"
+            :file="store.state.upload.file"
             :file-name="store.state.upload.file?.name || ''"
           />
           <GenerationProgress

@@ -23,6 +23,7 @@
             <UploadZone
               :disabled="isBusy"
               :error="store.state.upload.error"
+              :file="store.state.upload.file"
               :file-name="store.state.upload.file?.name || ''"
               :accept="uploadAccept"
               :limits-text="uploadLimitsText"
