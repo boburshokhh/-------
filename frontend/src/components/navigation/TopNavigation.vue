@@ -9,14 +9,18 @@
       <!-- Логотип -->
       <RouterLink
         to="/biblioteka"
-        class="group flex min-w-0 shrink items-center gap-2 rounded-lg py-1 outline-none ring-[#3755C3] ring-offset-2 ring-offset-[#F0F4F7] focus-visible:ring-2"
+        class="group flex min-w-0 shrink items-center rounded-lg py-1 outline-none ring-[#3755C3] ring-offset-2 ring-offset-[#F0F4F7] focus-visible:ring-2"
+        aria-label="ATG AI — библиотека"
         @click="closeMobileMenu"
       >
-        <span
-          class="font-headline text-lg font-extrabold tracking-tight text-[#3755C3] transition-colors group-hover:text-[#2848B7] sm:text-xl"
-        >
-          Academic Architect
-        </span>
+        <img
+          src="/logo-atg.svg"
+          alt="ATG AI"
+          class="h-7 w-auto max-w-[min(72vw,260px)] object-contain object-left sm:h-8 sm:max-w-[min(78vw,300px)] md:h-9"
+          width="300"
+          height="32"
+          decoding="async"
+        />
       </RouterLink>
 
       <!-- Desktop nav -->

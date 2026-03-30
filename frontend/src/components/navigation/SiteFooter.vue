@@ -2,7 +2,7 @@
   <footer class="w-full border-t border-[#A9B4B9]/15 bg-[#F7F9FB]">
     <div class="flex flex-col md:flex-row justify-between items-center px-8 py-12 space-y-4 md:space-y-0 max-w-7xl mx-auto">
       <p class="font-body text-xs text-[#566166]">
-        © 2024 Academic Architect. Обучение через тональную лепку.
+        © 2024 ATG AI. Обучение через тональную лепку.
       </p>
       <div class="flex flex-wrap justify-center gap-6">
         <a
