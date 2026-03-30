@@ -151,6 +151,18 @@ app.get('/api/models', async (req, res) => {
     });
 });
 
+/** Публичный предпросмотр маршрутизации для страницы генерации (без admin). */
+app.get('/api/generation-routing', apiLimiter, async (req, res, next) => {
+    try {
+        const { getPublicGenerationRoutingSnapshot, normalizeMode } = require('./services/generationRoutingSnapshot');
+        const mode = normalizeMode(req.query.mode);
+        const snapshot = await getPublicGenerationRoutingSnapshot({ requestedMode: mode });
+        res.json({ ok: true, ...snapshot });
+    } catch (e) {
+        next(e);
+    }
+});
+
 const frontendDistPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(frontendDistPath));
 

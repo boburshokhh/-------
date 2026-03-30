@@ -863,6 +863,7 @@ module.exports = {
     costTierFromModelId,
     budgetPhaseForCandidate,
     isHeavyStage,
+    resolveEffectiveMode,
     canUseModelForStage: quotaGuard.canUseModelForStage,
     getFallbackModel: quotaGuard.getFallbackModel,
     getUsageSnapshot: quotaGuard.getUsageSnapshot,

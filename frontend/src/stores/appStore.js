@@ -3,7 +3,14 @@ import { reactive, computed } from 'vue';
 const state = reactive({
   models: [],
   defaultModel: '',
+  /** Пустая строка = авто-выбор модели сервером */
   selectedModel: '',
+  /** 'auto' | 'manual' — ручной выбор конкретной модели из списка */
+  modelChoiceMode: 'auto',
+  /** Режим маршрутизации для запроса: auto | economy | balanced | quality | manual */
+  routingModeUser: 'auto',
+  /** Последний снимок GET /api/generation-routing */
+  generationRouting: null,
   upload: {
     file: null,
     status: 'idle',
@@ -22,6 +29,8 @@ const state = reactive({
     },
     testId: null,
     generationMetrics: null,
+    /** Снимок маршрутизации на момент завершения (дублирует часть generationMetrics) */
+    routingSummary: null,
   },
   tests: [],
   testsLoading: false,
@@ -51,6 +60,8 @@ function persistState() {
       jobId: state.upload.jobId,
       testId: state.upload.testId,
       selectedModel: state.selectedModel,
+      modelChoiceMode: state.modelChoiceMode,
+      routingModeUser: state.routingModeUser,
       userName: state.userName,
     };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
@@ -67,6 +78,12 @@ function restoreState() {
     if (snapshot.jobId) state.upload.jobId = snapshot.jobId;
     if (snapshot.testId) state.upload.testId = snapshot.testId;
     if (snapshot.selectedModel) state.selectedModel = snapshot.selectedModel;
+    if (snapshot.modelChoiceMode === 'auto' || snapshot.modelChoiceMode === 'manual') {
+      state.modelChoiceMode = snapshot.modelChoiceMode;
+    } else if (snapshot.selectedModel) {
+      state.modelChoiceMode = 'manual';
+    }
+    if (snapshot.routingModeUser) state.routingModeUser = snapshot.routingModeUser;
     if (snapshot.userName) state.userName = snapshot.userName;
   } catch {
     // ignore invalid snapshot
@@ -90,7 +107,7 @@ export function useAppStore() {
     setModels(payload) {
       state.models = payload?.models || [];
       state.defaultModel = payload?.defaultModel || '';
-      if (!state.selectedModel && state.defaultModel) {
+      if (!state.selectedModel && state.modelChoiceMode === 'manual' && state.defaultModel) {
         state.selectedModel = state.defaultModel;
       }
       persistState();
@@ -99,6 +116,21 @@ export function useAppStore() {
     setSelectedModel(modelId) {
       state.selectedModel = modelId || '';
       persistState();
+    },
+
+    setModelChoice(mode, modelId) {
+      state.modelChoiceMode = mode === 'manual' ? 'manual' : 'auto';
+      state.selectedModel = modelId || '';
+      persistState();
+    },
+
+    setRoutingModeUser(mode) {
+      state.routingModeUser = mode || 'auto';
+      persistState();
+    },
+
+    setGenerationRouting(payload) {
+      state.generationRouting = payload && typeof payload === 'object' ? payload : null;
     },
 
     startUpload(file, jobId) {
@@ -142,6 +174,17 @@ export function useAppStore() {
       state.upload.error = '';
       state.upload.testId = payload?.testId ?? null;
       state.upload.generationMetrics = payload?.generationMetrics ?? null;
+      const gm = payload?.generationMetrics;
+      state.upload.routingSummary = gm
+        ? {
+            routing_mode_requested: gm.routing_mode_requested,
+            routing_mode_effective: gm.routing_mode_effective,
+            pipeline_execution_mode: gm.pipeline_execution_mode,
+            models_by_agent: gm.models_by_agent,
+            degraded_reasons: gm.degraded_reasons,
+            quota_offline: gm.quota_offline,
+          }
+        : null;
       state.upload.progress = {
         phase: 'done',
         stage: 'saved_test',

@@ -63,6 +63,63 @@
       <p class="status-detail">{{ currentDetail }}</p>
     </div>
 
+    <!-- ── Маршрутизация (предпросмотр / итог) ─────────────────────── -->
+    <div v-if="routingPreview || routingResult" class="routing-panel">
+      <p class="routing-panel__title">Маршрутизация моделей</p>
+      <div v-if="isDone && routingResult" class="routing-block routing-block--result">
+        <p class="routing-label">Итог генерации</p>
+        <ul class="routing-list text-sm">
+          <li v-if="routingResult.routing_mode_requested">
+            Запрошенный режим: <strong>{{ routingResult.routing_mode_requested }}</strong>
+            → эффективный: <strong>{{ routingResult.routing_mode_effective || '—' }}</strong>
+          </li>
+          <li v-if="routingResult.pipeline_execution_mode">
+            Режим пайплайна: <strong>{{ routingResult.pipeline_execution_mode }}</strong>
+            <span v-if="routingResult.pipeline_execution_mode === 'quota_offline' || routingResult.quota_offline" class="text-amber-800"> (downgrade: квота LLM)</span>
+            <span v-if="routingResult.pipeline_execution_mode === 'degraded'" class="text-amber-800"> (downgrade: деградация)</span>
+            <span v-if="routingResult.pipeline_execution_mode === 'emergency_fallback'" class="text-amber-800"> (downgrade: запасной путь)</span>
+          </li>
+          <li v-if="routingResult.degraded_reasons?.length">
+            Причины деградации: {{ routingResult.degraded_reasons.join(', ') }}
+          </li>
+          <li v-if="routingResult.models_by_agent && Object.keys(routingResult.models_by_agent).length">
+            Модели по ролям:
+            <span class="font-mono text-xs">{{ formatModelsByAgent(routingResult.models_by_agent) }}</span>
+          </li>
+        </ul>
+      </div>
+      <div v-else-if="routingPreview" class="routing-block">
+        <p class="routing-label">Перед запуском (оценка)</p>
+        <ul class="routing-list text-sm">
+          <li>Эффективный режим: <strong>{{ routingPreview.effective_mode }}</strong>
+            <span v-if="routingPreview.requested_mode !== routingPreview.effective_mode" class="text-[#566166]">
+              (запрошено: {{ routingPreview.requested_mode }})
+            </span>
+          </li>
+          <li v-if="routingPreview.base_config_routing_mode && routingPreview.requested_mode === 'auto'">
+            Базовый режим в настройках: <strong>{{ routingPreview.base_config_routing_mode }}</strong>
+          </li>
+          <li v-if="routingPreview.downgrade_active" class="text-[#9F403D] font-medium">
+            Активен аварийный downgrade (экономия моделей).
+          </li>
+          <li v-if="routingPreview.policies?.premium_guard_enabled && routingPreview.premium_budget && !routingPreview.premium_budget.allowed" class="text-[#9F403D]">
+            Premium ограничен политикой сейчас.
+          </li>
+          <li v-else-if="routingPreview.premium_budget?.warning" class="text-amber-800">
+            Premium: приближение к мягкому лимиту (~{{ routingPreview.premium_budget.premiumPercent ?? routingPreview.premium_budget.premium_percent }}%).
+          </li>
+          <li v-for="(line, i) in routingPreview.explanations" :key="'e'+i">{{ line }}</li>
+        </ul>
+        <div v-if="routingPreview.stage_preview && !routingPreview.stage_preview._error" class="mt-2 space-y-1 text-xs text-[#566166]">
+          <p class="font-semibold text-[#2A3439]">Оценка моделей по стадиям</p>
+          <div v-for="(info, key) in stagePreviewFiltered" :key="key" class="font-mono">
+            {{ stageLabel(key) }}: {{ info.selected }}
+            <span v-if="info.premium_blocked" class="text-[#9F403D]">[premium off]</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Лог-терминал ───────────────────────────────────────────── -->
     <div class="terminal-card">
       <div class="terminal-header">
@@ -105,10 +162,39 @@ const props = defineProps({
   detail:           { type: String, default: '' },
   updatedAt:        { type: Number, default: 0 },
   modelLabel:       { type: String, default: 'LLM' },
+  /** Снимок GET /api/generation-routing до/во время генерации */
+  routingPreview:   { type: Object, default: null },
+  /** Фрагмент generation_metrics после завершения (routing + models_by_agent) */
+  routingResult:    { type: Object, default: null },
   /** С бэкенда: известен полный объём работ (workTotal) */
   volumeReady:      { type: Boolean, default: false },
   /** История [PROGRESS] с сервера (тот же поток, что в логах) */
   progressHistory:  { type: Array, default: () => [] },
+})
+
+const STAGE_LABELS = {
+  question_generation: 'Вопросы',
+  blueprint_generation: 'План (blueprint)',
+  grounding_validation: 'Проверка grounding',
+  embedding: 'Эмбеддинги',
+}
+
+function stageLabel(key) {
+  return STAGE_LABELS[key] || key
+}
+
+function formatModelsByAgent(obj) {
+  if (!obj || typeof obj !== 'object') return '—'
+  return Object.entries(obj)
+    .map(([k, v]) => `${k.replace(/_agent$/, '')}: ${v || '—'}`)
+    .join(' · ')
+}
+
+const stagePreviewFiltered = computed(() => {
+  const sp = props.routingPreview?.stage_preview
+  if (!sp || typeof sp !== 'object') return {}
+  const { _error, ...rest } = sp
+  return rest
 })
 
 // ── State ──────────────────────────────────────────────────────────
@@ -469,6 +555,40 @@ onMounted(() => syncLogFromProps())
   color: #566166;
   line-height: 1.5;
   font-style: italic;
+}
+
+.routing-panel {
+  border-radius: 1rem;
+  border: 1px solid rgba(169, 180, 185, 0.35);
+  background: #f8fafb;
+  padding: 1rem 1.1rem;
+}
+.routing-panel__title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #435368;
+  margin-bottom: 0.6rem;
+}
+.routing-block--result {
+  border-left: 3px solid #3755c3;
+  padding-left: 0.65rem;
+}
+.routing-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #2a3439;
+  margin-bottom: 0.35rem;
+}
+.routing-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #566166;
+  line-height: 1.45;
+}
+.routing-list li {
+  margin-bottom: 0.25rem;
 }
 
 /* ── Terminal ───────────────────────────────────────────────────── */

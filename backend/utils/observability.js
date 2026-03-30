@@ -279,6 +279,23 @@ function buildGenerationMetrics(raw) {
             ? { models_by_agent: raw.modelsByAgent }
             : {}),
         ...(raw.quotaOffline ? { quota_offline: true } : {}),
+        ...(raw.routing_mode_requested != null
+            ? { routing_mode_requested: raw.routing_mode_requested }
+            : {}),
+        ...(raw.routing_mode_effective != null
+            ? { routing_mode_effective: raw.routing_mode_effective }
+            : {}),
+        ...(raw.pipeline_execution_mode != null
+            ? { pipeline_execution_mode: raw.pipeline_execution_mode }
+            : {}),
+        ...(() => {
+            const reasons = raw.degraded_reasons || raw.degradedReasons;
+            const stages = raw.degraded_stages || raw.degradedStages;
+            const o = {};
+            if (Array.isArray(reasons) && reasons.length) o.degraded_reasons = reasons;
+            if (Array.isArray(stages) && stages.length) o.degraded_stages = stages;
+            return o;
+        })(),
     };
 }
 

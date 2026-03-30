@@ -35,7 +35,7 @@
               </td>
               <td class="py-2 pr-3">
                 <select
-                  v-model="stageEdits[stage.stage_key].primary"
+                  v-model="ensureStageEdit(stage.stage_key).primary"
                   class="field w-full min-w-[180px]"
                 >
                   <option value="">— auto —</option>
@@ -46,7 +46,7 @@
               </td>
               <td class="py-2 pr-3">
                 <select
-                  v-model="stageEdits[stage.stage_key].fallback"
+                  v-model="ensureStageEdit(stage.stage_key).fallback"
                   class="field w-full min-w-[180px]"
                 >
                   <option value="">— auto —</option>
@@ -59,14 +59,14 @@
               <td class="py-2 pr-3">
                 <input
                   type="checkbox"
-                  v-model="stageEdits[stage.stage_key].allowPremium"
+                  v-model="ensureStageEdit(stage.stage_key).allowPremium"
                   :disabled="!stage.premium_eligible"
                 />
               </td>
               <td class="py-2 pr-3">
                 <input
                   type="checkbox"
-                  v-model="stageEdits[stage.stage_key].allowPreview"
+                  v-model="ensureStageEdit(stage.stage_key).allowPreview"
                 />
               </td>
               <td class="py-2 pr-3">
@@ -127,19 +127,31 @@ const overrideByStage = computed(() => {
 function initEdits() {
   for (const s of stages.value) {
     const existing = stageEdits[s.stage_key]
-    if (existing) continue
     const rule = rules.value.find((r) => r.stage_key === s.stage_key)
-    stageEdits[s.stage_key] = {
+    const nextState = {
       primary: rule?.actions?.primary_api_model_id || '',
-      fallback:
-        Array.isArray(rule?.actions?.fallback_api_model_ids)
-          ? rule.actions.fallback_api_model_ids[0] || ''
-          : '',
+      fallback: Array.isArray(rule?.actions?.fallback_api_model_ids)
+        ? rule.actions.fallback_api_model_ids[0] || ''
+        : '',
       allowPremium: rule?.allow_premium ?? (rule?.actions?.allow_premium ?? false),
       allowPreview: rule?.allow_preview ?? false,
       ruleId: rule?.id || null,
     }
+    stageEdits[s.stage_key] = existing ? { ...existing, ...nextState } : nextState
   }
+}
+
+function ensureStageEdit(stageKey) {
+  if (!stageEdits[stageKey]) {
+    stageEdits[stageKey] = {
+      primary: '',
+      fallback: '',
+      allowPremium: false,
+      allowPreview: false,
+      ruleId: null,
+    }
+  }
+  return stageEdits[stageKey]
 }
 
 async function loadAll() {
@@ -153,6 +165,7 @@ async function loadAll() {
       API.adminGetModels(),
     ])
     stages.value = stageRes.stages || []
+    initEdits()
     routingMode.value = modeRes.routing_mode || 'auto'
     overrides.value = ovRes.rows || []
     models.value = modelsRes.models || []

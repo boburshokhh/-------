@@ -195,6 +195,8 @@ function applyFallbackDecisions(stats, ctx) {
 async function runOfflinePipeline({
     fullText, indexedChunks, model, modelBlueprint, modelsByAgent, targetCount, targetMin, targetMax,
     detectedLang, startTime, runId, traceId, documentId, opts, progress,
+    routingModeRequested = 'auto',
+    routingModeEffective = 'auto',
 }) {
     progress({ phase: 'generate', stage: 'quota_offline',
         detail: 'Квота LLM на сутки исчерпана — вопросы из текста и сохранённых выжимок' });
@@ -247,6 +249,10 @@ async function runOfflinePipeline({
         backfillRounds: 0, backfillQuestionsAdded: 0, evidenceScores: [],
         quotaOffline: true,
         modelsByAgent: modelsByAgent || undefined,
+        routing_mode_requested: routingModeRequested,
+        routing_mode_effective: routingModeEffective,
+        pipeline_execution_mode: 'quota_offline',
+        degraded_reasons: ['rpd_exhausted'],
     });
 
     const fallbackDecision = applyFallbackDecisions({
@@ -588,6 +594,13 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     }
 
     const routingMode = opts.routingMode || 'auto';
+    let routingModeEffective = routingMode;
+    try {
+        routingModeEffective = await modelRouter.resolveEffectiveMode(routingMode);
+    } catch (e) {
+        console.warn(`[PIPELINE] resolveEffectiveMode: ${e.message}`);
+    }
+
     const documentMetadata = {
         ...opts.documentMetadata,
         page_count: opts.documentMetadata?.page_count ?? opts.pageCount,
@@ -725,6 +738,8 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
             fullText, indexedChunks, model: modelGenerator, modelBlueprint, modelsByAgent,
             targetCount, targetMin, targetMax,
             detectedLang, startTime, runId, traceId, documentId, opts, progress,
+            routingModeRequested: routingMode,
+            routingModeEffective,
         });
         const cleanName = docName.replace(/\.(pdf|docx?)$/i, '');
         return {
@@ -854,6 +869,9 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         degradedReasons: pipelineContext.degradedReasons,
         degradedStages: pipelineContext.degradedStages,
         modelsByAgent: modelsByAgentFlat,
+        routing_mode_requested: routingMode,
+        routing_mode_effective: routingModeEffective,
+        pipeline_execution_mode: pipelineContext.executionMode,
     });
 
     // ── 13. Persist results ──────────────────────────────────────────────────

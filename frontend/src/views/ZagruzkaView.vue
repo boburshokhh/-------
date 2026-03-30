@@ -9,7 +9,7 @@
         <p
           class="mx-auto mt-4 max-w-md text-[11px] leading-snug text-[#566166] sm:text-xs sm:max-w-lg sm:leading-relaxed"
         >
-          Загрузите PDF или DOCX: система проиндексирует документ и сгенерирует тест. Ниже — файл и модель генерации.
+          Загрузите PDF или DOCX: система проиндексирует документ и сгенерирует тест. Ниже — режим маршрутизации и выбор модели (или авто).
         </p>
       </section>
 
@@ -32,35 +32,103 @@
           </div>
 
           <div
-            class="flex min-w-0 flex-col rounded-xl border border-[#A9B4B9]/25 bg-[#FFFFFF] p-5 tonal-sculpt-shadow md:p-6 lg:min-h-0 lg:self-stretch"
+            class="flex min-w-0 flex-col gap-4 rounded-xl border border-[#A9B4B9]/25 bg-[#FFFFFF] p-5 tonal-sculpt-shadow md:p-6 lg:min-h-0 lg:self-stretch"
           >
-            <label for="model-select" class="mb-2 block font-headline text-sm font-bold text-[#2A3439]">
-              Модель для генерации
-            </label>
-            <p v-if="quotaTierLabel" class="mb-3 text-xs text-[#566166]">
-              Квота: {{ quotaTierLabel }}
-            </p>
-            <select
-              id="model-select"
-              v-model="selectedModelId"
-              :disabled="isBusy || !modelOptions.length"
-              class="w-full rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option v-if="!modelOptions.length" value="" disabled>
-                Загрузка списка моделей…
-              </option>
-              <option
-                v-for="m in modelOptions"
-                :key="m.id"
-                :value="m.id"
+            <div>
+              <label for="routing-mode" class="mb-2 block font-headline text-sm font-bold text-[#2A3439]">
+                Режим маршрутизации
+              </label>
+              <p class="mb-2 text-xs text-[#566166]">
+                «Auto» подставляет базовый режим из настроек сервера; остальные режимы задают приоритет цены или качества.
+              </p>
+              <select
+                id="routing-mode"
+                v-model="routingModeUser"
+                :disabled="isBusy"
+                class="w-full rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {{ m.label }}
-              </option>
-            </select>
-            <p v-if="selectedModelLimits" class="mt-auto pt-4 text-xs leading-relaxed text-[#566166]">
-              Free tier (локальный учёт): до {{ selectedModelLimits.rpd }} запросов/сутки (UTC),
-              до {{ selectedModelLimits.rpm }} запросов/мин.
-            </p>
+                <option value="auto">Auto (сервер + настройки админа)</option>
+                <option value="economy">Economy — минимум стоимости</option>
+                <option value="balanced">Balanced</option>
+                <option value="quality">Quality — выше качество при необходимости</option>
+                <option value="manual">Manual — только выбранная ниже модель</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="model-select" class="mb-2 block font-headline text-sm font-bold text-[#2A3439]">
+                Модель для генерации
+              </label>
+              <p v-if="quotaTierLabel" class="mb-2 text-xs text-[#566166]">
+                Квота: {{ quotaTierLabel }}
+              </p>
+              <select
+                id="model-select"
+                v-model="modelDropdownValue"
+                :disabled="isBusy || !modelOptions.length"
+                class="w-full rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option v-if="!modelOptions.length" value="" disabled>
+                  Загрузка списка моделей…
+                </option>
+                <option value="__AUTO__">Авто — сервер выберет модель по правилам</option>
+                <option
+                  v-for="m in modelOptions"
+                  :key="m.id"
+                  :value="m.id"
+                >
+                  {{ m.label || m.id }}
+                </option>
+              </select>
+              <p v-if="selectedModelLimits" class="mt-2 text-xs leading-relaxed text-[#566166]">
+                Free tier (локальный учёт): до {{ selectedModelLimits.rpd }} запросов/сутки (UTC),
+                до {{ selectedModelLimits.rpm }} запросов/мин.
+              </p>
+            </div>
+
+            <div
+              v-if="routingSnapshot && !routingSnapshotError"
+              class="rounded-lg border border-[#A9B4B9]/20 bg-[#F8FAFB] p-3 text-xs text-[#566166]"
+            >
+              <p class="font-headline text-[11px] font-bold uppercase tracking-wide text-[#435368]">
+                Как сработает генерация
+              </p>
+              <ul class="mt-2 list-disc space-y-1 pl-4 text-[#2A3439]">
+                <li>
+                  Эффективный режим:
+                  <strong>{{ routingSnapshot.effective_mode }}</strong>
+                  <span v-if="routingSnapshot.requested_mode !== routingSnapshot.effective_mode"> (запрошено: {{ routingSnapshot.requested_mode }})</span>
+                </li>
+                <li v-if="routingSnapshot.requested_mode === 'auto' && routingSnapshot.base_config_routing_mode">
+                  Базовый режим в конфиге: <strong>{{ routingSnapshot.base_config_routing_mode }}</strong>
+                  — при «auto» он подставляется как основа.
+                </li>
+                <li v-if="routingSnapshot.downgrade_active" class="text-[#9F403D] font-medium">
+                  Включён аварийный downgrade: приоритет у стабильных экономичных моделей.
+                </li>
+                <li v-if="routingSnapshot.policies?.stable_only && !routingSnapshot.downgrade_active">
+                  Только стабильные модели (preview отключены).
+                </li>
+                <li v-if="routingSnapshot.policies?.premium_guard_enabled && routingSnapshot.premium_budget && !routingSnapshot.premium_budget.allowed">
+                  Premium сейчас ограничен политикой дневного бюджета.
+                </li>
+                <li v-else-if="routingSnapshot.premium_budget?.warning" class="text-amber-800">
+                  Premium: приближение к мягкому лимиту (~{{ routingSnapshot.premium_budget.premium_percent ?? '?' }}% вызовов).
+                </li>
+                <li v-if="routingSnapshot.quota_flags?.flashBudgetTightForCheap" class="text-amber-800">
+                  Снижена нагрузка на «flash» для дешёвых стадий — возможен downgrade.
+                </li>
+                <li v-if="routingSnapshot.quota_flags?.premiumBudgetTight" class="text-amber-800">
+                  Сработал soft-limit по premium (premium_budget_tight).
+                </li>
+                <li v-if="routingSnapshot.quota_flags?.previewRoutingBlocked" class="text-amber-800">
+                  Preview-модели временно отключены из‑за ошибок.
+                </li>
+                <li v-for="(line, i) in routingSnapshot.explanations" :key="'ex'+i">{{ line }}</li>
+              </ul>
+            </div>
+            <p v-if="routingLoading" class="text-xs text-[#566166]">Загрузка сведений о маршрутизации…</p>
+            <p v-if="routingSnapshotError" class="text-xs text-[#9F403D]">{{ routingSnapshotError }}</p>
           </div>
         </div>
 
@@ -74,9 +142,30 @@
           :volume-ready="store.state.upload.progress.volumeReady"
           :progress-history="store.state.upload.progress.history"
           :model-label="selectedModelLabel"
+          :routing-preview="store.state.generationRouting"
+          :routing-result="store.state.upload.routingSummary"
         />
 
-        <div v-if="canGoToTest" class="mt-10 flex justify-center">
+        <div v-if="canGoToTest" class="mt-10 flex flex-col items-center gap-4">
+          <div
+            v-if="store.state.upload.generationMetrics"
+            class="max-w-2xl rounded-xl border border-[#A9B4B9]/25 bg-white p-4 text-left text-sm text-[#566166]"
+          >
+            <p class="font-headline text-xs font-bold uppercase tracking-wide text-[#435368]">Итог маршрутизации</p>
+            <ul class="mt-2 list-disc space-y-1 pl-4">
+              <li v-if="store.state.upload.generationMetrics.routing_mode_effective">
+                Режим: запрошен <strong>{{ store.state.upload.generationMetrics.routing_mode_requested }}</strong>
+                → эффективный <strong>{{ store.state.upload.generationMetrics.routing_mode_effective }}</strong>
+              </li>
+              <li v-if="store.state.upload.generationMetrics.pipeline_execution_mode">
+                Пайплайн: <strong>{{ store.state.upload.generationMetrics.pipeline_execution_mode }}</strong>
+                <span v-if="store.state.upload.generationMetrics.quota_offline" class="text-amber-800"> (downgrade: квота)</span>
+              </li>
+              <li v-if="store.state.upload.generationMetrics.degraded_reasons?.length">
+                Деградация: {{ store.state.upload.generationMetrics.degraded_reasons.join(', ') }}
+              </li>
+            </ul>
+          </div>
           <button
             class="rounded-xl bg-gradient-to-r from-[#3755C3] to-[#2848B7] px-8 py-3 text-sm font-bold tracking-wide text-[#F8F7FF] shadow-lg transition-all hover:opacity-90 active:scale-95"
             @click="goToTest"
@@ -148,7 +237,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AcademicLayout from '@/layouts/AcademicLayout.vue'
 import UploadZone from '@/components/upload/UploadZone.vue'
@@ -161,15 +250,46 @@ const router = useRouter()
 const store = useAppStore()
 const healthLoading = ref(false)
 const logsLoading = ref(false)
+const routingLoading = ref(false)
+const routingSnapshotError = ref('')
 let pollTimer = null
 let pollActive = false
 
 const isBusy = computed(() => ['uploading', 'processing'].includes(store.state.upload.status))
 const showProgressInline = computed(() => ['uploading', 'processing', 'done'].includes(store.state.upload.status))
 const canGoToTest = computed(() => store.state.upload.status === 'done' && !!store.state.upload.testId)
-const selectedModelLabel = computed(() => store.state.selectedModel || store.state.defaultModel || 'LLM')
+const selectedModelLabel = computed(() => {
+  if (store.state.modelChoiceMode === 'auto' || !store.state.selectedModel) {
+    return 'Авто (сервер)'
+  }
+  return store.state.selectedModel || store.state.defaultModel || 'LLM'
+})
 
 const modelOptions = computed(() => store.state.models || [])
+
+const routingModeUser = computed({
+  get() {
+    return store.state.routingModeUser || 'auto'
+  },
+  set(v) {
+    store.actions.setRoutingModeUser(v || 'auto')
+  },
+})
+
+const routingSnapshot = computed(() => store.state.generationRouting)
+
+const modelDropdownValue = computed({
+  get() {
+    return store.state.modelChoiceMode === 'auto' ? '__AUTO__' : (store.state.selectedModel || '')
+  },
+  set(val) {
+    if (val === '__AUTO__') {
+      store.actions.setModelChoice('auto', '')
+    } else {
+      store.actions.setModelChoice('manual', val)
+    }
+  },
+})
 
 const quotaTierLabel = computed(() => {
   const h = store.state.diagnostics.health
@@ -178,17 +298,9 @@ const quotaTierLabel = computed(() => {
   return ''
 })
 
-const selectedModelId = computed({
-  get() {
-    return store.state.selectedModel || store.state.defaultModel || ''
-  },
-  set(value) {
-    store.actions.setSelectedModel(value)
-  },
-})
-
 const selectedModelLimits = computed(() => {
-  const id = store.state.selectedModel || store.state.defaultModel
+  if (store.state.modelChoiceMode === 'auto' || !store.state.selectedModel) return null
+  const id = store.state.selectedModel
   const m = modelOptions.value.find((x) => x.id === id)
   return m?.limits || null
 })
@@ -224,11 +336,34 @@ const logsUpdatedAtLabel = computed(() => {
 })
 const logsPreview = computed(() => (store.state.diagnostics.logs || []).slice(-20))
 
+async function loadRoutingSnapshot() {
+  routingSnapshotError.value = ''
+  routingLoading.value = true
+  try {
+    const mode = store.state.routingModeUser || 'auto'
+    const data = await API.getGenerationRouting(mode)
+    store.actions.setGenerationRouting(data)
+  } catch (e) {
+    routingSnapshotError.value = e?.message || 'Не удалось загрузить сведения о маршрутизации'
+    store.actions.setGenerationRouting(null)
+  } finally {
+    routingLoading.value = false
+  }
+}
+
+watch(
+  () => store.state.routingModeUser,
+  () => {
+    void loadRoutingSnapshot()
+  },
+)
+
 onMounted(async () => {
   const [modelsPayload] = await Promise.all([
     API.getModels(),
     loadHealth(),
     loadLogs(),
+    loadRoutingSnapshot(),
   ])
   store.actions.setModels(modelsPayload)
   if (isBusy.value && store.state.upload.jobId) {
@@ -322,9 +457,14 @@ async function handleUpload(file) {
   store.actions.startUpload(file, jobId)
   // POST /upload должен уйти раньше GET /jobs/:id: иначе registerUploadJobStub на сервере
   // ещё не выполнится и первый poll вернёт 404 («Задача не найдена»).
+  const manualModel = store.state.modelChoiceMode === 'manual' && store.state.selectedModel
+    ? store.state.selectedModel
+    : null
+  const routingMode = store.state.routingModeUser || 'auto'
   const uploadPromise = API.upload(file, {
     jobId,
-    modelId: store.state.selectedModel || null,
+    modelId: manualModel,
+    routingMode,
     forceOffline: file._forceOffline === true,
   })
   startPolling()

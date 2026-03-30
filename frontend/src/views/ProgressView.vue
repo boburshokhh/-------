@@ -32,6 +32,8 @@
             :volume-ready="store.state.upload.progress.volumeReady"
             :progress-history="store.state.upload.progress.history"
             :model-label="modelLabel"
+            :routing-preview="store.state.generationRouting"
+            :routing-result="store.state.upload.routingSummary"
           />
         </div>
       </section>
@@ -56,7 +58,12 @@ import { useAppStore } from '@/stores/appStore'
 const router = useRouter()
 const store = useAppStore()
 
-const modelLabel = computed(() => store.state.selectedModel || store.state.defaultModel || 'LLM')
+const modelLabel = computed(() => {
+  if (store.state.modelChoiceMode === 'auto' || !store.state.selectedModel) {
+    return 'Авто (сервер)'
+  }
+  return store.state.selectedModel || store.state.defaultModel || 'LLM'
+})
 
 let pollTimer = null
 let pollActive = false

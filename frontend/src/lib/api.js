@@ -1,6 +1,16 @@
 import { getToken } from '@/lib/authSession';
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+function normalizeApiBase(raw) {
+  const base = String(raw || '/api').trim();
+  if (!base) return '/api';
+  if (/^https?:\/\//i.test(base)) {
+    return base.replace(/\/+$/, '');
+  }
+  const withLeadingSlash = base.startsWith('/') ? base : `/${base}`;
+  return withLeadingSlash.replace(/\/+$/, '') || '/api';
+}
+
+const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE);
 const LOGS_API_TOKEN = import.meta.env.VITE_LOGS_API_TOKEN || '';
 const SETTINGS_API_TOKEN = import.meta.env.VITE_SETTINGS_API_TOKEN || '';
 
@@ -82,6 +92,7 @@ export const API = {
     formData.append('file', file);
     if (opts.modelId) formData.append('model', opts.modelId);
     if (opts.forceOffline) formData.append('forceOffline', 'true');
+    if (opts.routingMode) formData.append('routingMode', String(opts.routingMode));
 
     const headers = {};
     if (opts.jobId) headers['X-Job-Id'] = opts.jobId;
@@ -91,6 +102,14 @@ export const API = {
       body: formData,
       headers,
     });
+  },
+
+  /** Предпросмотр политик маршрутизации для UI генерации (без admin). */
+  getGenerationRouting(mode = 'auto') {
+    const qs = new URLSearchParams();
+    if (mode) qs.set('mode', String(mode));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/generation-routing${suffix}`);
   },
 
   getJobProgress(jobId) {
