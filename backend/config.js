@@ -72,18 +72,12 @@ module.exports = {
   FREE_TIER_QUOTA_DEFAULT: { rpm: 5, tpm: 250000, rpd: 20 },
   LLM_MAX_RETRIES: 3,
   /**
-   * Summary generation strategy for the indexer.
-   * - llm:        use LLM_MODEL (default model, costs most quota)
-   * - cheap_llm:  use SUMMARY_CHEAP_MODEL (lower RPD cost; still LLM)
-   * - extractive: sentence-based, zero LLM calls
-   * - none:       skip summaries entirely (fastest, no LLM usage)
-   */
-  /**
-   * Summary generation strategy for the indexer.
-   * - extractive: sentence-based, zero LLM calls (default — saves RPD quota)
-   * - llm:        use LLM_MODEL (costs most quota)
-   * - cheap_llm:  use SUMMARY_CHEAP_MODEL with LLM_SUMMARY_BATCH_SIZE batching
-   * - none:       skip summaries entirely (fastest, no LLM usage)
+   * Summary generation strategy for the indexer (primary facts in summary_text).
+   * Heuristic extractive bullets are always computed and stored in extractive_facts when possible.
+   * - extractive: primary facts = extractive only, zero LLM (default — saves RPD quota)
+   * - llm:        primary facts from LLM_MODEL; extractive_facts kept in parallel
+   * - cheap_llm:  primary facts from SUMMARY_CHEAP_MODEL with LLM_SUMMARY_BATCH_SIZE batching
+   * - none:       primary facts empty (summary_text []); extractive_facts still saved for RAG/blueprint
    */
   SUMMARY_MODE: process.env.SUMMARY_MODE || 'extractive',
   /** Model used when SUMMARY_MODE=cheap_llm (should have high RPD on free tier) */

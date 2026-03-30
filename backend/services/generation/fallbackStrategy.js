@@ -1,9 +1,13 @@
 const { validateQuestions } = require('../validator');
+const { getMergedFactsForChunk } = require('../rag/evidenceBuilder');
 
 function pickChunkSnippet(c) {
-    if (c && Array.isArray(c.summary) && c.summary.length > 0) {
-        const s = String(c.summary[0]).trim();
-        if (s.length >= 12) return s.slice(0, 200);
+    if (c) {
+        const merged = getMergedFactsForChunk(c, 6);
+        if (merged.length > 0) {
+            const s = String(merged[0]).trim();
+            if (s.length >= 12) return s.slice(0, 200);
+        }
     }
     if (!c || typeof c.text !== 'string') return '';
     const t = c.text.replace(/\s+/g, ' ').trim();

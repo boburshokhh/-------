@@ -30,6 +30,7 @@ const { semanticDedup, levenshteinSimilarity } = require('../nlp/similarity');
 
 // RAG
 const rag = require('../rag');
+const { countMergedFactBullets } = require('../rag/evidenceBuilder');
 
 // Generation
 const {
@@ -128,8 +129,8 @@ async function runOfflinePipeline({
         blueprintIntents: blueprint.length,
         parseQualityScore: opts.extractionQuality,
         chunkCount: indexedChunks.length,
-        chunksWithFacts: indexedChunks.filter(c => Array.isArray(c.summary) && c.summary.length > 0).length,
-        atomicFactsExtracted: indexedChunks.reduce((s, c) => s + (Array.isArray(c.summary) ? c.summary.length : 0), 0),
+        chunksWithFacts: indexedChunks.filter(c => countMergedFactBullets(c, 99) > 0).length,
+        atomicFactsExtracted: indexedChunks.reduce((s, c) => s + countMergedFactBullets(c, 99), 0),
         retrievalPassed: 0, retrievalSkipped: 0,
         groundingAccepted: finalQuestions.length, groundingFailed: 0,
         batchValidated: 0, llmSkipped: blueprint.length, validationFailed: 0,
@@ -488,10 +489,14 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     if (budgetPlan.reductionReasons.length > 0)
         console.log(`[BUDGET] Урезание: ${budgetPlan.reductionReasons.join(' | ')}`);
 
-    const atomicFactsExtracted = indexedChunks.reduce((s, c) => s + (Array.isArray(c.summary) ? c.summary.length : 0), 0);
-    const chunksWithFacts      = indexedChunks.filter(c => Array.isArray(c.summary) && c.summary.length > 0).length;
-    const downstreamSource     = chunksWithFacts === indexedChunks.length ? 'summary'
-                               : chunksWithFacts === 0 ? 'text' : 'mixed';
+    const atomicFactsExtracted = indexedChunks.reduce((s, c) => s + countMergedFactBullets(c, 99), 0);
+    const chunksWithFacts      = indexedChunks.filter(c => countMergedFactBullets(c, 99) > 0).length;
+    const nChunks              = indexedChunks.length;
+    const chunksWithLlmFacts   = indexedChunks.filter(c => Array.isArray(c.summary) && c.summary.length > 0).length;
+    const downstreamSource     = chunksWithFacts === 0 ? 'text'
+        : chunksWithLlmFacts === nChunks ? 'summary'
+        : chunksWithLlmFacts === 0 ? 'extractive'
+        : 'mixed';
 
     logStructured({
         level: 'info', traceId, documentId, phase: 'generate', event: 'budget_calculated',
@@ -506,7 +511,9 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     // ── 4. Pipeline context (degraded mode tracking) ─────────────────────────
     const pipelineContext = { executionMode: 'normal', degradedReasons: [], degradedStages: [] };
     const hasIndexerIssues = (indexedChunks || []).some(c =>
-        c.summary_status === 'quota_skip' || c.summary_status === 'error' || c.summary_source === 'extractive');
+        c.summary_status === 'quota_skip'
+        || c.summary_status === 'error'
+        || (c.summary_status === 'empty' && countMergedFactBullets(c, 99) === 0));
     if (hasIndexerIssues) {
         pipelineContext.executionMode = 'degraded';
         pipelineContext.degradedReasons.push('indexer_fallback');

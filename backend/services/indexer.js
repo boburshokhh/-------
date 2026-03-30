@@ -3,6 +3,7 @@ const { GoogleGenAI } = require('@google/genai');
 const config = require('../config');
 const chunkRepo = require('../db/repositories/chunkRepo');
 const { chunkText } = require('./chunker');
+const { detectFactProfile, extractiveSummary } = require('./nlp/extractiveFacts');
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
@@ -54,230 +55,6 @@ async function fetchEmbeddingWithRetry(text, retries = 3) {
         }
     }
     throw lastError;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FACT PROFILE DETECTION
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Паттерны, характерные для различных типов технического/процедурного контента.
- * Используются для определения fact_profile чанка.
- */
-const PROCEDURAL_MARKERS = [
-    /(?:^|\n)\s*(?:шаг|этап)\s*\d+/im,
-    /(?:^|\n)\s*step\s*\d+/im,
-    /(?:^|\n)\s*\d+[\.\)]\s+[А-ЯA-Z]/m,    // Нумерованный список (1. Сделайте...)
-    /(?:^|\n)\s*[-•►▸]\s+\S/m,              // Маркированный список
-    /процедура|procedure|инструкция|instruction/i,
-    /порядок\s+(?:действий|выполнения|работ)/i,
-    /последовательность\s+(?:действий|операций)/i,
-];
-
-const WARNING_MARKERS = [
-    /(?:ВНИМАНИЕ|ОСТОРОЖНО|ПРЕДУПРЕЖДЕНИЕ|ЗАПРЕЩАЕТСЯ|ОПАСНО)/,
-    /(?:WARNING|CAUTION|DANGER|NOTICE|NOTE:)/i,
-    /(?:не\s+допускается|строго\s+запрещ)/i,
-    /(?:категорически|обязательно)\s/i,
-];
-
-const TROUBLESHOOTING_MARKERS = [
-    /(?:неисправност|диагностик|устранени|поиск\s+(?:и\s+)?устранени)/i,
-    /(?:troubleshoot|diagnos|fault|malfunction)/i,
-    /(?:если\s+.*(?:не\s+работает|ошибка|сбой|отказ))/i,
-    /(?:причина|symptom|solution|решение)\s*[:—–-]/i,
-    /(?:при\s+.*(?:обнаружен|выявлен|возникн))/i,
-];
-
-const PARAMETER_MARKERS = [
-    /\b\d+[\.,]\d*\s*(?:мм|см|м|кг|г|°[CС]|[кmМ][Вв]т|[AА]|[Вv]|бар|атм|МПа|PSI|RPM|rpm)\b/,
-    /(?:not?\s+(?:less|more)\s+than|не\s+(?:менее|более))\s+\d+/i,
-    /(?:диапазон|range|допуск|tolerance)\s*[:—–-]/i,
-    /(?:номинал|nominal|макс|max|мин|min)\s*[:—–.]/i,
-    /\b(?:ТУ|ГОСТ|ISO|DIN|ASTM|IEC)\s*\d+/,
-];
-
-/**
- * Определяет "профиль фактов" текста чанка.
- * Возвращает метаданные о типе контента для адаптации LLM-промпта и extractive логики.
- *
- * @param {string} text
- * @returns {{ profile: 'declarative'|'technical_procedural'|'mixed', signals: string[] }}
- */
-function detectFactProfile(text) {
-    if (!text || typeof text !== 'string') {
-        return { profile: 'declarative', signals: [] };
-    }
-    const sample = text.slice(0, 2000);
-    const signals = [];
-
-    let proceduralScore = 0;
-    let technicalScore = 0;
-
-    // Procedural signals
-    if (PROCEDURAL_MARKERS.some(re => re.test(sample))) {
-        proceduralScore += 2;
-        signals.push('procedural_structure');
-    }
-
-    // Warning signals
-    if (WARNING_MARKERS.some(re => re.test(sample))) {
-        technicalScore += 1;
-        signals.push('warning_content');
-    }
-
-    // Troubleshooting signals
-    if (TROUBLESHOOTING_MARKERS.some(re => re.test(sample))) {
-        technicalScore += 2;
-        signals.push('troubleshooting_content');
-    }
-
-    // Parameter / specification signals
-    if (PARAMETER_MARKERS.some(re => re.test(sample))) {
-        technicalScore += 1;
-        signals.push('parameter_content');
-    }
-
-    // Condition-action pairs: «если...то», «при...необходимо», «в случае...»
-    const conditionAction = (sample.match(/(?:если\s|при\s|в случае\s|when\s|if\s)/gi) || []).length;
-    if (conditionAction >= 2) {
-        proceduralScore += 1;
-        signals.push(`condition_action(${conditionAction})`);
-    }
-
-    // Imperative verbs (command form) — strong procedural signal
-    const imperatives = (sample.match(/(?:(?:^|\.\s+)(?:установите|проверьте|подключите|отключите|откройте|закройте|замените|снимите|нажмите|убедитесь|выполните|перезапустите|очистите|промойте|затяните|ослабьте))/gim) || []).length;
-    if (imperatives >= 2) {
-        proceduralScore += 2;
-        signals.push(`imperatives(${imperatives})`);
-    }
-
-    const totalScore = proceduralScore + technicalScore;
-
-    if (totalScore >= 3) {
-        return { profile: 'technical_procedural', signals };
-    }
-    if (totalScore >= 1) {
-        return { profile: 'mixed', signals };
-    }
-    return { profile: 'declarative', signals };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EXTRACTIVE SUMMARISER  (zero LLM calls)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Проверяет, является ли строка значимой технической/процедурной единицей,
- * даже если она короткая (< 40 символов).
- */
-function isTechnicallyMeaningful(line) {
-    const t = line.trim();
-    if (t.length < 8) return false;
-
-    // Нумерованные/маркированные шаги: «1. Открутите гайку», «- Проверьте давление»
-    if (/^\s*(?:\d+[.\)]\s|[-•►▸]\s)/.test(t)) return true;
-
-    // Warnings / notices: «ВНИМАНИЕ: ...», «WARNING: ...»
-    if (/^(?:ВНИМАНИЕ|ОСТОРОЖНО|ПРЕДУПРЕЖДЕНИЕ|ЗАПРЕЩАЕТСЯ|ОПАСНО|WARNING|CAUTION|DANGER|NOTE|NOTICE)\s*[:!]/i.test(t)) return true;
-
-    // Condition-action: «Если X, то Y», «При X — Y»
-    if (/^(?:если|при |в случае|when |if )/i.test(t)) return true;
-
-    // Parameter specs: содержит число + единицу
-    if (/\b\d+[\.,]?\d*\s*(?:мм|см|м|кг|°[CС]|бар|[Вv]|[AА]|МПа|PSI)\b/.test(t)) return true;
-
-    // Imperative verbs (начало предложения — команда)
-    if (/^(?:установите|проверьте|подключите|отключите|откройте|закройте|замените|снимите|нажмите|убедитесь|выполните|перезапустите|очистите|промойте|затяните|ослабьте)/i.test(t)) return true;
-
-    return false;
-}
-
-/**
- * Returns up to N meaningful facts from chunkTextStr.
- * Enhanced for technical/procedural content: recognises steps, warnings,
- * parameters, troubleshooting rules — not just declarative prose sentences.
- *
- * @param {string} chunkTextStr    - raw chunk text
- * @param {string} [factProfile]   - 'declarative'|'technical_procedural'|'mixed'
- * @returns {string[]}
- */
-function extractiveSummary(chunkTextStr, factProfile) {
-    const maxSentences = config.SUMMARY_EXTRACTIVE_SENTENCES || 5;
-    const profile = factProfile || 'declarative';
-
-    // Split on sentence-ending punctuation or double newline.
-    const raw = chunkTextStr
-        .replace(/\r\n/g, '\n')
-        .split(/(?<=[.!?…])[\s\n]+|\n{2,}/)
-        .map(s => s.trim())
-        .filter(s => s.length > 10);  // Снижен порог с 20 до 10 для процедурных строк
-
-    if (profile === 'declarative') {
-        // Legacy behaviour for pure declarative content
-        const meaningful = raw.filter(s => s.length >= 40);
-        const pool = meaningful.length >= 2 ? meaningful : raw.filter(s => s.length > 20);
-        return pool.slice(0, maxSentences);
-    }
-
-    // ── Technical / procedural / mixed ────────────────────────────────────────
-    // Дополнительно разбиваем по переводам строк — технические инструкции
-    // часто не заканчиваются «.!?», а просто идут по одной строке.
-    const lineBasedSplits = chunkTextStr
-        .split(/\n/)
-        .map(s => s.trim())
-        .filter(s => s.length >= 10);
-
-    // Merge и deduplicate
-    const allCandidates = new Map();
-    for (const s of [...raw, ...lineBasedSplits]) {
-        const key = s.slice(0, 80).toLowerCase();
-        if (!allCandidates.has(key)) allCandidates.set(key, s);
-    }
-    const candidates = [...allCandidates.values()];
-
-    // Score each candidate: technical meaningfulness first, then length
-    const scored = candidates.map(s => {
-        let score = 0;
-        const technical = isTechnicallyMeaningful(s);
-        if (technical) score += 10;
-
-        // Longer lines are generally more informative
-        if (s.length >= 60)  score += 3;
-        else if (s.length >= 40) score += 2;
-        else if (s.length >= 20) score += 1;
-
-        // Contains numbers / parameters
-        if (/\d/.test(s)) score += 1;
-
-        // Contains warnings
-        if (WARNING_MARKERS.some(re => re.test(s))) score += 5;
-
-        // Condition-action patterns
-        if (/(?:если|при |в случае|when |if )/i.test(s)) score += 3;
-
-        return { text: s, score, technical };
-    });
-
-    // Sort by score DESC, take top N
-    scored.sort((a, b) => b.score - a.score);
-
-    // Take at least all technically meaningful ones, then fill with best remaining
-    const technicalOnes = scored.filter(s => s.technical);
-    const remaining     = scored.filter(s => !s.technical);
-
-    const result = [];
-    for (const item of technicalOnes) {
-        if (result.length >= maxSentences * 2) break; // Разрешаем до 2x для техдоков
-        result.push(item.text);
-    }
-    for (const item of remaining) {
-        if (result.length >= maxSentences * 2) break;
-        if (item.score >= 1) result.push(item.text);
-    }
-
-    // Cap to reasonable limit
-    return result.slice(0, Math.min(maxSentences * 2, 12));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -386,13 +163,32 @@ async function processSummaryBatch(chunksMap) {
     }
 
     if (mode === 'none') {
-        return chunks.map(c => ({ id: c.id, facts: [], source: 'none', status: 'ok', errorReason: null, factProfile: c.factProfile }));
+        return chunks.map(c => {
+            const extractive_facts = extractiveSummary(c.text, c.factProfile);
+            return {
+                id: c.id,
+                facts: [],
+                extractive_facts,
+                source: 'none',
+                status: extractive_facts.length > 0 ? 'ok' : 'empty',
+                errorReason: null,
+                factProfile: c.factProfile,
+            };
+        });
     }
 
     if (mode === 'extractive') {
         return chunks.map(c => {
             const facts = extractiveSummary(c.text, c.factProfile);
-            return { id: c.id, facts, source: 'extractive', status: facts.length > 0 ? 'ok' : 'empty', errorReason: null, factProfile: c.factProfile };
+            return {
+                id: c.id,
+                facts,
+                extractive_facts: facts,
+                source: 'extractive',
+                status: facts.length > 0 ? 'ok' : 'empty',
+                errorReason: null,
+                factProfile: c.factProfile,
+            };
         });
     }
 
@@ -402,7 +198,15 @@ async function processSummaryBatch(chunksMap) {
     const fallbackToExtractive = (reason, status) => {
         return chunks.map(c => {
             const facts = extractiveSummary(c.text, c.factProfile);
-            return { id: c.id, facts, source: 'extractive', status, errorReason: reason, factProfile: c.factProfile };
+            return {
+                id: c.id,
+                facts,
+                extractive_facts: facts,
+                source: 'extractive',
+                status,
+                errorReason: reason,
+                factProfile: c.factProfile,
+            };
         });
     };
 
@@ -413,12 +217,28 @@ async function processSummaryBatch(chunksMap) {
 
         const results = [];
         for (const c of chunks) {
+            const extractive_facts = extractiveSummary(c.text, c.factProfile);
             const llmRes = parsedResults.find(r => String(r.chunk_index) === String(c.chunk_index));
             if (llmRes && Array.isArray(llmRes.facts) && llmRes.facts.length > 0) {
-                results.push({ id: c.id, facts: llmRes.facts, source: sourceTag, status: 'ok', errorReason: null, factProfile: c.factProfile });
+                results.push({
+                    id: c.id,
+                    facts: llmRes.facts,
+                    extractive_facts,
+                    source: sourceTag,
+                    status: 'ok',
+                    errorReason: null,
+                    factProfile: c.factProfile,
+                });
             } else {
-                const exFacts = extractiveSummary(c.text, c.factProfile);
-                results.push({ id: c.id, facts: exFacts, source: 'extractive', status: exFacts.length > 0 ? 'ok' : 'empty', errorReason: 'LLM skipped in batch', factProfile: c.factProfile });
+                results.push({
+                    id: c.id,
+                    facts: extractive_facts,
+                    extractive_facts,
+                    source: 'extractive',
+                    status: extractive_facts.length > 0 ? 'ok' : 'empty',
+                    errorReason: 'LLM skipped in batch',
+                    factProfile: c.factProfile,
+                });
             }
         }
         return results;
@@ -578,7 +398,15 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
             batchResults = batchChunks.map(c => {
                 const det = detectFactProfile(c.text);
                 const facts = extractiveSummary(c.text, det.profile);
-                return { id: c.id, facts, source: 'extractive', status: 'quota_skip', errorReason: 'quota exhausted earlier', factProfile: det.profile };
+                return {
+                    id: c.id,
+                    facts,
+                    extractive_facts: facts,
+                    source: 'extractive',
+                    status: 'quota_skip',
+                    errorReason: 'quota exhausted earlier',
+                    factProfile: det.profile,
+                };
             });
         } else {
             const chunksMap = {};
@@ -591,7 +419,14 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
             if (res.factProfile) profileCounts[res.factProfile] = (profileCounts[res.factProfile] || 0) + 1;
             totalFactsExtracted += res.facts.length;
 
-            await chunkRepo.insertSummary(res.id, res.facts, res.source, res.status, res.errorReason);
+            await chunkRepo.insertSummary(
+                res.id,
+                res.facts,
+                res.source,
+                res.status,
+                res.errorReason,
+                res.extractive_facts
+            );
 
             if (res.source === 'llm' || res.source === 'cheap_llm') summaryOk++;
             else if (res.status === 'quota_skip') summarySkipped++;

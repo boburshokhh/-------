@@ -1,4 +1,5 @@
 const config = require('../config');
+const { countMergedFactBullets } = require('./rag/evidenceBuilder');
 
 const CONFIG = {
     HARD_MIN: 5,
@@ -59,7 +60,7 @@ function calculateQuestionBudget(fullText, indexedChunks, options = {}) {
     if (chunkCount > 0) {
         indexedChunks.forEach(c => {
             totalTokens += (c.token_count || 0);
-            summaryFacts += (Array.isArray(c.summary) ? c.summary.length : 0);
+            summaryFacts += countMergedFactBullets(c, 99);
 
             if (c.heading || c.section) {
                 headingChunks++;
@@ -79,14 +80,14 @@ function calculateQuestionBudget(fullText, indexedChunks, options = {}) {
     let factsSource;
     if (summaryFacts > 0) {
         atomicFacts = summaryFacts;
-        factsSource = 'summary';
+        factsSource = 'merged_facts';
     } else if (chunkCount > 0) {
-        // Нет summary — оцениваем по токенам.
+        // Нет извлечённых опорных фактов — оцениваем по токенам.
         // ~1 тестируемый факт на 150 токенов (реальная плотность технических текстов).
         // Гарантируем минимум chunkCount*2 (хотя бы 2 факта на чанк).
         atomicFacts = Math.max(chunkCount * 2, Math.floor(totalTokens / 150));
         factsSource = 'token_estimate';
-        logs.push(`[facts] No summaries — estimate: ${totalTokens} tokens / 150 = ${Math.floor(totalTokens / 150)}, min=chunks*2=${chunkCount * 2} → atomicFacts=${atomicFacts}`);
+        logs.push(`[facts] No fact bullets — estimate: ${totalTokens} tokens / 150 = ${Math.floor(totalTokens / 150)}, min=chunks*2=${chunkCount * 2} → atomicFacts=${atomicFacts}`);
     } else {
         atomicFacts = Math.max(1, Math.floor((fullText?.length || 0) / 400));
         factsSource = 'text_length';

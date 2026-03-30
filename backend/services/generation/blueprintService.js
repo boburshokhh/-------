@@ -4,7 +4,26 @@ const { extractJSON } = require('../validator');
 const runtimeConfig = require('../runtimeConfig');
 const quotaGuard = require('../quotaGuard');
 const { parseGeminiApiError, sleepForGeminiRetry, withTimeout } = require('../geminiError');
-const { buildSummaryDigest } = require('../rag/evidenceBuilder');
+const { buildSummaryDigest, getMergedFactsForChunk } = require('../rag/evidenceBuilder');
+
+/** Компактное оглавление по section/heading чанков (без LLM). */
+function buildDocumentOutline(indexedChunks) {
+    const lines = [];
+    const seen = new Set();
+    for (const c of indexedChunks || []) {
+        const sec = (c.section || '').trim();
+        const hd = (c.heading || '').trim();
+        if (!sec && !hd) continue;
+        const key = `${sec}\n${hd}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (sec && hd && sec !== hd) lines.push(`- ${sec} → ${hd}`);
+        else if (sec) lines.push(`- ${sec}`);
+        else lines.push(`- ${hd}`);
+    }
+    if (lines.length === 0) return '';
+    return `\n\nОГЛАВЛЕНИЕ (структура чанков, ${Math.min(lines.length, 80)} пунктов):\n${lines.slice(0, 80).join('\n')}`;
+}
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -61,8 +80,9 @@ function estimateThemeCount(indexedChunks, fullText) {
 
         let factsCount = 0;
         for (const chunk of indexedChunks) {
-            if (Array.isArray(chunk.summary) && chunk.summary.length > 0) {
-                factsCount += chunk.summary.length;
+            const merged = getMergedFactsForChunk(chunk, 99);
+            if (merged.length > 0) {
+                factsCount += merged.length;
             } else {
                 const text = typeof chunk.text === 'string' ? chunk.text : '';
                 const sentenceEst = Math.max(2, Math.min(6,
@@ -111,7 +131,7 @@ function buildLocalThemesFromSections(indexedChunks) {
 
     for (const [section, chunks] of sectionMap) {
         const sectionText = chunks.map(c => c.text || '').join(' ');
-        const summaryFacts = chunks.flatMap(c => Array.isArray(c.summary) ? c.summary : []);
+        const summaryFacts = chunks.flatMap(c => getMergedFactsForChunk(c, 24));
 
         let bloom = ['understand'];
         let importance = 2;
@@ -157,7 +177,7 @@ function buildLocalThemesFromSections(indexedChunks) {
             for (const sig of CONTENT_SIGNALS) {
                 if (sig.re.test(groupText)) { bloom = sig.bloom; importance = sig.importance; break; }
             }
-            const firstFact = (group[0].summary || [])[0] || '';
+            const firstFact = (getMergedFactsForChunk(group[0], 8)[0] || '');
             const topic = firstFact
                 ? firstFact.replace(/^\[(\w+)\]\s*/, '').slice(0, 100)
                 : `Группа чанков ${Math.floor(i / groupSize) + 1}`;
@@ -233,6 +253,7 @@ async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, ta
     const sectionListText = uniqueSections.length > 0
         ? `\n\nРАЗДЕЛЫ ДОКУМЕНТА (${uniqueSections.length}):\n${uniqueSections.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
         : '';
+    const outlineText = buildDocumentOutline(indexedChunks);
 
     const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
     const maxAttempts = 5;
@@ -248,7 +269,7 @@ async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, ta
 Твоя задача — выделить темы и СРАЗУ создать для них план вопросов (intents).
 
 ТРЕБОВАНИЯ:
-1. Выдели примерно ${targetThemes} конкретных тем из документа.${sectionListText}
+1. Выдели примерно ${targetThemes} конкретных тем из документа.${sectionListText}${outlineText}
 2. Суммарно для всех тем ты должен сгенерировать ровно ${totalQuestions} намерений (intents). Распредели их по темам пропорционально их важности.
 3. Intent — это что конкретно будет проверять вопрос (1-2 предложения, например "Проверить знание шагов процедуры отключения питания").
 
@@ -320,6 +341,7 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
     const sectionListText = uniqueSections.length > 0
         ? `\n\nРАЗДЕЛЫ ДОКУМЕНТА (${uniqueSections.length}):\n${uniqueSections.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
         : '';
+    const outlineText = buildDocumentOutline(indexedChunks);
 
     const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
     const maxAttempts = 5;
@@ -331,7 +353,7 @@ async function extractThemes(indexedChunks, fullText, model = null, targetCount 
             const ai = await getAiClient();
             const genPromise = ai.models.generateContent({
                 model: llmModel,
-                contents: `Ты анализируешь техническую/учебную документацию. Твоя задача — выделить КОНКРЕТНЫЕ, ГРАНУЛЯРНЫЕ темы из документа, представленного секциями с фактами.${sectionListText}
+                contents: `Ты анализируешь техническую/учебную документацию. Твоя задача — выделить КОНКРЕТНЫЕ, ГРАНУЛЯРНЫЕ темы из документа, представленного секциями с фактами.${sectionListText}${outlineText}
 
 ТРЕБОВАНИЯ К ТЕМАМ:
 1. Каждая тема — конкретная подтема из ОДНОГО раздела, НЕ обобщение всего документа.

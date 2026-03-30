@@ -34,7 +34,7 @@ AI Test Generator — это веб-приложение для автомати
 
 3. **Retrieval per intent**: для каждого intent — гибридный поиск: `score = 0.75 * cosine + 0.25 * BM25-lite`. Из топ-N кандидатов MMR (λ=0.65) отбирает K разнообразных чанков.
 
-4. **Contextual compression**: вместо сырого текста чанка в LLM уходят evidence packets — `[{chunk_id, facts: [...], quote: "..."}]`. Экономия токенов в 3–10 раз.
+4. **Contextual compression**: evidence packets содержат слои «опоры из текста», при наличии — «факты модели», плюс усечённый сырой текст чанка (`evidenceBuilder.js`). Раньше опирались в основном на один слой summary.
 
 5. **Генерация с источниками**: LLM генерирует 1 вопрос по intent + evidence, обязательно возвращает `sources: [{chunk_id, quote}]`.
 
@@ -141,7 +141,7 @@ PDF-файлы хранятся в object storage (MinIO) или на локал
 *   **`documents`**: метаданные документа + привязка к object storage (`storage_bucket`, `storage_key`, `checksum_sha256`, `size_bytes`, `mime_type`, `status`). JSONB: `parse_diagnostics`.
 *   **`chunks`** (бывш. `document_chunks`): `document_id` FK, `chunk_index`, `text`, `token_count`, `content_hash` (SHA-256, кэш), `page`, `section`, `heading`.
 *   **`chunk_embeddings`**: `chunk_id` FK, `embedding_model`, `embedding` (JSONB float[]), `dims`. UNIQUE(`chunk_id`, `embedding_model`).
-*   **`chunk_summaries`**: `chunk_id` FK, `summary_text` (JSONB string[], 5–10 фактов). UNIQUE(`chunk_id`).
+*   **`chunk_summaries`**: `chunk_id` FK, `summary_text` (JSONB string[], основные факты — LLM или extractive), `extractive_facts` (JSONB string[], эвристические опоры из текста, дублируются/дополняют primary), `summary_source`, `summary_status`. UNIQUE(`chunk_id`).
 *   **`tests`**: `document_id` FK, `title`, `questions_json` (JSONB), `total_questions`, `generation_metrics` (JSONB), `generation_run_id` FK.
 *   **`results`**: `test_id` FK, `user_name`, `answers_json` (JSONB), `score`, `max_score`, `percentage`.
 *   **`app_settings`**: key-value настройки (API ключ и т.д.).

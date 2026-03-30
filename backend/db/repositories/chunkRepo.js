@@ -1,5 +1,6 @@
 const pg = require('../pgPool');
 const config = require('../../config');
+const { coerceExtractiveFacts } = require('../../services/nlp/extractiveFacts');
 
 async function getChunkHashesByDocumentId(documentId) {
     const { rows } = await pg.query(
@@ -43,21 +44,24 @@ async function insertEmbeddings(embeddings, embeddingModel) {
 
 /**
  * @param {number} chunkId
- * @param {string[]} facts        - array of fact strings (may be empty for quota_skip)
+ * @param {string[]} facts        - primary facts (LLM or extractive-only in summary_text)
  * @param {string}  source        - 'llm' | 'cheap_llm' | 'extractive' | 'none'
  * @param {string}  status        - 'ok' | 'quota_skip' | 'error' | 'empty'
  * @param {string|null} errorReason
+ * @param {string[]} [extractiveFacts] - heuristic facts; persisted even when primary facts are LLM or empty
  */
-async function insertSummary(chunkId, facts, source = 'llm', status = 'ok', errorReason = null) {
+async function insertSummary(chunkId, facts, source = 'llm', status = 'ok', errorReason = null, extractiveFacts = null) {
+    const ex = Array.isArray(extractiveFacts) ? extractiveFacts : [];
     await pg.query(`
-        INSERT INTO chunk_summaries (chunk_id, summary_text, summary_source, summary_status, summary_error_reason)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO chunk_summaries (chunk_id, summary_text, summary_source, summary_status, summary_error_reason, extractive_facts)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (chunk_id) DO UPDATE
           SET summary_text         = EXCLUDED.summary_text,
               summary_source       = EXCLUDED.summary_source,
               summary_status       = EXCLUDED.summary_status,
-              summary_error_reason = EXCLUDED.summary_error_reason
-    `, [chunkId, JSON.stringify(facts), source, status, errorReason]);
+              summary_error_reason = EXCLUDED.summary_error_reason,
+              extractive_facts     = EXCLUDED.extractive_facts
+    `, [chunkId, JSON.stringify(facts), source, status, errorReason, JSON.stringify(ex)]);
 }
 
 async function loadIndexedChunks(documentId) {
@@ -78,7 +82,8 @@ async function loadIndexedChunks(documentId) {
             cs.summary_text,
             cs.summary_source,
             cs.summary_status,
-            cs.summary_error_reason
+            cs.summary_error_reason,
+            cs.extractive_facts
         FROM chunks c
         LEFT JOIN chunk_embeddings ce ON ce.chunk_id = c.id AND ce.embedding_model = $1
         LEFT JOIN chunk_summaries cs ON cs.chunk_id = c.id
@@ -86,21 +91,36 @@ async function loadIndexedChunks(documentId) {
         ORDER BY c.chunk_index ASC
     `, [embeddingModel, documentId]);
 
-    return rows.map(row => ({
-        id:              row.id,
-        document_id:     row.document_id,
-        chunk_index:     row.chunk_index,
-        text:            row.text,
-        token_count:     row.token_count,
-        content_hash:    row.content_hash,
-        page:            row.page ?? null,
-        section:         row.section ?? null,
-        heading:         row.heading ?? null,
-        embedding:       row.embedding || null,
-        summary:         row.summary_text || [],
-        summary_source:  row.summary_source || null,
-        summary_status:  row.summary_status || null,
-    }));
+    return rows.map(row => {
+        let primary = row.summary_text;
+        if (typeof primary === 'string') {
+            try { primary = JSON.parse(primary); } catch { primary = []; }
+        }
+        if (!Array.isArray(primary)) primary = [];
+
+        let storedEx = row.extractive_facts;
+        if (typeof storedEx === 'string') {
+            try { storedEx = JSON.parse(storedEx); } catch { storedEx = null; }
+        }
+        const extractive_facts = coerceExtractiveFacts(storedEx, row.text);
+
+        return {
+            id:              row.id,
+            document_id:     row.document_id,
+            chunk_index:     row.chunk_index,
+            text:            row.text,
+            token_count:     row.token_count,
+            content_hash:    row.content_hash,
+            page:            row.page ?? null,
+            section:         row.section ?? null,
+            heading:         row.heading ?? null,
+            embedding:       row.embedding || null,
+            summary:         primary,
+            extractive_facts,
+            summary_source:  row.summary_source || null,
+            summary_status:  row.summary_status || null,
+        };
+    });
 }
 
 async function hasIndex(documentId) {

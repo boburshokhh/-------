@@ -175,10 +175,10 @@ function createBackfillIntents(poolChunks, count, typeOffset = 0) {
         const chunk = poolChunks[i % poolChunks.length];
         const ev = resolveChunkEvidence(chunk, { excerptChars: 200, maxFacts: 3 });
         let intentText;
-        if (ev.source === 'summary' && ev.facts.length > 0) {
+        if ((ev.source === 'summary' || ev.source === 'layered') && ev.facts.length > 0) {
             const factIdx = Math.floor(i / poolChunks.length) % ev.facts.length;
             intentText = `Проверить знание факта: "${ev.facts[factIdx]}"`;
-        } else if (ev.source === 'text' && ev.facts.length > 0) {
+        } else if ((ev.source === 'text' || ev.source === 'extractive') && ev.facts.length > 0) {
             intentText = `Проверить понимание: "${ev.facts[0].slice(0, 120)}"`;
         } else if (ev.heading) {
             intentText = `Проверить ключевые понятия раздела "${ev.heading}"`;
