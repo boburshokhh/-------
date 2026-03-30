@@ -4,8 +4,13 @@ const config = require('../config');
 const aiModelsRepo = require('../db/repositories/aiModelsRepo');
 const aiRoutingRulesRepo = require('../db/repositories/aiRoutingRulesRepo');
 const { ALL_AGENT_IDS } = require('../config/agentRoles');
+const { ALL_STAGE_KEYS, STAGE_CATALOG } = require('../config/stageTaxonomy');
 const aiModelRegistryService = require('../services/aiModelRegistryService');
 const { syncFromGemini } = require('../services/aiModelSyncService');
+const aiStageCatalogRepo = require('../db/repositories/aiStageCatalogRepo');
+const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
+const aiRoutingDecisionsRepo = require('../db/repositories/aiRoutingDecisionsRepo');
+const aiModelHealthRepo = require('../db/repositories/aiModelHealthRepo');
 
 const router = express.Router();
 
@@ -70,8 +75,8 @@ function validateRoutingMode(value) {
 }
 
 function validatePhase(phase) {
-    if (!ALL_AGENT_IDS.includes(phase)) {
-        const err = new Error('Некорректный phase');
+    if (!ALL_AGENT_IDS.includes(phase) && !ALL_STAGE_KEYS.includes(phase)) {
+        const err = new Error('Некорректный phase / stage_key');
         err.status = 400;
         throw err;
     }
@@ -535,6 +540,180 @@ router.get(
                 offset: optionalNonNegativeInt(req.query.offset, 0),
             });
             res.json({ ok: true, rows });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+// ─── Stage Catalog ──────────────────────────────────────────────────────────
+
+router.get(
+    '/stages',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const activeOnly = req.query.active_only !== 'false';
+            const rows = await aiStageCatalogRepo.listStages({ activeOnly });
+            res.json({ ok: true, stages: rows });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.get(
+    '/stages/:stageKey',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const row = await aiStageCatalogRepo.getStageByKey(req.params.stageKey);
+            if (!row) return res.status(404).json({ error: 'Stage not found' });
+            res.json({ ok: true, stage: row });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+// ─── Global Policies ────────────────────────────────────────────────────────
+
+router.get(
+    '/global-policies',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const policies = await aiGlobalPoliciesRepo.getPolicies();
+            res.json({ ok: true, policies: policies || {} });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.patch(
+    '/global-policies',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const body = req.body || {};
+            if (body.routing_mode !== undefined) validateRoutingMode(body.routing_mode);
+            const before = await aiGlobalPoliciesRepo.getPolicies();
+            const after = await aiGlobalPoliciesRepo.updatePolicies(body, {
+                updatedBy: req.user?.id || null,
+            });
+
+            try {
+                const routingEngine = require('../services/routingEngine');
+                routingEngine.invalidatePolicies();
+            } catch { /* optional */ }
+
+            await appendAudit(req, {
+                action: 'global_policies_updated',
+                entityType: 'ai_global_policies',
+                entityId: 1,
+                beforeState: before,
+                afterState: after,
+            });
+            res.json({ ok: true, policies: after });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+// ─── Routing Decisions (explainable log) ────────────────────────────────────
+
+router.get(
+    '/routing-decisions',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const rows = await aiRoutingDecisionsRepo.listDecisions({
+                runId: req.query.run_id ? Number(req.query.run_id) : null,
+                documentId: req.query.document_id ? Number(req.query.document_id) : null,
+                stageKey: req.query.stage_key || null,
+                selectedApiModelId: req.query.model_id || null,
+                limit: optionalPositiveInt(req.query.limit, 100),
+                offset: optionalNonNegativeInt(req.query.offset, 0),
+            });
+            res.json({ ok: true, rows });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.get(
+    '/routing-decisions/:id',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const row = await aiRoutingDecisionsRepo.getDecisionById(id);
+            if (!row) return res.status(404).json({ error: 'Decision not found' });
+            res.json({ ok: true, decision: row });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+// ─── Model Health ───────────────────────────────────────────────────────────
+
+router.get(
+    '/model-health',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const rows = await aiModelHealthRepo.listAllLatest({
+                limit: optionalPositiveInt(req.query.limit, 200),
+            });
+            res.json({ ok: true, rows });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.get(
+    '/model-health/:modelId',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const modelId = parsePositiveInt(req.params.modelId, 'modelId');
+            const row = await aiModelHealthRepo.getLatestHealth(modelId);
+            res.json({ ok: true, health: row });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+// ─── Routing Rules with stage_key support ───────────────────────────────────
+
+router.get(
+    '/routing-rules-by-stage/:stageKey',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const stageKey = req.params.stageKey;
+            if (!ALL_STAGE_KEYS.includes(stageKey)) {
+                return res.status(400).json({ error: 'Некорректный stage_key' });
+            }
+            const enabledOnly = req.query.enabled_only !== 'false';
+            const allRules = await aiRoutingRulesRepo.listRules({ enabledOnly });
+            const filtered = allRules.filter(r => r.stage_key === stageKey);
+            res.json({ ok: true, stage_key: stageKey, rules: filtered });
         } catch (e) {
             next(e);
         }

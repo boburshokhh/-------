@@ -18,6 +18,7 @@
 
 const config       = require('../../config');
 const { AGENT_ROLES, AGENT_RESOLUTION_ORDER } = require('../../config/agentRoles');
+const { STAGE_KEYS } = require('../../config/stageTaxonomy');
 const { chunkText } = require('../chunker');
 const { calculateQuestionBudget } = require('../budgetCalculator');
 const quotaGuard   = require('../quotaGuard');
@@ -56,8 +57,8 @@ const {
 const PW = jobProgress.WEIGHT;
 
 /**
- * Резолвинг моделей по агентным ролям (БД rules + legacy routeModel).
- * @returns {{ decisions: Record<string, object>, modelsByAgent: Record<string, string|null> }}
+ * Резолвинг моделей по stage taxonomy через RoutingEngine (primary path)
+ * с fallback на legacy agent-role routing.
  */
 async function resolvePipelineAgentModels({
     routingMode,
@@ -67,7 +68,55 @@ async function resolvePipelineAgentModels({
     adminOverrides,
     traceId,
     documentId,
+    runId,
 }) {
+    const v2 = await modelRouter.resolvePipelineModelsV2({
+        routingMode,
+        documentMetadata,
+        complexityScore: complexityNorm,
+        quotaSnapshot,
+        adminOverrides,
+        traceId,
+        documentId,
+        runId,
+    });
+
+    if (v2) {
+        const decisions = {};
+        const modelsByAgent = {};
+        const stageToAgent = {
+            [STAGE_KEYS.embedding]:             AGENT_ROLES.evidence,
+            [STAGE_KEYS.cheap_preprocess]:      AGENT_ROLES.structuring,
+            [STAGE_KEYS.blueprint_generation]:  AGENT_ROLES.blueprint,
+            [STAGE_KEYS.question_generation]:   AGENT_ROLES.generator,
+            [STAGE_KEYS.grounding_validation]:  AGENT_ROLES.quality,
+            [STAGE_KEYS.backfill_generation]:   AGENT_ROLES.backfill,
+        };
+        for (const [stageKey, agentRole] of Object.entries(stageToAgent)) {
+            const d = v2.decisions[stageKey];
+            if (d) {
+                decisions[agentRole] = d;
+                let m = d.selectedModel;
+                if (m) {
+                    const avail = await quotaGuard.getAvailableModel(m);
+                    if (avail) m = avail;
+                    else if (d.fallbackModel) {
+                        const fb = await quotaGuard.getAvailableModel(d.fallbackModel);
+                        if (fb) m = fb;
+                    }
+                }
+                modelsByAgent[agentRole] = m;
+            }
+        }
+        decisions[AGENT_ROLES.evaluation] = {
+            selectedModel: null, fallbackModel: null,
+            reason: 'evaluation_agent_no_llm', costTier: 'none',
+            isPreview: false, agentRole: AGENT_ROLES.evaluation,
+        };
+        modelsByAgent[AGENT_ROLES.evaluation] = null;
+        return { decisions, modelsByAgent };
+    }
+
     const base = {
         requestedMode: routingMode,
         documentMetadata,

@@ -1,8 +1,10 @@
 'use strict';
 
+const { AGENT_ROLE_TO_STAGE, STAGE_KEYS } = require('./stageTaxonomy');
+
 /**
  * Канонические id агентов пайплайна генерации тестов.
- * Поле phase в ai_routing_rules = этому id (например phase = 'blueprint_agent').
+ * Поле phase в ai_routing_rules может содержать agent id (legacy) или stage_key (new).
  *
  * @readonly
  * @enum {string}
@@ -29,8 +31,8 @@ const AGENT_LABELS = {
 };
 
 /**
- * Fallback stage для modelRouter.routeModel, если нет подходящего правила в БД.
- * @type {Record<string, string>}
+ * Legacy fallback stage for modelRouter.routeModel.
+ * @deprecated Use AGENT_ROLE_TO_STAGE from stageTaxonomy.js instead.
  */
 const AGENT_TO_ROUTER_STAGE = {
     [AGENT_ROLES.structuring]: 'pipeline',
@@ -41,6 +43,11 @@ const AGENT_TO_ROUTER_STAGE = {
     [AGENT_ROLES.backfill]: 'backfill',
     [AGENT_ROLES.evaluation]: 'pipeline',
 };
+
+/**
+ * Canonical stage_key for each agent role (new taxonomy).
+ */
+const AGENT_TO_STAGE_KEY = Object.freeze({ ...AGENT_ROLE_TO_STAGE });
 
 const ALL_AGENT_IDS = Object.values(AGENT_ROLES);
 
@@ -63,6 +70,7 @@ module.exports = {
     AGENT_ROLES,
     AGENT_LABELS,
     AGENT_TO_ROUTER_STAGE,
+    AGENT_TO_STAGE_KEY,
     ALL_AGENT_IDS,
     AGENT_RESOLUTION_ORDER,
     isKnownAgentRole,

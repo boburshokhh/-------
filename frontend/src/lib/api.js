@@ -310,4 +310,59 @@ export const API = {
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return request(`/admin/ai/audit${suffix}`);
   },
+
+  // ── Stage Catalog ──────────────────────────────────────────────────────
+  adminGetStages({ activeOnly = true } = {}) {
+    const qs = activeOnly ? '' : '?active_only=false';
+    return request(`/admin/ai/stages${qs}`);
+  },
+
+  adminGetStage(stageKey) {
+    return request(`/admin/ai/stages/${encodeURIComponent(stageKey)}`);
+  },
+
+  // ── Global Policies ────────────────────────────────────────────────────
+  adminGetGlobalPolicies() {
+    return request('/admin/ai/global-policies');
+  },
+
+  adminUpdateGlobalPolicies(patch) {
+    return request('/admin/ai/global-policies', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch || {}),
+    });
+  },
+
+  // ── Routing Decisions ──────────────────────────────────────────────────
+  adminGetRoutingDecisions(params = {}) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v != null && v !== '') qs.set(k, String(v));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/ai/routing-decisions${suffix}`);
+  },
+
+  adminGetRoutingDecision(id) {
+    return request(`/admin/ai/routing-decisions/${encodeURIComponent(id)}`);
+  },
+
+  // ── Model Health ───────────────────────────────────────────────────────
+  adminGetModelHealth(params = {}) {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set('limit', String(params.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/ai/model-health${suffix}`);
+  },
+
+  adminGetModelHealthById(modelId) {
+    return request(`/admin/ai/model-health/${encodeURIComponent(modelId)}`);
+  },
+
+  // ── Routing Rules by Stage Key ─────────────────────────────────────────
+  adminGetRoutingRulesByStage(stageKey, { enabledOnly = true } = {}) {
+    const qs = enabledOnly ? '' : '?enabled_only=false';
+    return request(`/admin/ai/routing-rules-by-stage/${encodeURIComponent(stageKey)}${qs}`);
+  },
 };

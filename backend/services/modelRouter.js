@@ -796,9 +796,65 @@ async function routeModelForAgent(input) {
     return { ...legacy, agentRole, fromDbRule: false };
 }
 
+// ---------------------------------------------------------------------------
+// New RoutingEngine bridge: selectModelForStage delegates to routingEngine
+// while keeping full backward compat with routeModel / routeModelForAgent.
+// ---------------------------------------------------------------------------
+
+let _routingEngine = null;
+function getRoutingEngine() {
+    if (!_routingEngine) _routingEngine = require('./routingEngine');
+    return _routingEngine;
+}
+
+/**
+ * New unified entry point — uses the RoutingEngine with stage taxonomy.
+ * Falls back to legacy routeModelForAgent if engine is unavailable.
+ */
+async function selectModelForStage(stageRequest) {
+    try {
+        return await getRoutingEngine().selectModel(stageRequest);
+    } catch (e) {
+        console.warn('[modelRouter] RoutingEngine unavailable, falling back to legacy:', e.message);
+        const { stageKeyFromAgentRole } = require('../config/stageTaxonomy');
+        const agentRole = stageRequest.agentRole || null;
+        const legacy = await routeModelForAgent({
+            agentRole: agentRole || 'generator_agent',
+            requestedMode: stageRequest.requestedMode,
+            documentMetadata: stageRequest.documentMetadata,
+            complexityScore: stageRequest.complexityScore,
+            quotaSnapshot: stageRequest.quotaSnapshot,
+            adminOverrides: stageRequest.adminOverrides,
+            traceId: stageRequest.traceId,
+            documentId: stageRequest.documentId,
+            executionMode: stageRequest.executionMode,
+        });
+        return {
+            ...legacy,
+            stageKey: stageRequest.stageKey,
+            fallbackChain: [legacy.fallbackModel].filter(Boolean),
+            decisionSource: 'legacy_fallback',
+            premiumBlocked: false,
+            previewBlocked: false,
+            wasFallback: false,
+        };
+    }
+}
+
+async function resolvePipelineModelsV2(pipelineCtx) {
+    try {
+        return await getRoutingEngine().resolvePipelineModels(pipelineCtx);
+    } catch (e) {
+        console.warn('[modelRouter] RoutingEngine.resolvePipelineModels unavailable:', e.message);
+        return null;
+    }
+}
+
 module.exports = {
     routeModel,
     routeModelForAgent,
+    selectModelForStage,
+    resolvePipelineModelsV2,
     emitRouterDecisionToPipeline,
     invalidateRoutingRulesCache,
     invalidateRoutingConfigCache,
