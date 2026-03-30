@@ -1,0 +1,280 @@
+{
+    "source": "user_screenshots",
+    "notes": {
+      "rpd_null_means_unlimited": true,
+      "numbers_from_k_are_approximate": true
+    },
+    "models": [
+      {
+        "ui_name": "Gemini Embedding 1",
+        "category": "other",
+        "api_model_id": "gemini-embedding-001",
+        "rpm": { "used": 39, "limit": 3000 },
+        "tpm": { "used": 4330, "limit": 1000000 },
+        "rpd": { "used": 78, "limit": null }
+      },
+      {
+        "ui_name": "Gemini 2.5 Flash Lite",
+        "category": "text_out",
+        "api_model_id": "gemini-2.5-flash-lite",
+        "rpm": { "used": 14, "limit": 4000 },
+        "tpm": { "used": 25800, "limit": 4000000 },
+        "rpd": { "used": 23, "limit": null }
+      },
+      {
+        "ui_name": "Gemini 2.5 Flash",
+        "category": "text_out",
+        "api_model_id": "gemini-2.5-flash",
+        "rpm": { "used": 0, "limit": 1000 },
+        "tpm": { "used": 0, "limit": 1000000 },
+        "rpd": { "used": 0, "limit": 10000 }
+      },
+      {
+        "ui_name": "Gemini 2.5 Pro",
+        "category": "text_out",
+        "api_model_id": "gemini-2.5-pro",
+        "rpm": { "used": 0, "limit": 150 },
+        "tpm": { "used": 0, "limit": 2000000 },
+        "rpd": { "used": 0, "limit": 1000 }
+      },
+      {
+        "ui_name": "Gemini 2 Flash",
+        "category": "text_out",
+        "api_model_id": "gemini-2.0-flash",
+        "rpm": { "used": 0, "limit": 2000 },
+        "tpm": { "used": 0, "limit": 4000000 },
+        "rpd": { "used": 0, "limit": null }
+      },
+      {
+        "ui_name": "Gemini 2 Flash Lite",
+        "category": "text_out",
+        "api_model_id": "gemini-2.0-flash-lite",
+        "rpm": { "used": 0, "limit": 4000 },
+        "tpm": { "used": 0, "limit": 4000000 },
+        "rpd": { "used": 0, "limit": null }
+      },
+      {
+        "ui_name": "Gemini 2.5 Flash TTS",
+        "category": "tts",
+        "api_model_id": "gemini-2.5-flash-preview-tts",
+        "rpm": { "used": 0, "limit": 10 },
+        "tpm": { "used": 0, "limit": 10000 },
+        "rpd": { "used": 0, "limit": 100 }
+      },
+      {
+        "ui_name": "Gemini 2.5 Pro TTS",
+        "category": "tts",
+        "api_model_id": "gemini-2.5-pro-preview-tts",
+        "rpm": { "used": 0, "limit": 10 },
+        "tpm": { "used": 0, "limit": 10000 },
+        "rpd": { "used": 0, "limit": 50 }
+      },
+      {
+        "ui_name": "Gemma 3 1B",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 30 },
+        "tpm": { "used": 0, "limit": 15000 },
+        "rpd": { "used": 0, "limit": 14400 }
+      },
+      {
+        "ui_name": "Gemma 3 2B",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 30 },
+        "tpm": { "used": 0, "limit": 15000 },
+        "rpd": { "used": 0, "limit": 14400 }
+      },
+      {
+        "ui_name": "Gemma 3 4B",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 30 },
+        "tpm": { "used": 0, "limit": 15000 },
+        "rpd": { "used": 0, "limit": 14400 }
+      },
+      {
+        "ui_name": "Gemma 3 12B",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 30 },
+        "tpm": { "used": 0, "limit": 15000 },
+        "rpd": { "used": 0, "limit": 14400 }
+      },
+      {
+        "ui_name": "Gemma 3 27B",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 30 },
+        "tpm": { "used": 0, "limit": 15000 },
+        "rpd": { "used": 0, "limit": 14400 }
+      },
+      {
+        "ui_name": "Imagen 4 Generate",
+        "category": "image",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 10 },
+        "tpm": null,
+        "rpd": { "used": 0, "limit": 70 }
+      },
+      {
+        "ui_name": "Imagen 4 Ultra Generate",
+        "category": "image",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 5 },
+        "tpm": null,
+        "rpd": { "used": 0, "limit": 30 }
+      },
+      {
+        "ui_name": "Imagen 4 Fast Generate",
+        "category": "image",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 10 },
+        "tpm": null,
+        "rpd": { "used": 0, "limit": 70 }
+      },
+      {
+        "ui_name": "Gemini 3 Flash",
+        "category": "text_out",
+        "api_model_id": "gemini-3-flash-preview",
+        "rpm": { "used": 0, "limit": 1000 },
+        "tpm": { "used": 0, "limit": 2000000 },
+        "rpd": { "used": 0, "limit": 10000 }
+      },
+      {
+        "ui_name": "Gemini 3.1 Pro",
+        "category": "text_out",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 25 },
+        "tpm": { "used": 0, "limit": 2000000 },
+        "rpd": { "used": 0, "limit": 250 }
+      },
+      {
+        "ui_name": "Nano Banana (Gemini 2.5 Flash Preview Image)",
+        "category": "image",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 500 },
+        "tpm": { "used": 0, "limit": 500000 },
+        "rpd": { "used": 0, "limit": 2000 }
+      },
+      {
+        "ui_name": "Gemini 3.1 Flash Lite",
+        "category": "text_out",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 4000 },
+        "tpm": { "used": 0, "limit": 4000000 },
+        "rpd": { "used": 0, "limit": 150000 }
+      },
+      {
+        "ui_name": "Nano Banana Pro (Gemini 3 Pro Image)",
+        "category": "image",
+        "api_model_id": "gemini-3-pro-image-preview",
+        "rpm": { "used": 0, "limit": 20 },
+        "tpm": { "used": 0, "limit": 100000 },
+        "rpd": { "used": 0, "limit": 250 }
+      },
+      {
+        "ui_name": "Nano Banana 2 (Gemini 3.1 Flash Image)",
+        "category": "image",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 100 },
+        "tpm": { "used": 0, "limit": 200000 },
+        "rpd": { "used": 0, "limit": 1000 }
+      },
+      {
+        "ui_name": "Lyria 3 Clip",
+        "category": "audio_music",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 150 },
+        "tpm": { "used": 0, "limit": 4000000 },
+        "rpd": { "used": 0, "limit": 500 }
+      },
+      {
+        "ui_name": "Lyria 3 Pro",
+        "category": "audio_music",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 150 },
+        "tpm": { "used": 0, "limit": 4000000 },
+        "rpd": { "used": 0, "limit": 500 }
+      },
+      {
+        "ui_name": "Veo 3 Generate",
+        "category": "video",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 2 },
+        "tpm": null,
+        "rpd": { "used": 0, "limit": 10 }
+      },
+      {
+        "ui_name": "Veo 3 Fast Generate",
+        "category": "video",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 2 },
+        "tpm": null,
+        "rpd": { "used": 0, "limit": 10 }
+      },
+      {
+        "ui_name": "Gemini Robotics ER 1.5 Preview",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 1000 },
+        "tpm": { "used": 0, "limit": 2000000 },
+        "rpd": { "used": 0, "limit": 14400 }
+      },
+      {
+        "ui_name": "Computer Use Preview",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 150 },
+        "tpm": { "used": 0, "limit": 2000000 },
+        "rpd": { "used": 0, "limit": 10000 }
+      },
+      {
+        "ui_name": "Gemini Embedding 2",
+        "category": "other",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": 3000 },
+        "tpm": { "used": 0, "limit": 1000000 },
+        "rpd": { "used": 0, "limit": null }
+      },
+      {
+        "ui_name": "Deep Research Pro Preview",
+        "category": "agent",
+        "api_model_id": "deep-research-pro-preview-12-2025",
+        "rpm": { "used": 0, "limit": 1 },
+        "tpm": { "used": 0, "limit": 500000 },
+        "rpd": { "used": 0, "limit": 1440 }
+      },
+      {
+        "ui_name": "Gemini 2.5 Flash Native Audio Dialog",
+        "category": "live_api",
+        "api_model_id": "gemini-2.5-flash-native-audio-preview-12-2025",
+        "rpm": { "used": 0, "limit": null },
+        "tpm": { "used": 0, "limit": 1000000 },
+        "rpd": { "used": 0, "limit": null }
+      },
+      {
+        "ui_name": "Gemini 3 Flash Live",
+        "category": "live_api",
+        "api_model_id": null,
+        "rpm": { "used": 0, "limit": null },
+        "tpm": { "used": 0, "limit": 150000 },
+        "rpd": { "used": 0, "limit": null }
+      }
+    ],
+    "tools": [
+      { "ui_name": "Gemini 2.5 Flash", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Gemini 2.5 Pro", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Gemini 3 Flash", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Gemini 2.5 Flash Lite", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Gemini 3.1 Pro", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Gemini 3.1 Flash Lite", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Computer Use Preview", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Deep Research Pro Preview", "tool_type": "map_grounding", "rpd": { "used": 0, "limit": null } },
+      { "ui_name": "Gemini 2", "tool_type": "search_grounding", "rpd": { "used": 0, "limit": 5000 } },
+      { "ui_name": "Gemini 2.5", "tool_type": "search_grounding", "rpd": { "used": 0, "limit": 5000 } },
+      { "ui_name": "Gemini 3", "tool_type": "search_grounding", "rpd": { "used": 0, "limit": 1500 } },
+      { "ui_name": "Default", "tool_type": "search_grounding", "rpd": { "used": 0, "limit": 5000 } }
+    ]
+  }
+  
