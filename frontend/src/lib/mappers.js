@@ -79,6 +79,31 @@ export function mapSubmitAnswersPayload(testDetail, answersMap) {
   };
 }
 
+/**
+ * Текст ответа для карточки разбора: индекс варианта → текст из options; boolean → Верно/Неверно.
+ */
+function formatAnswerForDisplay(value, question) {
+  if (value === null || typeof value === 'undefined' || value === '') return '—';
+  if (typeof value === 'boolean') {
+    return value ? 'Верно' : 'Неверно';
+  }
+  const type = question?.type || 'multiple_choice';
+  if (type === 'true_false' && (value === 'true' || value === 'false')) {
+    return value === 'true' ? 'Верно' : 'Неверно';
+  }
+  const options = Array.isArray(question?.options) ? question.options : [];
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const idx = Math.trunc(value);
+    if (idx >= 0 && idx < options.length) {
+      return String(options[idx]);
+    }
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return String(value);
+}
+
 export function mapResultSummary(payload, testDetail, userName = 'Пользователь') {
   const maxScore = payload.maxScore || 0;
   const score = payload.score || 0;
@@ -107,16 +132,33 @@ export function mapResultSummary(payload, testDetail, userName = 'Пользов
 export function mapResultDetail(payload) {
   const questions = Array.isArray(payload.questions) ? payload.questions : [];
   const answers = Array.isArray(payload.answers) ? payload.answers : [];
-  const byQuestionId = new Map(questions.map((q) => [q.id, q]));
+  const byQuestionId = new Map();
+  questions.forEach((q, i) => {
+    if (!q || typeof q !== 'object') return;
+    const id = q.id;
+    if (id != null && id !== '') {
+      byQuestionId.set(id, q);
+      const n = Number(id);
+      if (!Number.isNaN(n)) byQuestionId.set(n, q);
+    } else {
+      byQuestionId.set(i + 1, q);
+    }
+  });
 
   const items = answers.map((a, idx) => {
-    const q = byQuestionId.get(a.questionId) || {};
+    const qid = a.questionId;
+    let q = byQuestionId.get(qid);
+    if (!q && qid != null) {
+      const n = Number(qid);
+      if (!Number.isNaN(n)) q = byQuestionId.get(n);
+    }
+    if (!q) q = questions[idx] || {};
     return {
       id: a.questionId ?? idx + 1,
       status: a.isCorrect ? 'correct' : 'incorrect',
       text: q.question || 'Вопрос',
-      yourAnswer: typeof a.userAnswer === 'boolean' ? (a.userAnswer ? 'Верно' : 'Неверно') : String(a.userAnswer ?? '—'),
-      correctAnswer: typeof a.correctAnswer === 'boolean' ? (a.correctAnswer ? 'Верно' : 'Неверно') : String(a.correctAnswer ?? '—'),
+      yourAnswer: formatAnswerForDisplay(a.userAnswer, q),
+      correctAnswer: formatAnswerForDisplay(a.correctAnswer, q),
       reasoning: a.explanation || 'Объяснение отсутствует.',
     };
   });
