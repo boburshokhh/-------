@@ -9,6 +9,8 @@ const routingEngine = require('./routingEngine');
 const quotaGuard = require('./quotaGuard');
 const aiRoutingConfigRepo = require('../db/repositories/aiRoutingConfigRepo');
 const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
+const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
+const customModeService = require('./customModeService');
 const operationalGuardrails = require('./operationalGuardrails');
 const { STAGE_KEYS } = require('../config/stageTaxonomy');
 
@@ -29,6 +31,19 @@ function normalizeMode(raw) {
  */
 async function getPublicGenerationRoutingSnapshot({ requestedMode = 'auto' } = {}) {
     const mode = normalizeMode(requestedMode);
+    let customModeProfile = null;
+    if (!VALID_MODES.has(mode)) {
+        try {
+            customModeProfile = await customModeProfilesRepo.getProfileWithAssignmentsById(
+                (await customModeProfilesRepo.getProfileByCode(mode))?.id,
+            );
+            if (!customModeProfile || customModeProfile.is_archived || customModeProfile.is_disabled) {
+                customModeProfile = null;
+            }
+        } catch {
+            customModeProfile = null;
+        }
+    }
 
     let baseConfig = null;
     let globalPolicies = null;
@@ -103,37 +118,58 @@ async function getPublicGenerationRoutingSnapshot({ requestedMode = 'auto' } = {
         explanations.push('Preview-модели временно отключены из‑за высокой ошибки (preview_routing_blocked).');
     }
 
-    /** Предпросмотр моделей по стадиям для UI (эвристика: complexity 0.4, 1 стр.); отдельный endpoint не требуется. */
+    /** Предпросмотр моделей по стадиям для UI. */
     const stagePreview = {};
     try {
-        const v2 = await modelRouter.resolvePipelineModelsV2({
-            routingMode: mode,
-            documentMetadata: { page_count: 1 },
-            complexityScore: 0.4,
-            quotaSnapshot: quotaSnap,
-            adminOverrides: {},
-            traceId: 'ui-preview',
-            documentId: null,
-            runId: null,
-        });
-        if (v2?.decisions) {
-            const keys = [
-                STAGE_KEYS.question_generation,
-                STAGE_KEYS.blueprint_generation,
-                STAGE_KEYS.grounding_validation,
-                STAGE_KEYS.embedding,
-            ];
-            for (const k of keys) {
-                const d = v2.decisions[k];
-                if (d) {
-                    stagePreview[k] = {
-                        selected: d.selectedModel,
-                        fallback: d.fallbackModel,
-                        reason: d.reason,
-                        cost_tier: d.costTier,
-                        premium_blocked: !!d.premiumBlocked,
-                        preview_blocked: !!d.previewBlocked,
-                    };
+        if (customModeProfile) {
+            const preview = await customModeService.buildEffectivePreview({
+                profile: customModeProfile,
+                assignments: customModeProfile.assignments || [],
+                requestedContext: {},
+            });
+            for (const row of preview.rows || []) {
+                stagePreview[row.stage_key] = {
+                    selected: row.effective_primary || null,
+                    fallback: (row.effective_fallbacks && row.effective_fallbacks[0]) || null,
+                    reason: row.fallback_reason || null,
+                    cost_tier: null,
+                    premium_blocked: !!row.premium_blocked,
+                    preview_blocked: !!row.preview_blocked,
+                    configured_primary: row.configured_primary || null,
+                    configured_fallbacks: row.configured_fallbacks || [],
+                    blocked_by: row.blocked_by || [],
+                };
+            }
+        } else {
+            const v2 = await modelRouter.resolvePipelineModelsV2({
+                routingMode: mode,
+                documentMetadata: { page_count: 1 },
+                complexityScore: 0.4,
+                quotaSnapshot: quotaSnap,
+                adminOverrides: {},
+                traceId: 'ui-preview',
+                documentId: null,
+                runId: null,
+            });
+            if (v2?.decisions) {
+                const keys = [
+                    STAGE_KEYS.question_generation,
+                    STAGE_KEYS.blueprint_generation,
+                    STAGE_KEYS.grounding_validation,
+                    STAGE_KEYS.embedding,
+                ];
+                for (const k of keys) {
+                    const d = v2.decisions[k];
+                    if (d) {
+                        stagePreview[k] = {
+                            selected: d.selectedModel,
+                            fallback: d.fallbackModel,
+                            reason: d.reason,
+                            cost_tier: d.costTier,
+                            premium_blocked: !!d.premiumBlocked,
+                            preview_blocked: !!d.previewBlocked,
+                        };
+                    }
                 }
             }
         }
@@ -144,6 +180,14 @@ async function getPublicGenerationRoutingSnapshot({ requestedMode = 'auto' } = {
     return {
         requested_mode: mode,
         effective_mode: effectiveMode,
+        custom_mode: customModeProfile
+            ? {
+                code: customModeProfile.code,
+                name: customModeProfile.name,
+                config_version: customModeProfile.config_version,
+                parent_mode: customModeProfile.parent_mode || null,
+            }
+            : null,
         base_config_routing_mode: baseConfig?.routing_mode ?? 'auto',
         policies: globalPolicies
             ? {
