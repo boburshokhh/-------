@@ -26,6 +26,8 @@ const modelRouter  = require('../modelRouter');
 const { resolveExecutionMode, estimateQuotaBudget } = require('../quotaBudget');
 const jobProgress  = require('../jobProgress');
 const runRepo      = require('../../db/repositories/runRepo');
+const customModeProfilesRepo = require('../../db/repositories/customModeProfilesRepo');
+const customModeService = require('../customModeService');
 
 // NLP
 const { detectLanguageWithDiagnostics } = require('../nlp/languagePredictor');
@@ -141,6 +143,88 @@ async function resolvePipelineAgentModels({
         modelsByAgent[agentRole] = m;
     }
     return { decisions, modelsByAgent };
+}
+
+async function resolveCustomModeAgentModels({
+    routingMode,
+    traceId,
+    documentId,
+}) {
+    const builtInModes = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
+    const code = String(routingMode || '').toLowerCase().trim();
+    if (!code || builtInModes.has(code)) {
+        return null;
+    }
+
+    const profileBase = await customModeProfilesRepo.getProfileByCode(code);
+    if (!profileBase || profileBase.is_archived || profileBase.is_disabled) {
+        return null;
+    }
+    const profile = await customModeProfilesRepo.getProfileWithAssignmentsById(profileBase.id);
+    if (!profile) return null;
+
+    const preview = await customModeService.buildEffectivePreview({
+        profile,
+        assignments: profile.assignments || [],
+        requestedContext: {},
+    });
+
+    const modelsByAgent = {
+        [AGENT_ROLES.structuring]: null,
+        [AGENT_ROLES.evidence]: null,
+        [AGENT_ROLES.blueprint]: null,
+        [AGENT_ROLES.generator]: null,
+        [AGENT_ROLES.quality]: null,
+        [AGENT_ROLES.backfill]: null,
+        [AGENT_ROLES.evaluation]: null,
+    };
+    const decisions = {};
+
+    const stageToAgent = {
+        [STAGE_KEYS.embedding]: AGENT_ROLES.evidence,
+        [STAGE_KEYS.cheap_preprocess]: AGENT_ROLES.structuring,
+        [STAGE_KEYS.facts_enrichment]: AGENT_ROLES.structuring,
+        [STAGE_KEYS.theme_extraction]: AGENT_ROLES.blueprint,
+        [STAGE_KEYS.blueprint_generation]: AGENT_ROLES.blueprint,
+        [STAGE_KEYS.question_generation]: AGENT_ROLES.generator,
+        [STAGE_KEYS.grounding_validation]: AGENT_ROLES.quality,
+        [STAGE_KEYS.backfill_generation]: AGENT_ROLES.backfill,
+        [STAGE_KEYS.audit_debug]: AGENT_ROLES.evaluation,
+    };
+
+    for (const row of preview.rows || []) {
+        const agentRole = stageToAgent[row.stage_key];
+        if (!agentRole || !row.effective_primary) continue;
+        modelsByAgent[agentRole] = row.effective_primary;
+        decisions[agentRole] = {
+            selectedModel: row.effective_primary,
+            fallbackModel: Array.isArray(row.effective_fallbacks) ? (row.effective_fallbacks[0] || null) : null,
+            reason: row.fallback_reason || 'custom_mode_assignment',
+            costTier: modelRouter.costTierFromModelId(row.effective_primary),
+            isPreview: false,
+            agentRole,
+            fromDbRule: true,
+        };
+    }
+
+    logStructured({
+        level: 'info',
+        traceId,
+        documentId,
+        phase: 'generate',
+        event: 'custom_mode_models_applied',
+        metadata: {
+            mode_code: profile.code,
+            mode_profile_id: profile.id,
+            mode_profile_version: profile.config_version || 1,
+        },
+    });
+
+    return {
+        profile,
+        decisions,
+        modelsByAgent,
+    };
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -613,15 +697,29 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         ? { model: opts.model }
         : {};
 
-    const { decisions: agentDecisions, modelsByAgent } = await resolvePipelineAgentModels({
+    const customModeResolved = await resolveCustomModeAgentModels({
         routingMode,
-        documentMetadata,
-        complexityNorm,
-        quotaSnapshot,
-        adminOverrides,
         traceId,
         documentId,
     });
+    let agentDecisions;
+    let modelsByAgent;
+    if (customModeResolved) {
+        agentDecisions = customModeResolved.decisions;
+        modelsByAgent = customModeResolved.modelsByAgent;
+    } else {
+        const resolved = await resolvePipelineAgentModels({
+            routingMode,
+            documentMetadata,
+            complexityNorm,
+            quotaSnapshot,
+            adminOverrides,
+            traceId,
+            documentId,
+        });
+        agentDecisions = resolved.decisions;
+        modelsByAgent = resolved.modelsByAgent;
+    }
 
     const modelGenerator = modelsByAgent[AGENT_ROLES.generator] || config.LLM_MODEL || 'gemini-2.5-flash';
     const modelBlueprint = modelsByAgent[AGENT_ROLES.blueprint] || modelGenerator;
