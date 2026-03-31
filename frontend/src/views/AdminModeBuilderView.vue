@@ -68,7 +68,7 @@
                 <select v-model.number="row.primary_model_id" class="field w-full min-w-[220px]">
                   <option :value="null">— авто —</option>
                   <option v-for="m in modelsForRow(row)" :key="m.id" :value="m.id">
-                    {{ m.api_model_id || `id:${m.id}` }}
+                    {{ modelLabel(m) }}
                   </option>
                 </select>
               </td>
@@ -170,7 +170,7 @@ const llmModels = computed(() =>
   (models.value || []).filter((m) => m.model_role !== 'embedding' && m.api_model_id),
 )
 const embeddingModels = computed(() =>
-  (models.value || []).filter((m) => m.model_role === 'embedding' && m.api_model_id),
+  (models.value || []).filter((m) => m.model_role === 'embedding'),
 )
 
 const MISSION_LABELS = {
@@ -207,6 +207,13 @@ function translateRole(key) {
 function modelsForRow(row) {
   const isEmbeddingStage = row?.stage_key === 'embedding' || row?.agent_role === 'embedding' || row?.mission_key === 'evidence';
   return isEmbeddingStage ? embeddingModels.value : llmModels.value;
+}
+
+function modelLabel(model) {
+  if (model?.ui_name && model?.api_model_id) return `${model.ui_name} (${model.api_model_id})`
+  if (model?.ui_name) return model.ui_name
+  if (model?.api_model_id) return model.api_model_id
+  return `id:${model?.id ?? '—'}`
 }
 
 function toCsv(list) {
