@@ -399,4 +399,25 @@ export const API = {
     const qs = enabledOnly ? '' : '?enabled_only=false';
     return request(`/admin/ai/routing-rules-by-stage/${encodeURIComponent(stageKey)}${qs}`);
   },
+
+  // ── Routing Tariffs ────────────────────────────────────────────────────
+  adminGetRoutingProfiles() {
+    return request('/admin/ai/routing-profiles');
+  },
+
+  adminUpdateRoutingProfileRule(code, stageName, payload) {
+    return request(`/admin/ai/routing-profiles/${encodeURIComponent(code)}/rules/${encodeURIComponent(stageName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  adminResolveRoutingProfile(payload) {
+    return request('/admin/ai/router/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
 };

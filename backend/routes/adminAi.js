@@ -823,5 +823,60 @@ router.get(
         }
     },
 );
+// ─── Routing Tariffs ────────────────────────────────────────────────────────
+const aiRoutingTariffsRepo = require('../db/repositories/aiRoutingTariffsRepo');
+const routingService = require('../services/generation/routingService');
+
+router.get(
+    '/routing-profiles',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const profiles = await aiRoutingTariffsRepo.getAllProfiles();
+            for (let p of profiles) {
+                p.rules = (await aiRoutingTariffsRepo.getProfileWithRules(p.code))?.rules || [];
+            }
+            res.json({ ok: true, profiles });
+        } catch (e) {
+            next(e);
+        }
+    }
+);
+
+router.put(
+    '/routing-profiles/:code/rules/:stage_name',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const code = req.params.code;
+            const stage = req.params.stage_name;
+            const body = req.body || {};
+            const rule = await aiRoutingTariffsRepo.updateStageRule(code, stage, body);
+            res.json({ ok: true, rule });
+        } catch (e) {
+            next(e);
+        }
+    }
+);
+
+router.post(
+    '/router/resolve',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const profile = req.body.profile;
+            const stage = req.body.stage;
+            const estimatedTokens = req.body.context_size_estimated || 0;
+            
+            const resolution = await routingService.resolveRoute(profile, stage, { estimatedTokens });
+            res.json({ ok: true, resolution });
+        } catch (e) {
+            res.status(400).json({ ok: false, error: e.message });
+        }
+    }
+);
 
 module.exports = router;

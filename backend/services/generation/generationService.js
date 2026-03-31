@@ -6,6 +6,7 @@ const { parseGeminiApiError, sleepForGeminiRetry } = require('../geminiError');
 const { validateQuestions, extractJSON } = require('../validator');
 const { getBatchSystemPrompt, GROUNDING_SYSTEM } = require('../llm/prompts');
 const { resolveChunkEvidence } = require('../rag/evidenceBuilder');
+const routingService = require('./routingService');
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -66,10 +67,30 @@ function normalizeQuestion(q, chunkIds = []) {
     return normalized;
 }
 
-async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retries = null, model = null, lang = 'auto') {
+async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retries = null, model = null, lang = 'auto', routeOpts = null) {
     retries = retries || config.LLM_MAX_RETRIES;
-    const llmModel = model || config.LLM_MODEL;
+    let llmModel = model || config.LLM_MODEL;
     let lastError;
+
+    if (routeOpts && routeOpts.profile && routeOpts.stage) {
+        try {
+            // Оцениваем размер в токенах приблизительно (1 символ ~ 0.3 токена)
+            const estChars = JSON.stringify(intents).length + evidenceList.reduce((acc, text) => acc + text.length, 0);
+            const estimatedTokens = Math.ceil(estChars * 0.3);
+            
+            const route = await routingService.resolveRoute(routeOpts.profile, routeOpts.stage, { estimatedTokens });
+            if (route.skipStage) {
+                console.log(`[GENERATOR] Stage ${routeOpts.stage} skipped by Tariff Routing.`);
+                return { results: [], stats: { llmSkipped: intents.length, validationFailed: 0 } };
+            }
+            llmModel = route.resolved_model;
+            console.log(`[GENERATOR] Router resolved ${llmModel} for stage ${routeOpts.stage}`);
+        } catch (e) {
+            console.error(`[GENERATOR] Routing error: ${e.message}`);
+            // Если FAIL_FAST, кидаем ошибку сразу
+            throw e;
+        }
+    }
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
@@ -120,7 +141,7 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
             lastError = error;
             if (error.type === 'QUOTA_EXCEEDED') {
                 console.warn(`[GENERATOR] Batch: лимит free tier — ${error.message}`);
-                break;
+                break; // Не пробуем дальше тот же самый модель. fallback отдает router заранее!
             }
             const g = parseGeminiApiError(error);
             if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, error);
@@ -134,9 +155,21 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
     return { results: [], stats: { llmSkipped: 0, validationFailed: 0 } };
 }
 
-async function checkGroundingBatched(questions, evidences, model = null) {
+async function checkGroundingBatched(questions, evidences, model = null, routeOpts = null) {
     if (questions.length === 0) return [];
-    const llmModel = model || config.LLM_MODEL;
+    let llmModel = model || config.LLM_MODEL;
+
+    if (routeOpts && routeOpts.profile) {
+        try {
+            const route = await routingService.resolveRoute(routeOpts.profile, 'grounding_validation');
+            if (route.skipStage) return new Array(questions.length).fill(true); // if skipped, assume grounded? or false?
+            llmModel = route.resolved_model;
+        } catch (e) {
+            console.error(`[GENERATOR] Grounding router error: ${e.message}`);
+            return new Array(questions.length).fill(true); // fallback to true to not block pipeline on fail fast
+        }
+    }
+
     try {
         const payload = questions.map((q, i) => {
             const correctOption = Array.isArray(q.options) && q.correctIndex != null

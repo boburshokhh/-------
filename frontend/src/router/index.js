@@ -17,6 +17,7 @@ import AdminUsageView from '@/views/AdminUsageView.vue'
 import AdminPoliciesView from '@/views/AdminPoliciesView.vue'
 import AdminDebugDecisionsView from '@/views/AdminDebugDecisionsView.vue'
 import RolesStagesView from '@/views/RolesStagesView.vue'
+import AdminTariffsView from '@/views/AdminTariffsView.vue'
 
 const routes = [
   { path: '/', redirect: '/biblioteka' },
@@ -33,6 +34,7 @@ const routes = [
   { path: '/admin/ai/models', component: AdminModelsView, meta: { adminOnly: true } },
   { path: '/admin/ai/routing', component: AdminRoutingView, meta: { adminOnly: true } },
   { path: '/admin/ai/roles-stages', component: RolesStagesView, meta: { adminOnly: true } },
+  { path: '/admin/ai/tariffs', component: AdminTariffsView, meta: { adminOnly: true } },
   { path: '/admin/ai/usage', component: AdminUsageView, meta: { adminOnly: true } },
   { path: '/admin/ai/policies', component: AdminPoliciesView, meta: { adminOnly: true } },
   { path: '/admin/ai/debug', component: AdminDebugDecisionsView, meta: { adminOnly: true } },
