@@ -148,7 +148,7 @@ PDF-файлы хранятся в object storage (MinIO) или на локал
 *   **`gemini_usage`**: дневной учёт запросов к LLM.
 
 ### Pipeline таблицы (observability)
-*   **`generation_runs`**: каждый запуск генерации. `document_id`, `status`, `model`, `target_min/max/count`, `budget_metrics` (JSONB), `final_metrics` (JSONB), `duration_ms`.
+*   **`generation_runs`**: каждый запуск генерации. `document_id`, `status`, `model`, `target_min/max/count`, `budget_metrics` (JSONB), `final_metrics` (JSONB), `duration_ms`, `requested_mode_code`, `mode_profile_id`, `mode_profile_version`.
 *   **`intents`**: план вопросов. `run_id`, `theme`, `section`, `intent_text`, `difficulty`, `status`, `skip_reason`, `evidence_score`.
 *   **`questions`**: нормализованные вопросы. `run_id`, `question`, `options` (JSONB), `correct_index`, `difficulty`, `explanation`, `hint`, `grounded`.
 *   **`question_sources`**: связь вопрос↔чанк. `question_id`, `chunk_id`, `quote`.
@@ -168,6 +168,8 @@ PDF-файлы хранятся в object storage (MinIO) или на локал
 
 Это позволяет показывать в UI три уровня:
 `configured model` -> `effective model` -> `actual executed`.
+
+Важно по pipeline: стадии blueprint (`theme_extraction` и `blueprint_generation`) используют модель, переданную роутером/кастомным режимом, и только при отсутствии входной модели откатываются к `LLM_FAST_MODEL/LLM_MODEL`.
 
 ## Архитектурные риски и текущие проблемы (решаются в рамках рефакторинга)
 

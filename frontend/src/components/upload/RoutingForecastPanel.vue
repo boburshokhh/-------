@@ -32,6 +32,16 @@
         <strong>{{ snapshot.base_config_routing_mode }}</strong>
         — при Auto используется как основа.
       </p>
+      <p
+        v-if="snapshot?.custom_mode"
+        class="mt-2 rounded-lg border border-[#3755C3]/20 bg-[#F0F7FF] px-3 py-2 text-xs text-[#2A3439]"
+      >
+        Кастомный профиль:
+        <strong>{{ snapshot.custom_mode.name || snapshot.custom_mode.code }}</strong>
+        (код: {{ snapshot.custom_mode.code }}).
+        `effective_mode` здесь показывает базовый режим
+        <strong>{{ snapshot.effective_mode }}</strong>, а фактический выбор моделей идёт по стадиям в блоке «Какие модели ожидаются».
+      </p>
 
       <p
         v-if="!hasFile"
@@ -191,6 +201,9 @@ const constraintItems = computed(() => {
   const s = props.snapshot;
   if (!s) return [];
   const out = [];
+  const stagePreviewEntries = s.stage_preview && typeof s.stage_preview === 'object'
+    ? Object.entries(s.stage_preview).filter(([k]) => k !== '_error')
+    : [];
 
   if (s.downgrade_active) {
     out.push({
@@ -247,6 +260,19 @@ const constraintItems = computed(() => {
       hint: null,
       tone: 'bg-amber-50/80 text-amber-900',
     });
+  }
+  if (s.custom_mode) {
+    const previewBlockedStages = stagePreviewEntries
+      .filter(([, info]) => !!info?.preview_blocked)
+      .map(([stageKey]) => getStageLabelRu(stageKey));
+    if (previewBlockedStages.length) {
+      out.push({
+        title: 'Кастомный режим: preview ограничен',
+        detail: `Preview-кандидаты отфильтрованы на стадиях: ${previewBlockedStages.join(', ')}.`,
+        hint: 'Проверьте флаги stable_only/allow_preview в профиле режима.',
+        tone: 'bg-amber-50/80 text-amber-900',
+      });
+    }
   }
   return out;
 });

@@ -29,6 +29,11 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function resolveBlueprintModelTarget(model) {
+    const requested = typeof model === 'string' ? model.trim() : '';
+    return requested || config.LLM_FAST_MODEL || config.LLM_MODEL;
+}
+
 async function getAiClient() {
     return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
 }
@@ -233,7 +238,7 @@ function buildBlueprintFallbackLocal(richThemes, perTheme) {
 async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, targetCount = null, options = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const targetFastModel = config.LLM_FAST_MODEL || config.LLM_MODEL;
+    const targetFastModel = resolveBlueprintModelTarget(model);
     const llmModel = await quotaGuard.getAvailableModel(targetFastModel);
 
     const structuralEstimate = estimateThemeCount(indexedChunks, fullText);
@@ -318,7 +323,7 @@ ${digest}
 async function extractThemes(indexedChunks, fullText, model = null, targetCount = null, options = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const targetFastModel = config.LLM_FAST_MODEL || config.LLM_MODEL;
+    const targetFastModel = resolveBlueprintModelTarget(model);
     const llmModel = await quotaGuard.getAvailableModel(targetFastModel);
 
     const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
@@ -430,7 +435,7 @@ ${digest}
 async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null, options = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const targetFastModel = config.LLM_FAST_MODEL || config.LLM_MODEL;
+    const targetFastModel = resolveBlueprintModelTarget(model);
     const llmModel = await quotaGuard.getAvailableModel(targetFastModel);
     
     const richThemes = themes.map(t => typeof t === 'string'

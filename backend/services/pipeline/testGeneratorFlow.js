@@ -799,10 +799,14 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     // ── 5. Create generation_run ─────────────────────────────────────────────
     let runId = null;
     try {
+        const customProfile = customModeResolved?.profile || null;
         const runRow = await runRepo.insertRun({
             document_id: documentId, status: 'running', model,
             target_min: targetMin, target_max: targetMax, target_count: targetCount,
             language: detectedLang, budget_metrics: budgetPlan.metrics,
+            requested_mode_code: routingMode || null,
+            mode_profile_id: customProfile?.id || null,
+            mode_profile_version: customProfile?.config_version || null,
         });
         runId = runRow.id;
     } catch (e) {

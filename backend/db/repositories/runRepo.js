@@ -4,8 +4,8 @@ async function insertRun(data) {
     const { rows } = await pg.query(`
         INSERT INTO generation_runs (
             document_id, status, model, target_min, target_max, target_count,
-            language, budget_metrics
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            language, budget_metrics, requested_mode_code, mode_profile_id, mode_profile_version
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         RETURNING id
     `, [
         data.document_id,
@@ -16,6 +16,9 @@ async function insertRun(data) {
         data.target_count || null,
         data.language || null,
         data.budget_metrics ? JSON.stringify(data.budget_metrics) : null,
+        data.requested_mode_code || null,
+        data.mode_profile_id || null,
+        data.mode_profile_version || null,
     ]);
     return rows[0];
 }

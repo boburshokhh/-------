@@ -439,7 +439,12 @@ Body:
 `validate` и `dry-run` возвращают explainability-поля:
 `configured_primary`, `effective_primary`, `blocked_by[]`, `rejected_candidates[]`, `premium_blocked`, `preview_blocked`, `was_fallback`, `fallback_reason`.
 
-`test-run` создаёт запуск в `generation_runs` с привязкой к mode profile (`mode_profile_id`, `mode_profile_version`) и сохраняет dry-run snapshot в события run.
+`test-run` создаёт запуск в `generation_runs` с привязкой к mode profile (`mode_profile_id`, `mode_profile_version`, `requested_mode_code`) и сохраняет dry-run snapshot в события run.
+
+Обычная генерация через `POST /api/upload` также сохраняет в `generation_runs`:
+- `requested_mode_code` — исходный режим из запроса (`routingMode`);
+- `mode_profile_id` / `mode_profile_version` — если был применён кастомный профиль;
+- `null` в этих полях для системных режимов без custom profile.
 
 #### 11f. Runs / Export / Import
 - **GET** `/api/admin/ai/modes/:id/runs`

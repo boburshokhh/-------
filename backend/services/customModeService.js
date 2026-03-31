@@ -220,6 +220,20 @@ async function buildEffectivePreview({ profile, assignments, requestedContext = 
                 message: `Primary model ${configuredPrimary.api_model_id || configuredPrimary.id} является preview`,
             });
         }
+        const configuredPreviewModels = [configuredPrimary, ...configuredFallbacks].filter((m) => isPreviewModel(m));
+        if (configuredPreviewModels.length > 0 && (localStableOnly || !localAllowPreview)) {
+            const blockedReason = localStableOnly
+                ? 'в профиле включён stable_only'
+                : 'для этапа запрещён preview';
+            const modelList = configuredPreviewModels
+                .map((m) => m.api_model_id || `id=${m.id}`)
+                .join(', ');
+            warnings.push({
+                stage_key: assignment.stage_key,
+                type: 'preview_blocked_by_profile',
+                message: `Preview-кандидаты (${modelList}) будут отфильтрованы: ${blockedReason}`,
+            });
+        }
         if (configuredPrimary && !configuredPrimary.api_model_id) {
             warnings.push({
                 stage_key: assignment.stage_key,
