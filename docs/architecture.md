@@ -155,6 +155,20 @@ PDF-файлы хранятся в object storage (MinIO) или на локал
 *   **`pipeline_run_events`**: лог событий pipeline. `run_id`, `phase`, `event`, `level`, `reason_code`, `metrics` (JSONB), `metadata` (JSONB).
 *   **`document_sections`**: секции документа (опционально).
 
+### AI Admin: Custom Mode Profiles
+Добавлен отдельный слой управления режимами ИИ (не alias `manual override`):
+
+* **`custom_mode_profiles`**: карточка режима (`code`, `name`, `parent_mode`, `status`, global flags `allow_premium/allow_preview/stable_only/emergency_fallback`, budget limits, `config_version`).
+* **`custom_mode_stage_assignments`**: назначение модели и fallback по `mission/stage/role` (`primary_model_id`, `fallback_model_ids[]`, `override_strength`, локальные allow flags).
+* **`custom_mode_profile_versions`**: immutable snapshot конфигурации по версии.
+
+Интеграция с observability:
+* в **`generation_runs`** добавлены `mode_profile_id`, `mode_profile_version`, `requested_mode_code`;
+* в **`ai_routing_decisions`** добавлены `mode_profile_id`, `mode_profile_version`, `configured_source`, `effective_source`.
+
+Это позволяет показывать в UI три уровня:
+`configured model` -> `effective model` -> `actual executed`.
+
 ## Архитектурные риски и текущие проблемы (решаются в рамках рефакторинга)
 
 1.  **Рассинхрон LLM-провайдеров**: До рефакторинга конфигурация (`.env` и `config.js`) была настроена на `GEMINI_API_KEY`, тогда как `generator.js` использовал `openai` SDK. Это вызывало неработоспособность основного флоу. В рамках текущего плана система переводится на `@google/genai` как на единственный источник правды.

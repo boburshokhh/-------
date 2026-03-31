@@ -14,6 +14,9 @@ const aiModelHealthRepo = require('../db/repositories/aiModelHealthRepo');
 const routingMatrixService = require('../services/routingMatrixService');
 const runRepo = require('../db/repositories/runRepo');
 const aiUsageAnalyticsService = require('../services/aiUsageAnalyticsService');
+const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
+const customModeService = require('../services/customModeService');
+const pgPool = require('../db/pgPool');
 
 const router = express.Router();
 
@@ -1111,6 +1114,546 @@ router.get(
             next(e);
         }
     }
+);
+
+// ─── AI Mode Profiles (Custom Modes) ────────────────────────────────────────
+
+function parseModeAssignments(rawItems) {
+    if (!Array.isArray(rawItems)) return [];
+    return rawItems.map((item) => ({
+        mission_key: item?.mission_key || null,
+        stage_key: item?.stage_key || null,
+        agent_role: item?.agent_role || null,
+        primary_model_id: item?.primary_model_id != null ? Number(item.primary_model_id) : null,
+        fallback_model_ids: Array.isArray(item?.fallback_model_ids)
+            ? item.fallback_model_ids.map((id) => Number(id)).filter((n) => Number.isFinite(n) && n > 0)
+            : [],
+        allow_premium: item?.allow_premium,
+        allow_preview: item?.allow_preview,
+        stable_only: item?.stable_only,
+        preferred_cost_tier: item?.preferred_cost_tier || null,
+        preferred_provider: item?.preferred_provider || null,
+        override_strength: item?.override_strength || 'soft',
+        enabled: item?.enabled !== false,
+        notes: item?.notes || null,
+    }));
+}
+
+async function validateModelsExist(assignments) {
+    for (const a of assignments) {
+        if (a.primary_model_id != null) {
+            const model = await aiModelsRepo.getModelById(a.primary_model_id);
+            if (!model) {
+                const err = new Error(`primary_model_id не найден: ${a.primary_model_id}`);
+                err.status = 400;
+                throw err;
+            }
+        }
+        for (const mid of a.fallback_model_ids || []) {
+            const model = await aiModelsRepo.getModelById(mid);
+            if (!model) {
+                const err = new Error(`fallback_model_id не найден: ${mid}`);
+                err.status = 400;
+                throw err;
+            }
+        }
+    }
+}
+
+router.get(
+    '/modes',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const data = await customModeProfilesRepo.listProfiles({
+                status: req.query.status || null,
+                includeArchived: req.query.include_archived === 'true',
+                includeDisabled: req.query.include_disabled !== 'false',
+                search: req.query.search || null,
+                limit: optionalPositiveInt(req.query.limit, 100),
+                offset: optionalNonNegativeInt(req.query.offset, 0),
+            });
+            res.json({ ok: true, ...data });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const body = req.body || {};
+            const assignments = parseModeAssignments(body.assignments);
+            const errors = customModeService.validateProfilePayload({
+                ...body,
+                assignments,
+            });
+            if (errors.length) {
+                return res.status(400).json({ ok: false, errors });
+            }
+            await validateModelsExist(assignments);
+
+            const profile = await customModeProfilesRepo.createProfile({
+                code: String(body.code).trim(),
+                name: String(body.name).trim(),
+                description: body.description || null,
+                parent_mode: body.parent_mode || 'quality',
+                is_system: false,
+                is_active: false,
+                is_archived: false,
+                is_disabled: false,
+                status: body.status || 'draft',
+                default_routing_behavior: body.default_routing_behavior || 'stage_based',
+                allow_premium: body.allow_premium === true,
+                allow_preview: body.allow_preview === true,
+                stable_only: body.stable_only !== false,
+                emergency_fallback: body.emergency_fallback !== false,
+                max_premium_budget_for_run: body.max_premium_budget_for_run ?? null,
+                max_premium_share_per_day: body.max_premium_share_per_day ?? null,
+                created_by: req.user?.id || null,
+                updated_by: req.user?.id || null,
+            }, assignments);
+
+            await appendAudit(req, {
+                action: 'mode_profile_created',
+                entityType: 'custom_mode_profile',
+                entityId: profile.id,
+                afterState: profile,
+            });
+
+            res.json({ ok: true, mode: profile });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.get(
+    '/modes/:id',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const mode = await customModeProfilesRepo.getProfileWithAssignmentsById(id);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            res.json({ ok: true, mode });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.put(
+    '/modes/:id',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const existing = await customModeProfilesRepo.getProfileWithAssignmentsById(id);
+            if (!existing) return res.status(404).json({ error: 'Mode not found' });
+            if (existing.is_system) return res.status(400).json({ error: 'Системный режим нельзя изменять' });
+
+            const body = req.body || {};
+            const assignments = Array.isArray(body.assignments)
+                ? parseModeAssignments(body.assignments)
+                : null;
+            const errors = customModeService.validateProfilePayload({
+                ...existing,
+                ...body,
+                assignments: assignments || existing.assignments || [],
+            });
+            if (errors.length) {
+                return res.status(400).json({ ok: false, errors });
+            }
+            if (assignments) {
+                await validateModelsExist(assignments);
+            }
+
+            const mode = await customModeProfilesRepo.updateProfile(
+                id,
+                {
+                    code: body.code,
+                    name: body.name,
+                    description: body.description,
+                    parent_mode: body.parent_mode,
+                    status: body.status,
+                    is_archived: body.is_archived,
+                    is_disabled: body.is_disabled,
+                    is_active: body.is_active,
+                    default_routing_behavior: body.default_routing_behavior,
+                    allow_premium: body.allow_premium,
+                    allow_preview: body.allow_preview,
+                    stable_only: body.stable_only,
+                    emergency_fallback: body.emergency_fallback,
+                    max_premium_budget_for_run: body.max_premium_budget_for_run,
+                    max_premium_share_per_day: body.max_premium_share_per_day,
+                    updated_by: req.user?.id || null,
+                },
+                assignments,
+            );
+
+            await appendAudit(req, {
+                action: 'mode_profile_updated',
+                entityType: 'custom_mode_profile',
+                entityId: id,
+                beforeState: existing,
+                afterState: mode,
+            });
+            res.json({ ok: true, mode });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes/:id/disabled',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const disabled = req.body?.disabled !== false;
+            const mode = await customModeProfilesRepo.setDisabled(id, disabled, req.user?.id || null);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            await appendAudit(req, {
+                action: 'mode_profile_disabled_toggle',
+                entityType: 'custom_mode_profile',
+                entityId: id,
+                afterState: mode,
+            });
+            res.json({ ok: true, mode });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes/:id/clone',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const source = await customModeProfilesRepo.getProfileWithAssignmentsById(id);
+            if (!source) return res.status(404).json({ error: 'Mode not found' });
+
+            const code = String(req.body?.code || `${source.code}_copy_${Date.now()}`).trim();
+            const name = String(req.body?.name || `${source.name} (Copy)`).trim();
+            const created = await customModeProfilesRepo.createProfile(
+                {
+                    code,
+                    name,
+                    description: source.description,
+                    parent_mode: source.code,
+                    status: 'draft',
+                    default_routing_behavior: source.default_routing_behavior,
+                    allow_premium: source.allow_premium,
+                    allow_preview: source.allow_preview,
+                    stable_only: source.stable_only,
+                    emergency_fallback: source.emergency_fallback,
+                    max_premium_budget_for_run: source.max_premium_budget_for_run,
+                    max_premium_share_per_day: source.max_premium_share_per_day,
+                    created_by: req.user?.id || null,
+                    updated_by: req.user?.id || null,
+                },
+                (source.assignments || []).map((a) => ({
+                    ...a,
+                    id: undefined,
+                })),
+            );
+
+            await appendAudit(req, {
+                action: 'mode_profile_cloned',
+                entityType: 'custom_mode_profile',
+                entityId: created.id,
+                afterState: { source_id: source.id, mode: created },
+            });
+            res.json({ ok: true, mode: created });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes/:id/archive',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const mode = await customModeProfilesRepo.archiveProfile(id, req.body?.archived !== false, req.user?.id || null);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            await appendAudit(req, {
+                action: 'mode_profile_archived',
+                entityType: 'custom_mode_profile',
+                entityId: id,
+                afterState: mode,
+            });
+            res.json({ ok: true, mode });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes/:id/validate',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const mode = await customModeProfilesRepo.getProfileWithAssignmentsById(id);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            const validation = await customModeService.buildEffectivePreview({
+                profile: mode,
+                assignments: mode.assignments || [],
+                requestedContext: req.body || {},
+            });
+            res.json({ ok: true, mode_id: id, ...validation });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes/:id/dry-run',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const mode = await customModeProfilesRepo.getProfileWithAssignmentsById(id);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            const preview = await customModeService.buildEffectivePreview({
+                profile: mode,
+                assignments: mode.assignments || [],
+                requestedContext: req.body || {},
+            });
+            const routingPlan = preview.rows.map((r) => ({
+                stage_key: r.stage_key,
+                configured_primary: r.configured_primary,
+                effective_primary: r.effective_primary,
+                was_fallback: r.was_fallback,
+                blocked_by: r.blocked_by,
+                rejected_candidates: r.rejected_candidates,
+            }));
+            res.json({
+                ok: true,
+                mode_id: id,
+                document_id: req.body?.document_id || null,
+                sample_pdf_id: req.body?.sample_pdf_id || null,
+                routing_plan: routingPlan,
+                blocked_summary: {
+                    premium_blocked_stages: preview.rows.filter((r) => r.premium_blocked).map((r) => r.stage_key),
+                    preview_blocked_stages: preview.rows.filter((r) => r.preview_blocked).map((r) => r.stage_key),
+                },
+                rejected_candidates: preview.rows.flatMap((r) => r.rejected_candidates || []),
+                expected_routing_plan: routingPlan,
+                generated_at: preview.generated_at,
+            });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes/:id/test-run',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const mode = await customModeProfilesRepo.getProfileWithAssignmentsById(id);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            const documentId = parsePositiveInt(req.body?.document_id, 'document_id');
+            const targetCount = Number(req.body?.target_count || 10);
+            const language = req.body?.language || 'ru';
+            const dryRun = await customModeService.buildEffectivePreview({
+                profile: mode,
+                assignments: mode.assignments || [],
+                requestedContext: req.body || {},
+            });
+
+            const run = await runRepo.insertRun({
+                document_id: documentId,
+                status: 'pending',
+                model: `mode:${mode.code}`,
+                target_count: targetCount,
+                language,
+                budget_metrics: {
+                    mode_profile_id: mode.id,
+                    mode_code: mode.code,
+                    type: 'mode_test_run',
+                },
+            });
+            await pgPool.query(
+                `
+                UPDATE generation_runs
+                SET mode_profile_id = $2, mode_profile_version = $3, requested_mode_code = $4
+                WHERE id = $1
+                `,
+                [run.id, mode.id, mode.config_version || 1, mode.code],
+            );
+            await runRepo.insertPipelineEvent({
+                run_id: run.id,
+                document_id: documentId,
+                phase: 'mode_test',
+                event: 'mode_dry_run_snapshot_saved',
+                level: 'info',
+                metadata: {
+                    mode_id: mode.id,
+                    mode_code: mode.code,
+                    dry_run_rows: dryRun.rows?.length || 0,
+                },
+            });
+            await runRepo.updateRunFinished(run.id, {
+                status: 'completed',
+                final_metrics: {
+                    mode_id: mode.id,
+                    mode_code: mode.code,
+                    dry_run_generated: true,
+                },
+                fallback_decisions: dryRun.rows
+                    .filter((r) => r.was_fallback)
+                    .map((r) => ({ stage_key: r.stage_key, reason: r.fallback_reason })),
+                duration_ms: 0,
+                error_message: null,
+            });
+
+            res.json({
+                ok: true,
+                run_id: run.id,
+                status: 'completed',
+                mode_id: mode.id,
+                routing_plan_snapshot: dryRun.rows,
+            });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.get(
+    '/modes/:id/runs',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const mode = await customModeProfilesRepo.getProfileById(id);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            const data = await customModeProfilesRepo.listRunsForMode(id, {
+                status: req.query.status || null,
+                limit: optionalPositiveInt(req.query.limit, 50),
+                offset: optionalNonNegativeInt(req.query.offset, 0),
+            });
+            res.json({ ok: true, mode, ...data });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.get(
+    '/modes/:id/export',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const mode = await customModeProfilesRepo.getProfileWithAssignmentsById(id);
+            if (!mode) return res.status(404).json({ error: 'Mode not found' });
+            res.json({
+                ok: true,
+                schema_version: 'ai_mode_profile.v1',
+                exported_at: new Date().toISOString(),
+                mode: {
+                    profile: {
+                        id: mode.id,
+                        code: mode.code,
+                        name: mode.name,
+                        description: mode.description,
+                        parent_mode: mode.parent_mode,
+                        status: mode.status,
+                        default_routing_behavior: mode.default_routing_behavior,
+                        allow_premium: mode.allow_premium,
+                        allow_preview: mode.allow_preview,
+                        stable_only: mode.stable_only,
+                        emergency_fallback: mode.emergency_fallback,
+                        max_premium_budget_for_run: mode.max_premium_budget_for_run,
+                        max_premium_share_per_day: mode.max_premium_share_per_day,
+                        config_version: mode.config_version,
+                    },
+                    assignments: mode.assignments || [],
+                },
+            });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/modes/import',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const body = req.body || {};
+            const profile = body?.mode?.profile || body?.profile || {};
+            const assignments = parseModeAssignments(body?.mode?.assignments || body?.assignments || []);
+            const errors = customModeService.validateProfilePayload({
+                ...profile,
+                assignments,
+            });
+            if (errors.length) return res.status(400).json({ ok: false, errors });
+            await validateModelsExist(assignments);
+
+            const code = String(profile.code || `imported_${Date.now()}`).trim();
+            const name = String(profile.name || `Imported ${code}`).trim();
+            const created = await customModeProfilesRepo.createProfile(
+                {
+                    code,
+                    name,
+                    description: profile.description || null,
+                    parent_mode: profile.parent_mode || 'quality',
+                    status: profile.status || 'draft',
+                    default_routing_behavior: profile.default_routing_behavior || 'stage_based',
+                    allow_premium: profile.allow_premium === true,
+                    allow_preview: profile.allow_preview === true,
+                    stable_only: profile.stable_only !== false,
+                    emergency_fallback: profile.emergency_fallback !== false,
+                    max_premium_budget_for_run: profile.max_premium_budget_for_run ?? null,
+                    max_premium_share_per_day: profile.max_premium_share_per_day ?? null,
+                    created_by: req.user?.id || null,
+                    updated_by: req.user?.id || null,
+                },
+                assignments,
+            );
+            await appendAudit(req, {
+                action: 'mode_profile_imported',
+                entityType: 'custom_mode_profile',
+                entityId: created.id,
+                afterState: created,
+            });
+            res.json({ ok: true, mode: created });
+        } catch (e) {
+            next(e);
+        }
+    },
 );
 
 module.exports = router;

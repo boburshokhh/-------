@@ -38,6 +38,7 @@ const tabs = [
   { to: '/admin/ai/models', label: 'Модели' },
   { to: '/admin/ai/roles-stages', label: 'Роли и этапы' },
   { to: '/admin/ai/routing', label: 'Маршрутизация' },
+  { to: '/admin/ai/modes', label: 'Режимы ИИ' },
   { to: '/admin/ai/tariffs', label: 'Тарифы и Пакеты' },
   { to: '/admin/ai/runs', label: 'Запуски' },
   { to: '/admin/ai/usage', label: 'Статистика' },

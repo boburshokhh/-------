@@ -21,6 +21,10 @@ import AdminTariffsView from '@/views/AdminTariffsView.vue'
 import AdminRunsListView from '@/views/AdminRunsListView.vue'
 import AdminRunDetailsView from '@/views/AdminRunDetailsView.vue'
 import AiHomeView from '@/views/AiHomeView.vue'
+import AdminModesListView from '@/views/AdminModesListView.vue'
+import AdminModeBuilderView from '@/views/AdminModeBuilderView.vue'
+import AdminModeTestView from '@/views/AdminModeTestView.vue'
+import AdminModeRunsView from '@/views/AdminModeRunsView.vue'
 
 const routes = [
   { path: '/', redirect: '/biblioteka' },
@@ -38,6 +42,11 @@ const routes = [
   { path: '/admin/ai/models', component: AdminModelsView, meta: { adminOnly: true } },
   { path: '/admin/ai/routing', component: AdminRoutingView, meta: { adminOnly: true } },
   { path: '/admin/ai/tariffs', component: AdminTariffsView, meta: { adminOnly: true } },
+  { path: '/admin/ai/modes', component: AdminModesListView, meta: { adminOnly: true } },
+  { path: '/admin/ai/modes/new', component: AdminModeBuilderView, meta: { adminOnly: true } },
+  { path: '/admin/ai/modes/:id', component: AdminModeBuilderView, meta: { adminOnly: true } },
+  { path: '/admin/ai/modes/:id/test', component: AdminModeTestView, meta: { adminOnly: true } },
+  { path: '/admin/ai/modes/:id/runs', component: AdminModeRunsView, meta: { adminOnly: true } },
   { path: '/admin/ai/runs', component: AdminRunsListView, meta: { adminOnly: true } },
   { path: '/admin/ai/runs/:id', component: AdminRunDetailsView, meta: { adminOnly: true } },
   { path: '/admin/ai/usage', component: AdminUsageView, meta: { adminOnly: true } },

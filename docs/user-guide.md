@@ -107,3 +107,30 @@
    - **`/admin/ai/usage`** и **`/admin/ai/home`** — эффект на расход/блокировки.
 
 Если `Effective now` и фактические решения совпадают, настройка сделана корректно.
+
+## 6. Новый раздел "Режимы ИИ" (admin)
+
+Для сложных сценариев используйте отдельный слой профилей режима:
+`/admin/ai/modes`.
+
+### Быстрый workflow
+1. Откройте **`/admin/ai/modes`** и нажмите **"Клонировать"** у `quality` или другого профиля.
+2. Перейдите в **конструктор режима** (`/admin/ai/modes/:id`) и настройте:
+   - global flags (`allowPremium`, `allowPreview`, `stableOnly`, `emergencyFallback`);
+   - назначения по `mission/stage/role`;
+   - `primary_model_id` и `fallback_model_ids`.
+3. Нажмите **Validate** — появится блок **Configured vs Effective Preview**:
+   - что настроено;
+   - что реально сработает;
+   - где сработали блокировки (`health`, `premium_guard`, `preview_guard`, `emergency_downgrade`).
+4. На странице **`/admin/ai/modes/:id/test`** выполните dry-run и test-run по `document_id`.
+5. На странице **`/admin/ai/modes/:id/runs`** смотрите историю запусков выбранного режима.
+
+### Импорт/экспорт
+- Экспорт: кнопка **"Экспорт"** в списке режимов (`mode-<id>.json`).
+- Импорт: кнопка **"Импорт JSON"** и вставка JSON-конфига.
+
+### Важно
+- Системные режимы (`is_system=true`) нельзя редактировать.
+- Custom mode не заменяет manual override, а работает как отдельный конфиг-профиль.
+- Даже при ручном выборе модели effective-план может измениться из-за guard-ограничений.

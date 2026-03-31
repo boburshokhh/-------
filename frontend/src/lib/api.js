@@ -1,4 +1,5 @@
 import { getToken } from '@/lib/authSession';
+import { clearSession } from '@/lib/authSession';
 
 function normalizeApiBase(raw) {
   const base = String(raw || '/api').trim();
@@ -45,6 +46,10 @@ function mapHttpError(status, payload) {
   return fallback;
 }
 
+function hasAuthorizationHeader(headers) {
+  return Object.keys(headers || {}).some((k) => String(k).toLowerCase() === 'authorization');
+}
+
 async function request(path, options = {}) {
   const { timeoutMs = 0, ...fetchOpts } = options;
   const ctrl = new AbortController();
@@ -54,7 +59,7 @@ async function request(path, options = {}) {
   }
   const token = getToken();
   const headers = { ...(fetchOpts.headers || {}) };
-  if (token && !headers.Authorization) {
+  if (token && !hasAuthorizationHeader(headers)) {
     headers.Authorization = `Bearer ${token}`;
   }
   let response;
@@ -72,6 +77,12 @@ async function request(path, options = {}) {
   }
   const payload = await parseJson(response);
   if (!response.ok) {
+    if (response.status === 401 && !String(path || '').startsWith('/auth/')) {
+      clearSession();
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+    }
     throw createError(mapHttpError(response.status, payload), response.status, payload);
   }
   return payload;
@@ -445,6 +456,105 @@ export const API = {
 
   adminResolveRoutingProfile(payload) {
     return request('/admin/ai/router/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  // ── Custom AI Modes ─────────────────────────────────────────────────────
+  adminGetModes(params = {}) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v != null && v !== '') qs.set(k, String(v));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/ai/modes${suffix}`);
+  },
+
+  adminCreateMode(payload) {
+    return request('/admin/ai/modes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  adminGetMode(id) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}`);
+  },
+
+  adminUpdateMode(id, payload) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  adminCloneMode(id, payload = {}) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/clone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  adminArchiveMode(id, archived = true) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived }),
+    });
+  },
+
+  adminDisableMode(id, disabled = true) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/disabled`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled }),
+    });
+  },
+
+  adminValidateMode(id, payload = {}) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  adminDryRunMode(id, payload = {}) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/dry-run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  adminTestRunMode(id, payload = {}) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/test-run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  adminGetModeRuns(id, params = {}) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params || {})) {
+      if (v != null && v !== '') qs.set(k, String(v));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/runs${suffix}`);
+  },
+
+  adminExportMode(id) {
+    return request(`/admin/ai/modes/${encodeURIComponent(id)}/export`);
+  },
+
+  adminImportMode(payload) {
+    return request('/admin/ai/modes/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload || {}),

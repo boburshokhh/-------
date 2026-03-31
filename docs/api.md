@@ -361,3 +361,89 @@
 - **Ошибки**:
   - `400` — `geminiApiKey` отсутствует или пустой
   - `403` — неверный/отсутствующий `X-Settings-Token`
+
+---
+
+### 11. AI Admin: Mode Profiles (custom modes)
+
+Все эндпоинты требуют `admin`-роль и работают под `/api/admin/ai`.
+
+#### 11a. Список режимов
+**GET** `/api/admin/ai/modes`
+
+Query: `status`, `search`, `include_archived`, `include_disabled`, `limit`, `offset`.
+
+**Ответ (200 OK)**:
+```json
+{
+  "ok": true,
+  "items": [
+    {
+      "id": 17,
+      "code": "quality_plus_ru",
+      "name": "Quality Plus RU",
+      "status": "draft",
+      "is_system": false,
+      "parent_mode": "quality",
+      "config_version": 3
+    }
+  ],
+  "total": 1
+}
+```
+
+#### 11b. Создание режима
+**POST** `/api/admin/ai/modes`
+
+Body:
+```json
+{
+  "code": "quality_plus_ru",
+  "name": "Quality Plus RU",
+  "description": "Кастомный режим",
+  "parent_mode": "quality",
+  "allow_premium": true,
+  "allow_preview": false,
+  "stable_only": true,
+  "emergency_fallback": true,
+  "assignments": [
+    {
+      "mission_key": "generation",
+      "stage_key": "question_generation",
+      "agent_role": "generator_agent",
+      "primary_model_id": 31,
+      "fallback_model_ids": [22, 18],
+      "override_strength": "hard",
+      "enabled": true
+    }
+  ]
+}
+```
+
+#### 11c. Получение/обновление режима
+- **GET** `/api/admin/ai/modes/:id`
+- **PUT** `/api/admin/ai/modes/:id`
+
+`PUT` принимает те же поля, что `POST`. Системные режимы (`is_system=true`) редактировать нельзя.
+
+#### 11d. Clone / Archive / Disable
+- **POST** `/api/admin/ai/modes/:id/clone`
+- **POST** `/api/admin/ai/modes/:id/archive` (`{ "archived": true|false }`)
+- **POST** `/api/admin/ai/modes/:id/disabled` (`{ "disabled": true|false }`)
+
+#### 11e. Validate / Dry-run / Test-run
+- **POST** `/api/admin/ai/modes/:id/validate`
+- **POST** `/api/admin/ai/modes/:id/dry-run`
+- **POST** `/api/admin/ai/modes/:id/test-run`
+
+`validate` и `dry-run` возвращают explainability-поля:
+`configured_primary`, `effective_primary`, `blocked_by[]`, `rejected_candidates[]`, `premium_blocked`, `preview_blocked`, `was_fallback`, `fallback_reason`.
+
+`test-run` создаёт запуск в `generation_runs` с привязкой к mode profile (`mode_profile_id`, `mode_profile_version`) и сохраняет dry-run snapshot в события run.
+
+#### 11f. Runs / Export / Import
+- **GET** `/api/admin/ai/modes/:id/runs`
+- **GET** `/api/admin/ai/modes/:id/export`
+- **POST** `/api/admin/ai/modes/import`
+
+`export` возвращает `schema_version: "ai_mode_profile.v1"` и полную конфигурацию режима.
