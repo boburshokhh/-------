@@ -9,7 +9,7 @@
           </p>
         </div>
         <div class="flex gap-2">
-          <button class="btn-secondary" @click="validateMode">Validate</button>
+          <button class="btn-secondary" @click="validateMode">Проверить</button>
           <button class="btn-primary-sm" @click="saveMode">Сохранить</button>
         </div>
       </div>
@@ -19,43 +19,43 @@
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
         <div>
-          <label class="field-label">Name</label>
+          <label class="field-label">Название</label>
           <input v-model.trim="form.name" class="field w-full" />
         </div>
         <div>
-          <label class="field-label">Code</label>
+          <label class="field-label">Код</label>
           <input v-model.trim="form.code" class="field w-full" />
         </div>
         <div>
-          <label class="field-label">Parent mode</label>
+          <label class="field-label">Родительский режим</label>
           <input v-model.trim="form.parent_mode" class="field w-full" />
         </div>
         <div class="md:col-span-3">
-          <label class="field-label">Description</label>
+          <label class="field-label">Описание</label>
           <textarea v-model="form.description" class="field w-full min-h-[80px]" />
         </div>
       </div>
 
       <div class="mb-6 grid grid-cols-2 md:grid-cols-4 gap-2">
-        <label class="check"><input type="checkbox" v-model="form.allow_premium" /> allowPremium</label>
-        <label class="check"><input type="checkbox" v-model="form.allow_preview" /> allowPreview</label>
-        <label class="check"><input type="checkbox" v-model="form.stable_only" /> stableOnly</label>
-        <label class="check"><input type="checkbox" v-model="form.emergency_fallback" /> emergencyFallback</label>
+        <label class="check"><input type="checkbox" v-model="form.allow_premium" /> Разрешить premium</label>
+        <label class="check"><input type="checkbox" v-model="form.allow_preview" /> Разрешить preview</label>
+        <label class="check"><input type="checkbox" v-model="form.stable_only" /> Только стабильные</label>
+        <label class="check"><input type="checkbox" v-model="form.emergency_fallback" /> Аварийный fallback</label>
       </div>
 
       <div class="overflow-auto">
         <table class="w-full min-w-[1300px] text-sm">
           <thead>
             <tr class="border-b border-[#A9B4B9]/30 text-left text-[#566166]">
-              <th class="py-2 pr-3">Mission/Stage/Role</th>
-              <th class="py-2 pr-3">Primary</th>
-              <th class="py-2 pr-3">Fallback chain</th>
-              <th class="py-2 pr-3">Cost tier</th>
+              <th class="py-2 pr-3">Миссия / Этап / Роль</th>
+              <th class="py-2 pr-3">Основная модель</th>
+              <th class="py-2 pr-3">Цепочка fallback</th>
+              <th class="py-2 pr-3">Тариф</th>
               <th class="py-2 pr-3">Premium</th>
               <th class="py-2 pr-3">Preview</th>
-              <th class="py-2 pr-3">Stable</th>
-              <th class="py-2 pr-3">Strength</th>
-              <th class="py-2 pr-3">Enabled</th>
+              <th class="py-2 pr-3">Стабильность</th>
+              <th class="py-2 pr-3">Приоритет</th>
+              <th class="py-2 pr-3">Включено</th>
             </tr>
           </thead>
           <tbody>
@@ -66,7 +66,7 @@
               </td>
               <td class="py-2 pr-3">
                 <select v-model.number="row.primary_model_id" class="field w-full min-w-[220px]">
-                  <option :value="null">— auto —</option>
+                  <option :value="null">— авто —</option>
                   <option v-for="m in llmModels" :key="m.id" :value="m.id">
                     {{ m.api_model_id || `id:${m.id}` }}
                   </option>
@@ -77,12 +77,12 @@
                   class="field w-full min-w-[260px]"
                   :value="toCsv(row.fallback_model_ids)"
                   @change="onFallbackCsvChange($event, row)"
-                  placeholder="id,id,id"
+                  placeholder="id,id,id (например: 2,7,9)"
                 />
               </td>
               <td class="py-2 pr-3">
                 <select v-model="row.preferred_cost_tier" class="field w-28">
-                  <option value="">auto</option>
+                  <option value="">авто</option>
                   <option value="economy">economy</option>
                   <option value="standard">standard</option>
                   <option value="premium">premium</option>
@@ -105,16 +105,16 @@
     </div>
 
     <div v-if="preview" class="rounded-2xl border border-[#A9B4B9]/25 bg-white p-4 md:p-6 mt-6">
-      <h3 class="font-semibold text-[#2A3439] mb-2">Configured vs Effective Preview</h3>
-      <p class="text-xs text-[#566166] mb-2">can_publish: {{ preview.can_publish ? 'yes' : 'no' }}</p>
+      <h3 class="font-semibold text-[#2A3439] mb-2">Предпросмотр: настроено vs эффективно</h3>
+      <p class="text-xs text-[#566166] mb-2">Можно публиковать: {{ preview.can_publish ? 'да' : 'нет' }}</p>
       <div class="overflow-auto">
         <table class="w-full min-w-[1100px] text-xs">
           <thead>
             <tr class="border-b border-[#A9B4B9]/25 text-left text-[#566166]">
-              <th class="py-2 pr-2">Stage</th>
-              <th class="py-2 pr-2">Configured primary</th>
-              <th class="py-2 pr-2">Effective primary</th>
-              <th class="py-2 pr-2">Blocked</th>
+              <th class="py-2 pr-2">Этап</th>
+              <th class="py-2 pr-2">Настроенная основная</th>
+              <th class="py-2 pr-2">Эффективная основная</th>
+              <th class="py-2 pr-2">Блокировки</th>
               <th class="py-2 pr-2">Fallback</th>
             </tr>
           </thead>
@@ -234,7 +234,7 @@ async function loadData() {
       }))
     }
   } catch (e) {
-    error.value = e.message || 'Ошибка загрузки конструктора'
+    error.value = e.message || 'Ошибка загрузки страницы конструктора'
   } finally {
     loading.value = false
   }
@@ -281,9 +281,9 @@ async function validateMode() {
     }
     const res = await API.adminValidateMode(id, {})
     preview.value = res
-    successMsg.value = 'Validation выполнен'
+    successMsg.value = 'Проверка выполнена'
   } catch (e) {
-    error.value = e.message || 'Ошибка validation'
+    error.value = e.message || 'Ошибка проверки'
   }
 }
 
