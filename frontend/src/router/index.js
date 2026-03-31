@@ -20,6 +20,7 @@ import RolesStagesView from '@/views/RolesStagesView.vue'
 import AdminTariffsView from '@/views/AdminTariffsView.vue'
 import AdminRunsListView from '@/views/AdminRunsListView.vue'
 import AdminRunDetailsView from '@/views/AdminRunDetailsView.vue'
+import AiHomeView from '@/views/AiHomeView.vue'
 
 const routes = [
   { path: '/', redirect: '/biblioteka' },
@@ -32,7 +33,8 @@ const routes = [
   { path: '/itog', component: ItogView },
   { path: '/razbor', component: RazborView },
   { path: '/_hidden/runtime-settings', component: HiddenSettingsView },
-  { path: '/admin/ai', redirect: '/admin/ai/models', meta: { adminOnly: true } },
+  { path: '/admin/ai', redirect: '/admin/ai/home', meta: { adminOnly: true } },
+  { path: '/admin/ai/home', component: AiHomeView, meta: { adminOnly: true } },
   { path: '/admin/ai/models', component: AdminModelsView, meta: { adminOnly: true } },
   { path: '/admin/ai/routing', component: AdminRoutingView, meta: { adminOnly: true } },
   { path: '/admin/ai/tariffs', component: AdminTariffsView, meta: { adminOnly: true } },
