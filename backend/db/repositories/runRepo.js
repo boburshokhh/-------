@@ -120,7 +120,13 @@ async function insertPipelineEvent(data) {
 }
 
 async function getRunById(id) {
-    const { rows } = await pg.query('SELECT * FROM generation_runs WHERE id = $1', [id]);
+    const { rows } = await pg.query(`
+        SELECT
+            generation_runs.*,
+            generation_runs.started_at AS created_at
+        FROM generation_runs
+        WHERE id = $1
+    `, [id]);
     return rows[0] || null;
 }
 
@@ -138,10 +144,21 @@ async function listRuns({ status, documentId, limit = 50, offset = 0 } = {}) {
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const { rows } = await pg.query(`
-        SELECT id, document_id, status, target_count, language, created_at, finished_at, duration_ms, budget_metrics, fallback_decisions, error_message
+        SELECT
+            id,
+            document_id,
+            status,
+            target_count,
+            language,
+            started_at AS created_at,
+            finished_at,
+            duration_ms,
+            budget_metrics,
+            fallback_decisions,
+            error_message
         FROM generation_runs
         ${whereSql}
-        ORDER BY created_at DESC
+        ORDER BY started_at DESC
         LIMIT $${i++} OFFSET $${i}
     `, [...params, limit, offset]);
     
