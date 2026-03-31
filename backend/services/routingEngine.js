@@ -348,56 +348,59 @@ async function selectModel(stageRequest) {
 
     // 11. Write decision log
     const latencyMs = Date.now() - startMs;
+    const recordDecision = stageRequest.recordDecision !== false;
     let decisionId = null;
-    try {
-        decisionId = await aiRoutingDecisionsRepo.insertDecision({
-            runId, documentId, traceId, stageKey, agentRole,
-            selectedModelId, selectedApiModelId,
-            fallbackChain,
-            decisionReason: decision.reason,
-            decisionSource,
-            wasFallback, fallbackReason,
-            premiumBlocked, previewBlocked,
-            manualOverrideId,
-            costTier: decision.costTier,
-            isPreview: decision.isPreview,
-            quotaSnapshot: stageRequest.quotaSnapshot || null,
-            candidateSnapshot: rejections.length > 0 ? { rejected: rejections.slice(0, 20) } : null,
-            policySnapshot: {
+    if (recordDecision) {
+        try {
+            decisionId = await aiRoutingDecisionsRepo.insertDecision({
+                runId, documentId, traceId, stageKey, agentRole,
+                selectedModelId, selectedApiModelId,
+                fallbackChain,
+                decisionReason: decision.reason,
+                decisionSource,
+                wasFallback, fallbackReason,
+                premiumBlocked, previewBlocked,
+                manualOverrideId,
+                costTier: decision.costTier,
+                isPreview: decision.isPreview,
+                quotaSnapshot: stageRequest.quotaSnapshot || null,
+                candidateSnapshot: rejections.length > 0 ? { rejected: rejections.slice(0, 20) } : null,
+                policySnapshot: {
+                    mode: effectiveMode,
+                    stable_only: policies.stable_only,
+                    emergency: isEmergency,
+                    premium_guard: policies.premium_guard_enabled,
+                    canary_percent: policies.preview_canary_percent,
+                },
+                latencyMs,
+            });
+        } catch (e) {
+            console.warn('[RoutingEngine] decision log write failed:', e.message);
+        }
+
+        logStructured({
+            level: 'info',
+            traceId, documentId,
+            phase: 'generate',
+            event: 'routing_engine_decision',
+            metrics: {
+                stage_key: stageKey,
+                agent_role: agentRole,
+                selected_model: selectedApiModelId,
+                fallback_model: decision.fallbackModel,
+                cost_tier: decision.costTier,
                 mode: effectiveMode,
-                stable_only: policies.stable_only,
-                emergency: isEmergency,
-                premium_guard: policies.premium_guard_enabled,
-                canary_percent: policies.preview_canary_percent,
+                reason: decision.reason,
+                is_preview: decision.isPreview,
+                premium_blocked: premiumBlocked,
+                preview_blocked: previewBlocked,
+                decision_id: decisionId,
+                latency_ms: latencyMs,
             },
-            latencyMs,
         });
-    } catch (e) {
-        console.warn('[RoutingEngine] decision log write failed:', e.message);
     }
 
     decision.decisionId = decisionId;
-
-    logStructured({
-        level: 'info',
-        traceId, documentId,
-        phase: 'generate',
-        event: 'routing_engine_decision',
-        metrics: {
-            stage_key: stageKey,
-            agent_role: agentRole,
-            selected_model: selectedApiModelId,
-            fallback_model: decision.fallbackModel,
-            cost_tier: decision.costTier,
-            mode: effectiveMode,
-            reason: decision.reason,
-            is_preview: decision.isPreview,
-            premium_blocked: premiumBlocked,
-            preview_blocked: previewBlocked,
-            decision_id: decisionId,
-            latency_ms: latencyMs,
-        },
-    });
 
     return decision;
 }

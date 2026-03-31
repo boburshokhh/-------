@@ -84,6 +84,11 @@ async function createRoutingRule({
     isEnabled = true,
     conditions = {},
     actions = {},
+    stageKey = null,
+    allowPremium = false,
+    allowPreview = false,
+    stableOnly = true,
+    maxEscalationDepth = 1,
 }) {
     const id = await aiRoutingRulesRepo.createRule({
         name,
@@ -92,6 +97,11 @@ async function createRoutingRule({
         isEnabled,
         conditions,
         actions,
+        stageKey,
+        allowPremium,
+        allowPreview,
+        stableOnly,
+        maxEscalationDepth,
     });
     bumpModelRouterRulesCache();
     return id;
@@ -104,6 +114,11 @@ async function updateRoutingRule(ruleId, {
     isEnabled,
     conditions,
     actions,
+    stageKey,
+    allowPremium,
+    allowPreview,
+    stableOnly,
+    maxEscalationDepth,
 } = {}) {
     await aiRoutingRulesRepo.updateRule(ruleId, {
         name,
@@ -112,6 +127,11 @@ async function updateRoutingRule(ruleId, {
         isEnabled,
         conditions,
         actions,
+        stageKey,
+        allowPremium,
+        allowPreview,
+        stableOnly,
+        maxEscalationDepth,
     });
     bumpModelRouterRulesCache();
 }

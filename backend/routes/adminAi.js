@@ -11,6 +11,7 @@ const aiStageCatalogRepo = require('../db/repositories/aiStageCatalogRepo');
 const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
 const aiRoutingDecisionsRepo = require('../db/repositories/aiRoutingDecisionsRepo');
 const aiModelHealthRepo = require('../db/repositories/aiModelHealthRepo');
+const routingMatrixService = require('../services/routingMatrixService');
 
 const router = express.Router();
 
@@ -202,6 +203,97 @@ router.patch(
 );
 
 router.get(
+    '/routing-matrix',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const previewMode = String(req.query.preview_mode || req.query.mode || 'auto').trim();
+            const includeLastDecision = req.query.include_last_decision !== 'false';
+            const data = await routingMatrixService.getRoutingMatrix({
+                previewMode,
+                includeLastDecision,
+            });
+            res.json(data);
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.post(
+    '/routing-rules/bulk-patch',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const items = Array.isArray(req.body?.items) ? req.body.items : [];
+            if (!items.length) {
+                return res.status(400).json({ error: 'items обязателен (непустой массив)' });
+            }
+            const results = [];
+            for (const item of items) {
+                const rawId = item.rule_id ?? item.ruleId;
+                if (rawId == null || rawId === '') {
+                    results.push({ ok: false, error: 'rule_id обязателен' });
+                    continue;
+                }
+                let ruleId;
+                try {
+                    ruleId = parsePositiveInt(rawId, 'rule_id');
+                } catch (err) {
+                    results.push({ ok: false, error: err.message || 'Некорректный rule_id' });
+                    continue;
+                }
+                const patch = item.patch || {};
+                try {
+                    const patchSvc = {};
+                    if (patch.name !== undefined) patchSvc.name = patch.name;
+                    if (patch.phase !== undefined) {
+                        validatePhase(patch.phase);
+                        patchSvc.phase = patch.phase;
+                    }
+                    if (patch.priority !== undefined) patchSvc.priority = Number(patch.priority || 0);
+                    if (patch.is_enabled !== undefined) patchSvc.isEnabled = !!patch.is_enabled;
+                    if (patch.conditions !== undefined) patchSvc.conditions = patch.conditions;
+                    if (patch.actions !== undefined) {
+                        validateRoutingActions(patch.actions);
+                        patchSvc.actions = patch.actions;
+                    }
+                    if (patch.stage_key !== undefined) patchSvc.stageKey = patch.stage_key;
+                    if (patch.allow_premium !== undefined) patchSvc.allowPremium = !!patch.allow_premium;
+                    if (patch.allow_preview !== undefined) patchSvc.allowPreview = !!patch.allow_preview;
+                    if (patch.stable_only !== undefined) patchSvc.stableOnly = !!patch.stable_only;
+                    if (patch.max_escalation_depth !== undefined) {
+                        patchSvc.maxEscalationDepth = Number(patch.max_escalation_depth);
+                    }
+                    const before = await aiRoutingRulesRepo.getRuleById(ruleId);
+                    if (!before) {
+                        results.push({ rule_id: ruleId, ok: false, error: 'Rule не найден' });
+                        continue;
+                    }
+                    await aiModelRegistryService.updateRoutingRule(ruleId, patchSvc);
+                    const after = await aiRoutingRulesRepo.getRuleById(ruleId);
+                    await appendAudit(req, {
+                        action: 'routing_rule_bulk_patch',
+                        entityType: 'ai_routing_rule',
+                        entityId: ruleId,
+                        beforeState: before,
+                        afterState: after,
+                    });
+                    results.push({ rule_id: ruleId, ok: true, rule: after });
+                } catch (err) {
+                    results.push({ rule_id: ruleId, ok: false, error: err.message || String(err) });
+                }
+            }
+            res.json({ ok: true, results });
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+
+router.get(
     '/routing-rules/:phase',
     requireAuth,
     requireAdmin,
@@ -240,6 +332,11 @@ router.post(
                 isEnabled: body.is_enabled !== false,
                 conditions: body.conditions || {},
                 actions: body.actions || {},
+                stageKey: body.stage_key != null ? body.stage_key : null,
+                allowPremium: body.allow_premium === true,
+                allowPreview: body.allow_preview === true,
+                stableOnly: body.stable_only !== false,
+                maxEscalationDepth: Number(body.max_escalation_depth ?? 1),
             });
             const rule = await aiModelRegistryService.listRoutingRules(body.phase, { enabledOnly: false });
             const created = rule.find((r) => r.id === id) || { id };
@@ -278,6 +375,13 @@ router.patch(
             if (body.actions !== undefined) {
                 validateRoutingActions(body.actions);
                 patch.actions = body.actions;
+            }
+            if (body.stage_key !== undefined) patch.stageKey = body.stage_key;
+            if (body.allow_premium !== undefined) patch.allowPremium = !!body.allow_premium;
+            if (body.allow_preview !== undefined) patch.allowPreview = !!body.allow_preview;
+            if (body.stable_only !== undefined) patch.stableOnly = !!body.stable_only;
+            if (body.max_escalation_depth !== undefined) {
+                patch.maxEscalationDepth = Number(body.max_escalation_depth);
             }
             const before = await aiRoutingRulesRepo.getRuleById(id);
             if (!before) {

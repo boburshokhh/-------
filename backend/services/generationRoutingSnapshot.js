@@ -100,6 +100,7 @@ async function getPublicGenerationRoutingSnapshot({ requestedMode = 'auto' } = {
         explanations.push('Preview-модели временно отключены из‑за высокой ошибки (preview_routing_blocked).');
     }
 
+    /** Предпросмотр моделей по стадиям для UI (эвристика: complexity 0.4, 1 стр.); отдельный endpoint не требуется. */
     const stagePreview = {};
     try {
         const v2 = await modelRouter.resolvePipelineModelsV2({

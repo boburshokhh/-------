@@ -35,6 +35,7 @@ const route = useRoute()
 
 const tabs = [
   { to: '/admin/ai/models', label: 'Models' },
+  { to: '/admin/ai/roles-stages', label: 'Роли и этапы' },
   { to: '/admin/ai/routing', label: 'Routing' },
   { to: '/admin/ai/usage', label: 'Usage' },
   { to: '/admin/ai/policies', label: 'Policies' },

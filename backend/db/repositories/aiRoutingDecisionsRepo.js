@@ -70,4 +70,18 @@ async function getDecisionById(id) {
     return rows[0] || null;
 }
 
-module.exports = { insertDecision, listDecisions, getDecisionById };
+async function getLatestDecisionByStage(stageKey) {
+    const { rows } = await pg.query(
+        `
+        SELECT id, created_at, selected_api_model_id, decision_source
+        FROM ai_routing_decisions
+        WHERE stage_key = $1
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        `,
+        [stageKey],
+    );
+    return rows[0] || null;
+}
+
+module.exports = { insertDecision, listDecisions, getDecisionById, getLatestDecisionByStage };

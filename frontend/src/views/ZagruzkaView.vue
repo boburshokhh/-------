@@ -19,7 +19,10 @@
           v-if="!showProgressInline"
           class="grid grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:gap-8"
         >
-          <div class="min-w-0">
+          <div
+            id="upload-zone-block"
+            class="min-w-0 scroll-mt-24"
+          >
             <UploadZone
               :disabled="isBusy"
               :error="store.state.upload.error"
@@ -31,105 +34,11 @@
             />
           </div>
 
-          <div
-            class="flex min-w-0 flex-col gap-4 rounded-xl border border-[#A9B4B9]/25 bg-[#FFFFFF] p-5 tonal-sculpt-shadow md:p-6 lg:min-h-0 lg:self-stretch"
-          >
-            <div>
-              <label for="routing-mode" class="mb-2 block font-headline text-sm font-bold text-[#2A3439]">
-                Режим маршрутизации
-              </label>
-              <p class="mb-2 text-xs text-[#566166]">
-                «Auto» подставляет базовый режим из настроек сервера; остальные режимы задают приоритет цены или качества.
-              </p>
-              <select
-                id="routing-mode"
-                v-model="routingModeUser"
-                :disabled="isBusy"
-                class="w-full rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="auto">Auto (сервер + настройки админа)</option>
-                <option value="economy">Economy — минимум стоимости</option>
-                <option value="balanced">Balanced</option>
-                <option value="quality">Quality — выше качество при необходимости</option>
-                <option value="manual">Manual — только выбранная ниже модель</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="model-select" class="mb-2 block font-headline text-sm font-bold text-[#2A3439]">
-                Модель для генерации
-              </label>
-              <p v-if="quotaTierLabel" class="mb-2 text-xs text-[#566166]">
-                Квота: {{ quotaTierLabel }}
-              </p>
-              <select
-                id="model-select"
-                v-model="modelDropdownValue"
-                :disabled="isBusy || !modelOptions.length"
-                class="w-full rounded-xl border border-[#A9B4B9]/35 bg-[#F8FAFB] px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option v-if="!modelOptions.length" value="" disabled>
-                  Загрузка списка моделей…
-                </option>
-                <option value="__AUTO__">Авто — сервер выберет модель по правилам</option>
-                <option
-                  v-for="m in modelOptions"
-                  :key="m.id"
-                  :value="m.id"
-                >
-                  {{ m.label || m.id }}
-                </option>
-              </select>
-              <p v-if="selectedModelLimits" class="mt-2 text-xs leading-relaxed text-[#566166]">
-                Free tier (локальный учёт): до {{ selectedModelLimits.rpd }} запросов/сутки (UTC),
-                до {{ selectedModelLimits.rpm }} запросов/мин.
-              </p>
-            </div>
-
-            <div
-              v-if="routingSnapshot && !routingSnapshotError"
-              class="rounded-lg border border-[#A9B4B9]/20 bg-[#F8FAFB] p-3 text-xs text-[#566166]"
-            >
-              <p class="font-headline text-[11px] font-bold uppercase tracking-wide text-[#435368]">
-                Как сработает генерация
-              </p>
-              <ul class="mt-2 list-disc space-y-1 pl-4 text-[#2A3439]">
-                <li>
-                  Эффективный режим:
-                  <strong>{{ routingSnapshot.effective_mode }}</strong>
-                  <span v-if="routingSnapshot.requested_mode !== routingSnapshot.effective_mode"> (запрошено: {{ routingSnapshot.requested_mode }})</span>
-                </li>
-                <li v-if="routingSnapshot.requested_mode === 'auto' && routingSnapshot.base_config_routing_mode">
-                  Базовый режим в конфиге: <strong>{{ routingSnapshot.base_config_routing_mode }}</strong>
-                  — при «auto» он подставляется как основа.
-                </li>
-                <li v-if="routingSnapshot.downgrade_active" class="text-[#9F403D] font-medium">
-                  Включён аварийный downgrade: приоритет у стабильных экономичных моделей.
-                </li>
-                <li v-if="routingSnapshot.policies?.stable_only && !routingSnapshot.downgrade_active">
-                  Только стабильные модели (preview отключены).
-                </li>
-                <li v-if="routingSnapshot.policies?.premium_guard_enabled && routingSnapshot.premium_budget && !routingSnapshot.premium_budget.allowed">
-                  Premium сейчас ограничен политикой дневного бюджета.
-                </li>
-                <li v-else-if="routingSnapshot.premium_budget?.warning" class="text-amber-800">
-                  Premium: приближение к мягкому лимиту (~{{ routingSnapshot.premium_budget.premium_percent ?? '?' }}% вызовов).
-                </li>
-                <li v-if="routingSnapshot.quota_flags?.flashBudgetTightForCheap" class="text-amber-800">
-                  Снижена нагрузка на «flash» для дешёвых стадий — возможен downgrade.
-                </li>
-                <li v-if="routingSnapshot.quota_flags?.premiumBudgetTight" class="text-amber-800">
-                  Сработал soft-limit по premium (premium_budget_tight).
-                </li>
-                <li v-if="routingSnapshot.quota_flags?.previewRoutingBlocked" class="text-amber-800">
-                  Preview-модели временно отключены из‑за ошибок.
-                </li>
-                <li v-for="(line, i) in routingSnapshot.explanations" :key="'ex'+i">{{ line }}</li>
-              </ul>
-            </div>
-            <p v-if="routingLoading" class="text-xs text-[#566166]">Загрузка сведений о маршрутизации…</p>
-            <p v-if="routingSnapshotError" class="text-xs text-[#9F403D]">{{ routingSnapshotError }}</p>
-          </div>
+          <AiModeSection
+            :is-busy="isBusy"
+            :routing-loading="routingLoading"
+            :routing-error="routingSnapshotError"
+          />
         </div>
 
         <GenerationProgress
@@ -243,6 +152,7 @@ import AcademicLayout from '@/layouts/AcademicLayout.vue'
 import UploadZone from '@/components/upload/UploadZone.vue'
 import GenerationProgress from '@/components/upload/GenerationProgress.vue'
 import BentoFeatures from '@/components/upload/BentoFeatures.vue'
+import AiModeSection from '@/components/upload/AiModeSection.vue'
 import { API, createClientJobId } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
 
@@ -265,45 +175,6 @@ const selectedModelLabel = computed(() => {
   return store.state.selectedModel || store.state.defaultModel || 'LLM'
 })
 
-const modelOptions = computed(() => store.state.models || [])
-
-const routingModeUser = computed({
-  get() {
-    return store.state.routingModeUser || 'auto'
-  },
-  set(v) {
-    store.actions.setRoutingModeUser(v || 'auto')
-  },
-})
-
-const routingSnapshot = computed(() => store.state.generationRouting)
-
-const modelDropdownValue = computed({
-  get() {
-    return store.state.modelChoiceMode === 'auto' ? '__AUTO__' : (store.state.selectedModel || '')
-  },
-  set(val) {
-    if (val === '__AUTO__') {
-      store.actions.setModelChoice('auto', '')
-    } else {
-      store.actions.setModelChoice('manual', val)
-    }
-  },
-})
-
-const quotaTierLabel = computed(() => {
-  const h = store.state.diagnostics.health
-  const q = h?.geminiQuota?.tier
-  if (q) return String(q).toUpperCase()
-  return ''
-})
-
-const selectedModelLimits = computed(() => {
-  if (store.state.modelChoiceMode === 'auto' || !store.state.selectedModel) return null
-  const id = store.state.selectedModel
-  const m = modelOptions.value.find((x) => x.id === id)
-  return m?.limits || null
-})
 const healthStatus = computed(() => store.state.diagnostics.health?.status || 'unknown')
 const hasApiKeyLabel = computed(() => store.state.diagnostics.health?.hasApiKey ? 'настроен' : 'не настроен')
 const uploadLimits = computed(() => store.state.diagnostics.health?.uploadLimits || {})

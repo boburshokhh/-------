@@ -154,6 +154,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { getStageLabelRu } from '@/lib/routingLabels'
 
 const props = defineProps({
   percent:          { type: Number, default: 0 },
@@ -172,15 +173,8 @@ const props = defineProps({
   progressHistory:  { type: Array, default: () => [] },
 })
 
-const STAGE_LABELS = {
-  question_generation: 'Вопросы',
-  blueprint_generation: 'План (blueprint)',
-  grounding_validation: 'Проверка grounding',
-  embedding: 'Эмбеддинги',
-}
-
 function stageLabel(key) {
-  return STAGE_LABELS[key] || key
+  return getStageLabelRu(key)
 }
 
 function formatModelsByAgent(obj) {

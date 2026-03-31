@@ -245,6 +245,21 @@ export const API = {
     });
   },
 
+  adminGetRoutingMatrix({ previewMode = 'auto', includeLastDecision = true } = {}) {
+    const qs = new URLSearchParams();
+    qs.set('preview_mode', previewMode || 'auto');
+    qs.set('include_last_decision', includeLastDecision ? 'true' : 'false');
+    return request(`/admin/ai/routing-matrix?${qs.toString()}`);
+  },
+
+  adminBulkPatchRoutingRules(items) {
+    return request('/admin/ai/routing-rules/bulk-patch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+  },
+
   adminGetRoutingRules(phase, { enabledOnly = false } = {}) {
     const qs = new URLSearchParams();
     qs.set('enabled_only', enabledOnly ? 'true' : 'false');
