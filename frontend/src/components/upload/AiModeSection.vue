@@ -29,6 +29,32 @@
       @select="onSelectCardMode"
     />
 
+    <div
+      v-if="!useServerPolicy && customModes.length"
+      class="space-y-2 rounded-xl border border-[#A9B4B9]/25 bg-[#F8FAFB] p-4"
+    >
+      <p class="font-headline text-sm font-bold text-[#2A3439]">Кастомный режим</p>
+      <p class="text-xs leading-relaxed text-[#566166]">
+        Можно выбрать опубликованный пользовательский режим из конструктора.
+      </p>
+      <select
+        id="ai-custom-mode"
+        :value="customModeCode"
+        :disabled="isBusy"
+        class="w-full rounded-xl border border-[#A9B4B9]/35 bg-white px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
+        @change="onCustomModeChange"
+      >
+        <option value="">Без кастомного режима</option>
+        <option
+          v-for="m in customModes"
+          :key="m.code"
+          :value="m.code"
+        >
+          {{ m.name || m.code }} ({{ m.code }})
+        </option>
+      </select>
+    </div>
+
     <!-- Manual: модель -->
     <div
       v-if="!useServerPolicy && cardMode === 'manual'"
@@ -137,6 +163,14 @@ const hasFile = computed(() => !!store.state.upload.file);
 const fileName = computed(() => store.state.upload.file?.name || '');
 const routingSnapshot = computed(() => store.state.generationRouting);
 const modelOptions = computed(() => store.state.models || []);
+const customModes = computed(() =>
+  (store.state.availableModes || [])
+    .filter((m) => !m?.is_system)
+    .filter((m) => {
+      const c = String(m?.code || '').toLowerCase();
+      return c && !['auto', 'economy', 'balanced', 'quality', 'manual'].includes(c);
+    }),
+);
 
 const healthStatus = computed(() => store.state.diagnostics.health?.status || '');
 
@@ -152,6 +186,11 @@ const selectedModelLimits = computed(() => {
 });
 
 const useServerPolicy = computed(() => store.state.routingModeUser === 'auto');
+const customModeCode = computed(() => {
+  const current = String(store.state.routingModeUser || 'auto');
+  if (['auto', 'economy', 'balanced', 'quality', 'manual'].includes(current)) return '';
+  return current;
+});
 
 /** Пустая строка при Auto — ни одна карточка не подсвечивается */
 const cardMode = computed(() => {
@@ -201,6 +240,20 @@ function onSelectCardMode(mode) {
   } else {
     store.actions.setModelChoice('auto', '');
   }
+}
+
+function onCustomModeChange(evt) {
+  const modeCode = String(evt?.target?.value || '').trim().toLowerCase();
+  if (!modeCode) {
+    // Возвращаемся к выбранной карточке (по умолчанию balanced вне server policy).
+    const cur = String(store.state.routingModeUser || 'auto');
+    if (!['economy', 'balanced', 'quality', 'manual'].includes(cur)) {
+      store.actions.setRoutingModeUser('balanced');
+    }
+    return;
+  }
+  store.actions.setRoutingModeUser(modeCode);
+  store.actions.setModelChoice('auto', '');
 }
 
 function resetToAuto() {

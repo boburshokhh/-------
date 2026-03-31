@@ -123,6 +123,10 @@ export const API = {
     return request(`/generation-routing${suffix}`);
   },
 
+  getModes() {
+    return request('/modes');
+  },
+
   getJobProgress(jobId) {
     return request(`/jobs/${encodeURIComponent(jobId)}`, { timeoutMs: 20000 });
   },

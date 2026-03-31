@@ -272,14 +272,16 @@ watch(
 )
 
 onMounted(async () => {
-  const [modelsPayload] = await Promise.all([
+  const [modelsPayload, modesPayload] = await Promise.all([
     API.getModels(),
+    API.getModes(),
     loadHealth(),
     loadLogs(),
     loadRoutingSnapshot(),
     loadAgents(),
   ])
   store.actions.setModels(modelsPayload)
+  store.actions.setAvailableModes(modesPayload?.modes || [])
   if (isBusy.value && store.state.upload.jobId) {
     startPolling()
   }

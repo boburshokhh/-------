@@ -487,9 +487,15 @@ async function resolveEffectiveMode(requestedModeRaw) {
     }
     const cfg = await loadRoutingConfigCached();
     const globalMode = String(cfg?.routing_mode || '').toLowerCase().trim();
-    return ['auto', 'economy', 'balanced', 'quality', 'manual'].includes(globalMode)
-        ? globalMode
-        : 'auto';
+    if (['auto', 'economy', 'balanced', 'quality', 'manual'].includes(globalMode)) {
+        return globalMode;
+    }
+    // Для пользовательских режимов не подменяем на auto:
+    // режим будет учтён в условиях routing rules по routing_mode.
+    if (/^[a-z0-9][a-z0-9_-]{1,63}$/.test(normalized)) {
+        return normalized;
+    }
+    return 'auto';
 }
 
 function matchManualOverrideScope(override, { agentRole, stage, documentId }) {

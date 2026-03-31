@@ -12,11 +12,14 @@ const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
 const operationalGuardrails = require('./operationalGuardrails');
 const { STAGE_KEYS } = require('../config/stageTaxonomy');
 
-const VALID_MODES = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
+const BUILTIN_MODES = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
 
 function normalizeMode(raw) {
     const m = String(raw || 'auto').toLowerCase().trim();
-    return VALID_MODES.has(m) ? m : 'auto';
+    if (BUILTIN_MODES.has(m)) return m;
+    // Кастомный код режима допускаем для предпросмотра, если это валидный slug.
+    if (/^[a-z0-9][a-z0-9_-]{1,63}$/.test(m)) return m;
+    return 'auto';
 }
 
 /**

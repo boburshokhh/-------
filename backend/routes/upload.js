@@ -15,6 +15,7 @@ const { indexDocument } = require('../services/indexer');
 const jobProgress = require('../services/jobProgress');
 const { normalizeDisplayFilename, resolveStorageExtension } = require('../utils/filename');
 const { logStructured } = require('../utils/observability');
+const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
 
 const router = express.Router();
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
@@ -221,9 +222,22 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         const routingModeRaw = req.body.routingMode && typeof req.body.routingMode === 'string'
             ? req.body.routingMode.trim().toLowerCase()
             : '';
-        const routingMode = ['auto', 'economy', 'balanced', 'quality', 'manual'].includes(routingModeRaw)
-            ? routingModeRaw
-            : (hasValidPick ? 'manual' : 'auto');
+        let routingMode = hasValidPick ? 'manual' : 'auto';
+        if (routingModeRaw) {
+            if (['auto', 'economy', 'balanced', 'quality', 'manual'].includes(routingModeRaw)) {
+                routingMode = routingModeRaw;
+            } else {
+                const customMode = await customModeProfilesRepo.getProfileByCode(routingModeRaw);
+                if (
+                    customMode
+                    && customMode.status === 'active'
+                    && !customMode.is_archived
+                    && !customMode.is_disabled
+                ) {
+                    routingMode = routingModeRaw;
+                }
+            }
+        }
 
         console.log(`[UPLOAD] Генерация теста с моделью: ${model} (routingMode=${routingMode})`);
         logStructured({
