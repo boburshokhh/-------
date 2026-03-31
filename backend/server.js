@@ -10,6 +10,7 @@ const errorHandler = require('./middleware/errorHandler');
 const logCollector = require('./services/logCollector');
 const runtimeConfig = require('./services/runtimeConfig');
 const quotaGuard = require('./services/quotaGuard');
+const aiModelRegistryService = require('./services/aiModelRegistryService');
 const pgPool = require('./db/pgPool');
 const { runMigrations } = require('./db/migrations/runner');
 const fileStorage = require('./services/storage/fileStorage');
@@ -149,17 +150,56 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.get('/api/models', async (req, res) => {
-    const models = (config.LLM_MODELS || []).map((m) => ({
-        ...m,
-        limits: quotaGuard.getLimitsForModel(m.id),
-    }));
-    res.json({
-        models,
-        defaultModel: config.LLM_MODEL,
-        quotaTier: config.GEMINI_QUOTA_TIER || 'free',
-        embeddingModel: config.EMBEDDING_MODEL,
-        embeddingLimits: quotaGuard.getLimitsForModel(config.EMBEDDING_MODEL),
-    });
+    try {
+        // Источник истины для мультимодельного списка — реестр в БД.
+        const snapshot = await aiModelRegistryService.getRegistrySnapshot({
+            provider: 'google',
+            tier: config.GEMINI_QUOTA_TIER || 'free',
+            includeDisabled: false,
+            includePreviews: true,
+            category: null,
+        });
+
+        const models = (snapshot.models || [])
+            .filter((m) => m.model_role !== 'embedding' && !!m.api_model_id)
+            .map((m) => ({
+                id: m.api_model_id,
+                label: m.ui_name || m.api_model_id,
+                limits: {
+                    rpm: m.rpm ?? null,
+                    tpm: m.tpm ?? null,
+                    rpd: m.rpd ?? null,
+                },
+                isPreview: !!m.is_preview,
+                source: 'registry',
+            }));
+
+        const defaultModel = models.some((m) => m.id === config.LLM_MODEL)
+            ? config.LLM_MODEL
+            : (models[0]?.id || config.LLM_MODEL);
+
+        return res.json({
+            models,
+            defaultModel,
+            quotaTier: config.GEMINI_QUOTA_TIER || 'free',
+            embeddingModel: config.EMBEDDING_MODEL,
+            embeddingLimits: quotaGuard.getLimitsForModel(config.EMBEDDING_MODEL),
+        });
+    } catch (e) {
+        console.warn('[MODELS] Registry snapshot failed, fallback to config.LLM_MODELS:', e.message);
+        const models = (config.LLM_MODELS || []).map((m) => ({
+            ...m,
+            limits: quotaGuard.getLimitsForModel(m.id),
+            source: 'config_fallback',
+        }));
+        return res.json({
+            models,
+            defaultModel: config.LLM_MODEL,
+            quotaTier: config.GEMINI_QUOTA_TIER || 'free',
+            embeddingModel: config.EMBEDDING_MODEL,
+            embeddingLimits: quotaGuard.getLimitsForModel(config.EMBEDDING_MODEL),
+        });
+    }
 });
 
 /**
