@@ -382,6 +382,10 @@ export const API = {
     return request(`/admin/ai/routing-decisions/${encodeURIComponent(id)}`);
   },
 
+  adminGetRoutingDecisionExplain(id) {
+    return request(`/admin/ai/routing-decisions/${encodeURIComponent(id)}/explain`);
+  },
+
   // ── Model Health ───────────────────────────────────────────────────────
   adminGetModelHealth(params = {}) {
     const qs = new URLSearchParams();

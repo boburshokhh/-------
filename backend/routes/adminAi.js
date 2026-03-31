@@ -769,6 +769,102 @@ router.get(
     },
 );
 
+router.get(
+    '/routing-decisions/:id/explain',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const row = await aiRoutingDecisionsRepo.getDecisionById(id);
+            if (!row) return res.status(404).json({ error: 'Decision not found' });
+            
+            let status = 'matched';
+            if (row.was_fallback || row.selected_api_model_id !== (row.candidate_snapshot?.target_model || row.candidate_snapshot?.primary_api_model_id)) {
+                status = 'downgraded';
+            }
+            if (!row.selected_api_model_id) {
+                status = 'skipped';
+            }
+            if (row.decision_reason === 'fail_fast' || row.decision_reason?.includes('error')) {
+                status = 'failed';
+            }
+
+            const targetModel = row.candidate_snapshot?.target_model || row.candidate_snapshot?.primary_api_model_id || 'auto';
+
+            let parsedChain = row.fallback_chain;
+            if (typeof parsedChain === 'string') {
+                try { parsedChain = JSON.parse(parsedChain); } catch(e) { parsedChain = []; }
+            }
+
+            const response = {
+                decision_id: row.id,
+                timestamp: row.created_at,
+                summary: {
+                    status,
+                    target_model: targetModel,
+                    effective_model: row.selected_api_model_id
+                },
+                flags: {
+                    was_fallback: !!row.was_fallback,
+                    premium_blocked: !!row.premium_blocked,
+                    preview_blocked: !!row.preview_blocked,
+                    manual_override_active: !!row.manual_override_id
+                },
+                chain: [
+                    {
+                        step: 'intention',
+                        title: 'Pipeline Request',
+                        details: {
+                            stage: row.stage_key,
+                            routing_mode: row.candidate_snapshot?.routing_mode || row.policy_snapshot?.routing_mode || 'auto',
+                            complexity_score: row.candidate_snapshot?.complexity_score || null,
+                            estimated_tokens: row.candidate_snapshot?.estimated_tokens || null
+                        }
+                    },
+                    {
+                        step: 'resolution',
+                        title: 'Applied Rule',
+                        details: {
+                            source: row.decision_source,
+                            profile_name: row.candidate_snapshot?.profile || null,
+                            selected_primary: targetModel,
+                            premium_eligible: row.candidate_snapshot?.premium_eligible || false
+                        }
+                    },
+                    {
+                        step: 'guards',
+                        title: 'Quota & Guard Check',
+                        details: {
+                            passed: !row.was_fallback && !row.premium_blocked,
+                            block_reason: row.fallback_reason || (row.premium_blocked ? 'premium_blocked_by_limits' : null),
+                            fallback_triggered: row.was_fallback ? row.selected_api_model_id : null
+                        }
+                    },
+                    {
+                        step: 'health_check',
+                        title: 'Model Health / Execution',
+                        details: {
+                            model: row.selected_api_model_id,
+                            status: row.latency_ms ? 'healthy' : (row.selected_api_model_id ? 'resolved' : 'skipped'),
+                            ping_ms: row.latency_ms || null
+                        }
+                    }
+                ],
+                diagnostics: {
+                    quota_pressure: row.quota_snapshot || {},
+                    policy_snapshot: row.policy_snapshot || {},
+                    fallback_chain_attempted: parsedChain || []
+                }
+            };
+            
+            res.json({ ok: true, explain: response });
+        } catch (e) {
+            next(e);
+        }
+    }
+);
+
 // ─── Model Health ───────────────────────────────────────────────────────────
 
 router.get(

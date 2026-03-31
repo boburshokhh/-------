@@ -36,6 +36,7 @@
               <th class="py-2 pr-2">tier</th>
               <th class="py-2 pr-2">flags</th>
               <th class="py-2 pr-2">ms</th>
+              <th class="py-2 pr-2">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -68,6 +69,9 @@
                 <span v-if="d.is_preview" class="text-purple-600">preview </span>
               </td>
               <td class="py-2 pr-2 text-xs">{{ d.latency_ms ?? '—' }}</td>
+              <td class="py-2 pr-2 text-xs">
+                <button class="text-blue-600 font-semibold underline hover:bg-blue-50 px-2 py-1 rounded" @click.stop="openExplain(d.id)">Explain</button>
+              </td>
             </tr>
 
             <!-- Expanded detail -->
@@ -103,6 +107,12 @@
         No routing decisions found.
       </div>
     </div>
+    
+    <ExplainDecisionPanel 
+      :is-open="explainOpen" 
+      :decision-id="explainId" 
+      @close="explainOpen = false" 
+    />
   </AdminShell>
 </template>
 
@@ -110,12 +120,16 @@
 import { onMounted, reactive, ref } from 'vue'
 import { API } from '@/lib/api'
 import AdminShell from '@/components/admin/AdminShell.vue'
+import ExplainDecisionPanel from '@/components/admin/ExplainDecisionPanel.vue'
 
 const loading = ref(false)
 const error = ref('')
 const decisions = ref([])
 const stages = ref([])
 const expanded = ref(null)
+
+const explainOpen = ref(false)
+const explainId = ref(null)
 
 const filter = reactive({
   stage_key: '',
@@ -142,6 +156,11 @@ function tierClass(tier) {
 
 function toggleExpand(id) {
   expanded.value = expanded.value === id ? null : id
+}
+
+function openExplain(id) {
+  explainId.value = id
+  explainOpen.value = true
 }
 
 async function loadAll() {
