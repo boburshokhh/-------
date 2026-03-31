@@ -124,6 +124,57 @@ async function getRunById(id) {
     return rows[0] || null;
 }
 
+async function listRuns({ status, documentId, limit = 50, offset = 0 } = {}) {
+    const where = [];
+    const params = [];
+    let i = 1;
+    if (status) {
+        where.push(`status = $${i++}`);
+        params.push(status);
+    }
+    if (documentId) {
+        where.push(`document_id = $${i++}`);
+        params.push(documentId);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const { rows } = await pg.query(`
+        SELECT id, document_id, status, target_count, language, created_at, finished_at, duration_ms, budget_metrics, fallback_decisions, error_message
+        FROM generation_runs
+        ${whereSql}
+        ORDER BY created_at DESC
+        LIMIT $${i++} OFFSET $${i}
+    `, [...params, limit, offset]);
+    
+    const { rows: countRows } = await pg.query(`
+        SELECT COUNT(*) as total FROM generation_runs ${whereSql}
+    `, params);
+    
+    return { rows, total: parseInt(countRows[0].total, 10) };
+}
+
+async function getPipelineEventsForRun(runId) {
+    const { rows } = await pg.query(`
+        SELECT * FROM pipeline_run_events
+        WHERE run_id = $1
+        ORDER BY created_at ASC, id ASC
+    `, [runId]);
+    return rows;
+}
+
+async function getIntentsForRun(runId) {
+    const { rows } = await pg.query(`
+        SELECT * FROM intents WHERE run_id = $1 ORDER BY id ASC
+    `, [runId]);
+    return rows;
+}
+
+async function getQuestionsForRun(runId) {
+    const { rows } = await pg.query(`
+        SELECT * FROM questions WHERE run_id = $1 ORDER BY id ASC
+    `, [runId]);
+    return rows;
+}
+
 module.exports = {
     insertRun,
     updateRunFinished,
@@ -133,4 +184,8 @@ module.exports = {
     insertQuestionSources,
     insertPipelineEvent,
     getRunById,
+    listRuns,
+    getPipelineEventsForRun,
+    getIntentsForRun,
+    getQuestionsForRun,
 };

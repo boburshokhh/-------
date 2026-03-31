@@ -38,6 +38,7 @@ const tabs = [
   { to: '/admin/ai/roles-stages', label: 'Роли и этапы' },
   { to: '/admin/ai/routing', label: 'Routing' },
   { to: '/admin/ai/tariffs', label: 'Tariffs / Packages' },
+  { to: '/admin/ai/runs', label: 'Runs' },
   { to: '/admin/ai/usage', label: 'Usage' },
   { to: '/admin/ai/policies', label: 'Policies' },
   { to: '/admin/ai/debug', label: 'Debug Decisions' },

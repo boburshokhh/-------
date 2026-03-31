@@ -368,6 +368,24 @@ export const API = {
     });
   },
 
+  // ── Runs Observability ──────────────────────────────────────────────────
+  adminGetRuns(params = {}) {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.document_id) qs.set('document_id', params.document_id);
+    if (params.limit) qs.set('limit', params.limit);
+    if (params.offset) qs.set('offset', params.offset);
+    return request(`/admin/ai/runs?${qs.toString()}`);
+  },
+
+  adminGetRun(id) {
+    return request(`/admin/ai/runs/${encodeURIComponent(id)}`);
+  },
+
+  adminGetUsageOverview(period = '7d') {
+    return request(`/admin/ai/usage-overview?period=${encodeURIComponent(period)}`);
+  },
+
   // ── Routing Decisions ──────────────────────────────────────────────────
   adminGetRoutingDecisions(params = {}) {
     const qs = new URLSearchParams();

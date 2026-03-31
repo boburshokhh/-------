@@ -12,6 +12,8 @@ const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
 const aiRoutingDecisionsRepo = require('../db/repositories/aiRoutingDecisionsRepo');
 const aiModelHealthRepo = require('../db/repositories/aiModelHealthRepo');
 const routingMatrixService = require('../services/routingMatrixService');
+const runRepo = require('../db/repositories/runRepo');
+const aiUsageAnalyticsService = require('../services/aiUsageAnalyticsService');
 
 const router = express.Router();
 
@@ -971,6 +973,142 @@ router.post(
             res.json({ ok: true, resolution });
         } catch (e) {
             res.status(400).json({ ok: false, error: e.message });
+        }
+    }
+);
+
+// ─── Observability (Runs) ───────────────────────────────────────────────────
+
+router.get(
+    '/runs',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const { status, document_id, limit, offset } = req.query;
+            const docId = document_id ? parseInt(document_id, 10) : null;
+            
+            const result = await runRepo.listRuns({
+                status,
+                documentId: docId && !isNaN(docId) ? docId : null,
+                limit: optionalPositiveInt(limit, 50),
+                offset: optionalNonNegativeInt(offset, 0)
+            });
+
+            const runsWithSummary = result.rows.map(r => {
+                let fallbacks = [];
+                try {
+                    fallbacks = typeof r.fallback_decisions === 'string' ? JSON.parse(r.fallback_decisions) : (r.fallback_decisions || []);
+                } catch(e) {}
+                
+                return {
+                    id: r.id,
+                    document_id: r.document_id,
+                    status: (r.status === 'completed' && fallbacks.length > 0) ? 'degraded' : r.status,
+                    target_count: r.target_count,
+                    language: r.language,
+                    created_at: r.created_at,
+                    finished_at: r.finished_at,
+                    duration_ms: r.duration_ms,
+                    summary: {
+                        fallback_triggered: fallbacks.length > 0,
+                        errors_count: r.error_message ? 1 : 0
+                    }
+                };
+            });
+
+            res.json({ ok: true, runs: runsWithSummary, total: result.total });
+        } catch (e) {
+            next(e);
+        }
+    }
+);
+
+router.get(
+    '/runs/:id',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const id = parsePositiveInt(req.params.id, 'id');
+            const run = await runRepo.getRunById(id);
+            if (!run) return res.status(404).json({ error: 'Run not found' });
+
+            const [events, intents, questions, routingDecisions] = await Promise.all([
+                runRepo.getPipelineEventsForRun(id),
+                runRepo.getIntentsForRun(id),
+                runRepo.getQuestionsForRun(id),
+                aiRoutingDecisionsRepo.listDecisions({ runId: id, limit: 100 })
+            ]);
+
+            // Map routing decisions by stage
+            const decisionsByStage = {};
+            for (const dec of routingDecisions) {
+                decisionsByStage[dec.stage_key] = dec;
+            }
+
+            // Build Timeline
+            const timelineMap = new Map();
+            for (const ev of events) {
+                if (!timelineMap.has(ev.phase)) {
+                    timelineMap.set(ev.phase, {
+                        stage_name: ev.phase,
+                        status: 'success', // will be overwritten if errors occur
+                        events: [],
+                        routing: decisionsByStage[ev.phase] ? {
+                            decision_id: decisionsByStage[ev.phase].id,
+                            selected_model: decisionsByStage[ev.phase].selected_api_model_id,
+                            was_fallback: decisionsByStage[ev.phase].was_fallback,
+                            reason: decisionsByStage[ev.phase].decision_reason
+                        } : null
+                    });
+                }
+                const phaseGroup = timelineMap.get(ev.phase);
+                phaseGroup.events.push({ time: ev.created_at, event: ev.event, level: ev.level });
+                
+                if (ev.level === 'error' || ev.level === 'fatal') {
+                    phaseGroup.status = 'error';
+                } else if (ev.level === 'warn' && phaseGroup.status === 'success') {
+                    phaseGroup.status = 'warning';
+                }
+            }
+
+            let fallbacks = [];
+            try { fallbacks = typeof run.fallback_decisions === 'string' ? JSON.parse(run.fallback_decisions) : (run.fallback_decisions || []); } catch(e) {}
+
+            const response = {
+                run: {
+                    ...run,
+                    status: (run.status === 'completed' && fallbacks.length > 0) ? 'degraded' : run.status,
+                },
+                stats: {
+                    intents_planned: intents.length,
+                    questions_accepted: questions.length,
+                    fallback_rate_percent: fallbacks.length > 0 ? 100 : 0 // Simplified
+                },
+                timeline: Array.from(timelineMap.values())
+            };
+
+            res.json({ ok: true, ...response });
+        } catch (e) {
+            next(e);
+        }
+    }
+);
+
+// ─── Usage / Cost Breakdown ─────────────────────────────────────────────────
+
+router.get(
+    '/usage-overview',
+    requireAuth,
+    requireAdmin,
+    async (req, res, next) => {
+        try {
+            const period = req.query.period || '7d';
+            const data = await aiUsageAnalyticsService.getUsageOverview(period);
+            res.json({ ok: true, period, ...data });
+        } catch (e) {
+            next(e);
         }
     }
 );
