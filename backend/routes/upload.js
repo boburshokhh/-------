@@ -222,19 +222,17 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         const routingModeRaw = req.body.routingMode && typeof req.body.routingMode === 'string'
             ? req.body.routingMode.trim().toLowerCase()
             : '';
+        const builtInModes = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
         let routingMode = hasValidPick ? 'manual' : 'auto';
         if (routingModeRaw) {
-            if (['auto', 'economy', 'balanced', 'quality', 'manual'].includes(routingModeRaw)) {
+            if (builtInModes.has(routingModeRaw)) {
                 routingMode = routingModeRaw;
             } else {
                 const customMode = await customModeProfilesRepo.getProfileByCode(routingModeRaw);
-                if (
-                    customMode
-                    && customMode.status === 'active'
-                    && !customMode.is_archived
-                    && !customMode.is_disabled
-                ) {
+                if (customMode && !customMode.is_archived && !customMode.is_disabled) {
                     routingMode = routingModeRaw;
+                } else if (routingModeRaw) {
+                    console.warn(`[UPLOAD] Неизвестный routingMode "${routingModeRaw}", использован ${routingMode}`);
                 }
             }
         }

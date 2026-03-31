@@ -123,8 +123,9 @@ export const API = {
     return request(`/generation-routing${suffix}`);
   },
 
-  getModes() {
-    return request('/modes');
+  /** Публичный список режимов генерации (включая кастомные профили). */
+  getGenerationModes() {
+    return request('/generation-modes');
   },
 
   getJobProgress(jobId) {

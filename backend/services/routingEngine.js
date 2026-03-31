@@ -413,9 +413,6 @@ function resolveMode(requestedMode, policies) {
     const normalized = String(requestedMode || '').toLowerCase().trim();
     const valid = ['economy', 'balanced', 'quality', 'manual'];
     if (valid.includes(normalized)) return normalized;
-    // Кастомные режимы пропускаем как есть, чтобы их можно было матчить
-    // в ai_routing_rules.conditions.routing_mode.
-    if (/^[a-z0-9][a-z0-9_-]{1,63}$/.test(normalized) && normalized !== 'auto') return normalized;
     const global = String(policies.routing_mode || '').toLowerCase().trim();
     if (valid.includes(global)) return global;
     return 'auto';

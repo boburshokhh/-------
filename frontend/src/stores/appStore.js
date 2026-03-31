@@ -9,10 +9,10 @@ const state = reactive({
   modelChoiceMode: 'auto',
   /** Режим маршрутизации для запроса: auto | economy | balanced | quality | manual */
   routingModeUser: 'auto',
-  /** Публичный список доступных режимов (включая кастомные) */
-  availableModes: [],
   /** Последний снимок GET /api/generation-routing */
   generationRouting: null,
+  /** Публичный список режимов (GET /api/generation-modes) */
+  generationModes: [],
   upload: {
     file: null,
     status: 'idle',
@@ -64,7 +64,6 @@ function persistState() {
       selectedModel: state.selectedModel,
       modelChoiceMode: state.modelChoiceMode,
       routingModeUser: state.routingModeUser,
-      availableModes: state.availableModes,
       userName: state.userName,
     };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
@@ -87,7 +86,6 @@ function restoreState() {
       state.modelChoiceMode = 'manual';
     }
     if (snapshot.routingModeUser) state.routingModeUser = snapshot.routingModeUser;
-    if (Array.isArray(snapshot.availableModes)) state.availableModes = snapshot.availableModes;
     if (snapshot.userName) state.userName = snapshot.userName;
   } catch {
     // ignore invalid snapshot
@@ -133,23 +131,12 @@ export function useAppStore() {
       persistState();
     },
 
-    setAvailableModes(modes) {
-      state.availableModes = Array.isArray(modes) ? modes : [];
-      // Если сохранён кастомный режим, которого уже нет в публичном списке — сбрасываем в auto.
-      const current = String(state.routingModeUser || 'auto');
-      const builtin = ['auto', 'economy', 'balanced', 'quality', 'manual'];
-      const known = new Set([
-        ...builtin,
-        ...state.availableModes.map((m) => String(m?.code || '').trim().toLowerCase()).filter(Boolean),
-      ]);
-      if (!known.has(current)) {
-        state.routingModeUser = 'auto';
-      }
-      persistState();
-    },
-
     setGenerationRouting(payload) {
       state.generationRouting = payload && typeof payload === 'object' ? payload : null;
+    },
+
+    setGenerationModes(modes) {
+      state.generationModes = Array.isArray(modes) ? modes : [];
     },
 
     startUpload(file, jobId) {

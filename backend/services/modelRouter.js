@@ -9,6 +9,7 @@ const { AGENT_ROLES, AGENT_TO_ROUTER_STAGE } = require('../config/agentRoles');
 const quotaGuard = require('./quotaGuard');
 const aiModelsRepo = require('../db/repositories/aiModelsRepo');
 const aiModelRegistryService = require('./aiModelRegistryService');
+const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
 const runRepo = require('../db/repositories/runRepo');
 const { logStructured } = require('../utils/observability');
 
@@ -485,17 +486,25 @@ async function resolveEffectiveMode(requestedModeRaw) {
         }
         return 'auto';
     }
+    // Кастомный режим: допускаем только неархивные и неотключённые профили.
+    // Для роутера переводим в parent_mode (ближайший системный baseline).
+    try {
+        const profile = await customModeProfilesRepo.getProfileByCode(normalized);
+        if (profile && !profile.is_archived && !profile.is_disabled) {
+            const parent = String(profile.parent_mode || '').toLowerCase().trim();
+            if (['economy', 'balanced', 'quality', 'manual'].includes(parent)) {
+                return parent;
+            }
+            return 'auto';
+        }
+    } catch (e) {
+        console.warn(`[modelRouter] resolveEffectiveMode(custom): ${e.message}`);
+    }
     const cfg = await loadRoutingConfigCached();
     const globalMode = String(cfg?.routing_mode || '').toLowerCase().trim();
-    if (['auto', 'economy', 'balanced', 'quality', 'manual'].includes(globalMode)) {
-        return globalMode;
-    }
-    // Для пользовательских режимов не подменяем на auto:
-    // режим будет учтён в условиях routing rules по routing_mode.
-    if (/^[a-z0-9][a-z0-9_-]{1,63}$/.test(normalized)) {
-        return normalized;
-    }
-    return 'auto';
+    return ['auto', 'economy', 'balanced', 'quality', 'manual'].includes(globalMode)
+        ? globalMode
+        : 'auto';
 }
 
 function matchManualOverrideScope(override, { agentRole, stage, documentId }) {

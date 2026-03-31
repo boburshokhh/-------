@@ -240,35 +240,25 @@ app.get('/api/generation-routing', apiLimiter, async (req, res, next) => {
     }
 });
 
-/** Публичный список режимов для страницы загрузки (базовые + активные кастомные). */
-app.get('/api/modes', apiLimiter, async (req, res, next) => {
+/** Публичный список доступных режимов генерации (системные + кастомные). */
+app.get('/api/generation-modes', apiLimiter, async (req, res, next) => {
     try {
-        const builtin = [
-            { code: 'auto', name: 'Авто', is_system: true },
-            { code: 'economy', name: 'Эконом', is_system: true },
-            { code: 'balanced', name: 'Сбалансированный', is_system: true },
-            { code: 'quality', name: 'Качество', is_system: true },
-            { code: 'manual', name: 'Ручной', is_system: true },
-        ];
-        const custom = await customModeProfilesRepo.listProfiles({
-            status: 'active',
+        const { items } = await customModeProfilesRepo.listProfiles({
             includeArchived: false,
             includeDisabled: false,
             limit: 500,
             offset: 0,
         });
-        const customItems = (custom.items || [])
-            .filter((m) => !m.is_system)
-            .map((m) => ({
-                id: m.id,
-                code: m.code,
-                name: m.name || m.code,
-                description: m.description || null,
-                is_system: false,
-                parent_mode: m.parent_mode || null,
-                status: m.status,
-            }));
-        res.json({ ok: true, modes: [...builtin, ...customItems] });
+        const modes = (items || []).map((m) => ({
+            id: m.code,
+            code: m.code,
+            name: m.name,
+            description: m.description || null,
+            is_system: !!m.is_system,
+            parent_mode: m.parent_mode || null,
+            status: m.status || 'draft',
+        }));
+        res.json({ ok: true, modes });
     } catch (e) {
         next(e);
     }
