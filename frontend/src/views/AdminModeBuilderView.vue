@@ -67,7 +67,7 @@
               <td class="py-2 pr-3">
                 <select v-model.number="row.primary_model_id" class="field w-full min-w-[220px]">
                   <option :value="null">— авто —</option>
-                  <option v-for="m in llmModels" :key="m.id" :value="m.id">
+                  <option v-for="m in modelsForRow(row)" :key="m.id" :value="m.id">
                     {{ m.api_model_id || `id:${m.id}` }}
                   </option>
                 </select>
@@ -169,6 +169,9 @@ const preview = ref(null)
 const llmModels = computed(() =>
   (models.value || []).filter((m) => m.model_role !== 'embedding' && m.api_model_id),
 )
+const embeddingModels = computed(() =>
+  (models.value || []).filter((m) => m.model_role === 'embedding' && m.api_model_id),
+)
 
 const MISSION_LABELS = {
   generation: 'Генерация',
@@ -199,6 +202,11 @@ function translateRole(key) {
   // Пока role совпадает со stage_key, но оставляем отдельную функцию
   // на случай разделения семантики в будущем.
   return STAGE_LABELS[key] || key || '—'
+}
+
+function modelsForRow(row) {
+  const isEmbeddingStage = row?.stage_key === 'embedding' || row?.agent_role === 'embedding' || row?.mission_key === 'evidence';
+  return isEmbeddingStage ? embeddingModels.value : llmModels.value;
 }
 
 function toCsv(list) {
