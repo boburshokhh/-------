@@ -10,8 +10,23 @@ function normalizeMinioEndpoint(raw) {
   return s.replace(/^https?:\/\//i, '').split('/')[0].split(':')[0] || 'localhost';
 }
 
+/** Окно и потолок для express-rate-limit (общий API vs админка — раздельно). */
+function parseRateLimitWindow() {
+  const w = parseInt(process.env.API_RATE_LIMIT_WINDOW_MS, 10);
+  return Number.isFinite(w) && w >= 60_000 ? w : 15 * 60 * 1000;
+}
+function parseRateMax(envVal, fallback) {
+  const n = parseInt(envVal, 10);
+  return Number.isFinite(n) && n >= 1 ? n : fallback;
+}
+
 module.exports = {
   PORT: parseInt(process.env.PORT, 10) || 3002,
+  /** Лимит запросов к публичному API за окно (по умолчанию 100 / 15 мин). */
+  API_RATE_LIMIT_WINDOW_MS: parseRateLimitWindow(),
+  API_RATE_LIMIT_MAX: parseRateMax(process.env.API_RATE_LIMIT_MAX, 100),
+  /** Админка дергает много эндпоинтов параллельно — отдельный более высокий потолок. */
+  ADMIN_API_RATE_LIMIT_MAX: parseRateMax(process.env.ADMIN_API_RATE_LIMIT_MAX, 800),
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   MAX_FILE_SIZE_MB: parseInt(process.env.MAX_FILE_SIZE_MB) || 10,
   CHUNK_TOKEN_LIMIT: parseInt(process.env.CHUNK_TOKEN_LIMIT) || 2500,

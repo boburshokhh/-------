@@ -6,6 +6,21 @@
 const VALID_TYPES = ['multiple_choice'];
 const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
 
+/**
+ * Склейка заголовков оглавления («Глава-1 … Глава-2 …») — не компетентный вопрос.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function looksLikeTocCollage(text) {
+    const s = String(text || '');
+    if (s.length < 12) return false;
+    const headingMarkers = s.match(/\b(?:Глава|Раздел|Chapter|Section|Part)\s*[-–]?\s*[0-9IVX]+/gi) || [];
+    if (headingMarkers.length >= 2) return true;
+    const glavaDash = s.match(/Глава\s*[-–]\s*\d/gi) || [];
+    if (glavaDash.length >= 2) return true;
+    return false;
+}
+
 // Маппинг старых уровней сложности → Bloom taxonomy
 const DIFFICULTY_MAPPING = {
     easy: 'remember',
@@ -55,6 +70,9 @@ function validateSingleQuestion(q) {
     if (!q.question || typeof q.question !== 'string' || q.question.length < 5) {
         throw new Error('Некорректный текст вопроса');
     }
+    if (looksLikeTocCollage(q.question)) {
+        throw new Error('Вопрос похож на склейку заголовков (оглавление), а не на проверку знаний');
+    }
 
     // Нормализуем difficulty: поддерживаем и старые (easy/medium/hard) и новые (Bloom) уровни
     let difficulty = q.difficulty;
@@ -81,11 +99,17 @@ function validateSingleQuestion(q) {
     }
     result.options = q.options.map(o => String(o).trim());
 
+    for (let oi = 0; oi < result.options.length; oi++) {
+        if (looksLikeTocCollage(result.options[oi])) {
+            throw new Error(`Вариант ответа ${oi + 1} похож на склейку заголовков оглавления`);
+        }
+    }
+
     // Поддерживаем оба формата: correctIndex (новый) и correct_answer (старый)
     let correctIdx = Number(q.correctIndex != null ? q.correctIndex : q.correct_answer);
 
     if (typeof correctIdx !== 'number' || !Number.isFinite(correctIdx) || correctIdx < 0 || correctIdx > 3) {
-        throw new Error(`correctIndex должен быть числом 0-3, получено: ${rawIdx}`);
+        throw new Error(`correctIndex должен быть числом 0-3, получено: ${correctIdx}`);
     }
 
     result.correctIndex = correctIdx;
@@ -150,4 +174,4 @@ function extractJSON(text) {
     }
 }
 
-module.exports = { validateQuestions, extractJSON, BLOOM_LEVELS };
+module.exports = { validateQuestions, extractJSON, BLOOM_LEVELS, looksLikeTocCollage };
