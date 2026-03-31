@@ -13,6 +13,7 @@ const quotaGuard = require('./services/quotaGuard');
 const pgPool = require('./db/pgPool');
 const { runMigrations } = require('./db/migrations/runner');
 const fileStorage = require('./services/storage/fileStorage');
+const { AGENT_LABELS } = require('./config/agentRoles');
 
 const app = express();
 
@@ -159,6 +160,31 @@ app.get('/api/models', async (req, res) => {
         embeddingModel: config.EMBEDDING_MODEL,
         embeddingLimits: quotaGuard.getLimitsForModel(config.EMBEDDING_MODEL),
     });
+});
+
+/**
+ * Список агентных ролей, реально присутствующих в БД (ai_routing_rules.phase).
+ * Используется на странице загрузки для прозрачности маршрутизации.
+ */
+app.get('/api/agents', apiLimiter, async (req, res, next) => {
+    try {
+        const { rows } = await pgPool.query(
+            `
+            SELECT DISTINCT phase AS agent_id
+            FROM ai_routing_rules
+            WHERE phase IS NOT NULL
+              AND phase <> ''
+            ORDER BY phase ASC
+            `,
+        );
+        const agents = rows.map((r) => ({
+            id: r.agent_id,
+            label: AGENT_LABELS[r.agent_id] || r.agent_id,
+        }));
+        res.json({ agents });
+    } catch (e) {
+        next(e);
+    }
 });
 
 /** Публичный предпросмотр маршрутизации для страницы генерации (без admin). */

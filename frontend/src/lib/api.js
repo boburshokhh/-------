@@ -124,6 +124,14 @@ export const API = {
     }
   },
 
+  async getAgents() {
+    try {
+      return await request('/agents');
+    } catch {
+      return { agents: [] };
+    }
+  },
+
   getHealth() {
     return request('/health');
   },

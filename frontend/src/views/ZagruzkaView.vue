@@ -138,6 +138,40 @@
         </div>
       </section>
 
+      <section class="max-w-7xl mx-auto px-6 pb-12">
+        <div class="bg-[#FFFFFF] rounded-xl border border-[#A9B4B9]/25 p-5">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-headline font-bold text-[#2A3439]">Агенты маршрутизации (из БД)</h3>
+            <button
+              class="text-xs px-3 py-1 rounded-lg bg-[#E1E9EE] text-[#435368] hover:bg-[#D9E4EA]"
+              :disabled="agentsLoading"
+              @click="loadAgents"
+            >
+              Обновить
+            </button>
+          </div>
+
+          <p v-if="agentsError" class="text-sm text-[#9F403D]">
+            {{ agentsError }}
+          </p>
+          <template v-else>
+            <p class="text-xs text-[#566166] mb-3">Обновлено: {{ agentsUpdatedAtLabel }}</p>
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="agent in agentsList"
+                :key="agent.id"
+                class="rounded-lg border border-[#A9B4B9]/30 bg-[#F0F4F7] px-3 py-1.5 text-xs text-[#2A3439]"
+              >
+                {{ agent.label }} ({{ agent.id }})
+              </span>
+              <p v-if="!agentsList.length" class="text-xs text-[#566166]">
+                Агенты пока не найдены в таблице `ai_routing_rules`.
+              </p>
+            </div>
+          </template>
+        </div>
+      </section>
+
       <!-- Bento-секция с фичами -->
       <BentoFeatures />
     </div>
@@ -162,6 +196,10 @@ const healthLoading = ref(false)
 const logsLoading = ref(false)
 const routingLoading = ref(false)
 const routingSnapshotError = ref('')
+const agentsLoading = ref(false)
+const agentsError = ref('')
+const agentsList = ref([])
+const agentsUpdatedAt = ref(0)
 let pollTimer = null
 let pollActive = false
 
@@ -206,6 +244,10 @@ const logsUpdatedAtLabel = computed(() => {
   return new Date(store.state.diagnostics.logsUpdatedAt).toLocaleTimeString('ru-RU')
 })
 const logsPreview = computed(() => (store.state.diagnostics.logs || []).slice(-20))
+const agentsUpdatedAtLabel = computed(() => {
+  if (!agentsUpdatedAt.value) return '—'
+  return new Date(agentsUpdatedAt.value).toLocaleTimeString('ru-RU')
+})
 
 async function loadRoutingSnapshot() {
   routingSnapshotError.value = ''
@@ -235,6 +277,7 @@ onMounted(async () => {
     loadHealth(),
     loadLogs(),
     loadRoutingSnapshot(),
+    loadAgents(),
   ])
   store.actions.setModels(modelsPayload)
   if (isBusy.value && store.state.upload.jobId) {
@@ -319,6 +362,20 @@ async function loadLogs() {
     store.actions.setLogsError(error?.message || 'Не удалось получить логи')
   } finally {
     logsLoading.value = false
+  }
+}
+
+async function loadAgents() {
+  agentsLoading.value = true
+  agentsError.value = ''
+  try {
+    const payload = await API.getAgents()
+    agentsList.value = Array.isArray(payload?.agents) ? payload.agents : []
+    agentsUpdatedAt.value = Date.now()
+  } catch (error) {
+    agentsError.value = error?.message || 'Не удалось получить список агентов'
+  } finally {
+    agentsLoading.value = false
   }
 }
 
