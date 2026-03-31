@@ -9,12 +9,29 @@ function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
+function isEmbeddingModel(modelId) {
+    const id = String(modelId || '').trim().toLowerCase();
+    return id.includes('embedding') || id.includes('text-embedding');
+}
+
+function resolveEmbeddingModel(embedModelOverride = null) {
+    const fallback = 'gemini-embedding-001';
+    const override = String(embedModelOverride || '').trim();
+    if (override && isEmbeddingModel(override)) return override;
+    const fromConfig = String(config.EMBEDDING_MODEL || '').trim();
+    if (isEmbeddingModel(fromConfig)) return fromConfig;
+    return fallback;
+}
+
 async function getAiClient() {
     return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
 }
 
 async function getQueryEmbedding(query, retries = 3, embedModelOverride = null) {
-    const embedModel = embedModelOverride || config.EMBEDDING_MODEL || 'gemini-embedding-001';
+    const embedModel = resolveEmbeddingModel(embedModelOverride);
+    if (embedModelOverride && String(embedModelOverride).trim() && embedModel !== String(embedModelOverride).trim()) {
+        console.warn(`[RAG] Invalid embedding model "${embedModelOverride}", fallback to "${embedModel}"`);
+    }
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {

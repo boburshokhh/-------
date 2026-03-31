@@ -26,11 +26,21 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function isEmbeddingModel(modelId) {
+    const id = String(modelId || '').trim().toLowerCase();
+    return id.includes('embedding') || id.includes('text-embedding');
+}
+
+function resolveEmbeddingModel() {
+    const fromConfig = String(config.EMBEDDING_MODEL || '').trim();
+    return isEmbeddingModel(fromConfig) ? fromConfig : 'gemini-embedding-001';
+}
+
 async function fetchEmbeddingWithRetry(text, retries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const embedModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
+            const embedModel = resolveEmbeddingModel();
             await quotaGuard.assertWithinFreeTierQuota(embedModel);
             const ai = await getAiClient();
             const response = await ai.models.embedContent({
@@ -47,7 +57,7 @@ async function fetchEmbeddingWithRetry(text, retries = 3) {
             if (err.type === 'QUOTA_EXCEEDED') break;
             const parsed = parseGeminiApiError(err);
             if (parsed.isResourceExhausted) {
-                await quotaGuard.syncFromGoogle429(config.EMBEDDING_MODEL || 'gemini-embedding-001', err);
+                await quotaGuard.syncFromGoogle429(resolveEmbeddingModel(), err);
             }
             console.warn(`[INDEXER] Эмбеддинг попытка ${attempt}/${retries}: ${err.message}`);
             if (parsed.isDailyFreeTierQuota) break;
@@ -284,7 +294,7 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     console.log(`[INDEXER] Документ #${documentId}: ${rawChunks.length} чанков`);
 
     const { genUnits, estMainBatches } = jobProgressSvc.estimateGenerationTailUnits(config);
-    const embeddingModel = config.EMBEDDING_MODEL || 'gemini-embedding-001';
+    const embeddingModel = resolveEmbeddingModel();
 
     const existingRows = await chunkRepo.getChunkHashesByDocumentId(documentId);
     const existingHashes = new Map();
