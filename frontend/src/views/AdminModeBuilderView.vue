@@ -61,8 +61,8 @@
           <tbody>
             <tr v-for="row in assignments" :key="`${row.stage_key}-${row.agent_role}`" class="border-b border-[#A9B4B9]/15">
               <td class="py-2 pr-3">
-                <div class="font-semibold">{{ row.mission_key }}</div>
-                <div class="text-xs text-[#566166]">{{ row.stage_key }} / {{ row.agent_role }}</div>
+                <div class="font-semibold">{{ translateMission(row.mission_key) }}</div>
+                <div class="text-xs text-[#566166]">{{ translateStage(row.stage_key) }} / {{ translateRole(row.agent_role) }}</div>
               </td>
               <td class="py-2 pr-3">
                 <select v-model.number="row.primary_model_id" class="field w-full min-w-[220px]">
@@ -83,9 +83,9 @@
               <td class="py-2 pr-3">
                 <select v-model="row.preferred_cost_tier" class="field w-28">
                   <option value="">авто</option>
-                  <option value="economy">economy</option>
-                  <option value="standard">standard</option>
-                  <option value="premium">premium</option>
+                  <option value="economy">Эконом</option>
+                  <option value="standard">Стандарт</option>
+                  <option value="premium">Премиум</option>
                 </select>
               </td>
               <td class="py-2 pr-3"><input type="checkbox" v-model="row.allow_premium" /></td>
@@ -93,8 +93,8 @@
               <td class="py-2 pr-3"><input type="checkbox" v-model="row.stable_only" /></td>
               <td class="py-2 pr-3">
                 <select v-model="row.override_strength" class="field w-24">
-                  <option value="soft">soft</option>
-                  <option value="hard">hard</option>
+                  <option value="soft">Мягкий</option>
+                  <option value="hard">Жёсткий</option>
                 </select>
               </td>
               <td class="py-2 pr-3"><input type="checkbox" v-model="row.enabled" /></td>
@@ -169,6 +169,37 @@ const preview = ref(null)
 const llmModels = computed(() =>
   (models.value || []).filter((m) => m.model_role !== 'embedding' && m.api_model_id),
 )
+
+const MISSION_LABELS = {
+  generation: 'Генерация',
+  evidence: 'Факты',
+}
+
+const STAGE_LABELS = {
+  embedding: 'Векторизация',
+  cheap_preprocess: 'Быстрая предобработка',
+  facts_enrichment: 'Обогащение фактами',
+  theme_extraction: 'Извлечение тем',
+  blueprint_generation: 'Генерация структуры',
+  question_generation: 'Генерация вопросов',
+  grounding_validation: 'Проверка обоснованности',
+  backfill_generation: 'Догенерация пропусков',
+  audit_debug: 'Аудит и отладка',
+}
+
+function translateMission(key) {
+  return MISSION_LABELS[key] || key || '—'
+}
+
+function translateStage(key) {
+  return STAGE_LABELS[key] || key || '—'
+}
+
+function translateRole(key) {
+  // Пока role совпадает со stage_key, но оставляем отдельную функцию
+  // на случай разделения семантики в будущем.
+  return STAGE_LABELS[key] || key || '—'
+}
 
 function toCsv(list) {
   if (!Array.isArray(list)) return ''
