@@ -3,10 +3,10 @@
     <section class="max-w-7xl mx-auto px-6 py-10">
       <div class="mb-6">
         <h1 class="text-3xl font-headline font-extrabold text-[#2A3439] tracking-tight">
-          AI Routing Admin
+          Панель управления ИИ
         </h1>
         <p class="text-sm text-[#566166] mt-1">
-          Безопасная настройка моделей, маршрутизации и политик.
+          Единый центр конфигурации моделей, тарифов, профилей маршрутизации и политик безопасности.
         </p>
       </div>
 
@@ -34,14 +34,14 @@ import AcademicLayout from '@/layouts/AcademicLayout.vue'
 const route = useRoute()
 
 const tabs = [
-  { to: '/admin/ai/home', label: 'AI Home' },
-  { to: '/admin/ai/models', label: 'Models' },
+  { to: '/admin/ai/home', label: 'Главная ИИ' },
+  { to: '/admin/ai/models', label: 'Модели' },
   { to: '/admin/ai/roles-stages', label: 'Роли и этапы' },
-  { to: '/admin/ai/routing', label: 'Routing' },
-  { to: '/admin/ai/tariffs', label: 'Tariffs / Packages' },
-  { to: '/admin/ai/runs', label: 'Runs' },
-  { to: '/admin/ai/usage', label: 'Usage' },
-  { to: '/admin/ai/policies', label: 'Policies' },
-  { to: '/admin/ai/debug', label: 'Debug Decisions' },
+  { to: '/admin/ai/routing', label: 'Маршрутизация' },
+  { to: '/admin/ai/tariffs', label: 'Тарифы и Пакеты' },
+  { to: '/admin/ai/runs', label: 'Запуски' },
+  { to: '/admin/ai/usage', label: 'Статистика' },
+  { to: '/admin/ai/policies', label: 'Политики' },
+  { to: '/admin/ai/debug', label: 'Журнал отладки' },
 ]
 </script>

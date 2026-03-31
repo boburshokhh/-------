@@ -3,12 +3,12 @@
     <div class="rounded-2xl border border-[#A9B4B9]/25 bg-white p-4 md:p-6 mb-6">
       <div class="mb-4 flex items-center justify-between">
         <div>
-          <h2 class="font-headline text-xl font-bold text-[#2A3439]">AI Routing Tariffs (Packages)</h2>
+          <h2 class="font-headline text-xl font-bold text-[#2A3439]">Тарифы ИИ (Пакеты Моделей)</h2>
           <p class="text-sm text-[#566166] mt-1">
             Настройка стратегий Fallback и лимитов для каждого продуктового тарифа по стадиям.
           </p>
         </div>
-        <button class="btn-secondary" @click="loadData">Refresh</button>
+        <button class="btn-secondary" @click="loadData">Обновить</button>
       </div>
 
       <p v-if="error" class="mb-3 text-sm text-[#9F403D]">{{ error }}</p>
@@ -18,13 +18,13 @@
         <table class="w-full text-sm text-left">
           <thead>
             <tr class="border-b border-[#A9B4B9]/30 text-[#566166]">
-              <th class="py-2 pr-4 w-48 font-semibold">Stage</th>
+              <th class="py-2 pr-4 w-48 font-semibold">Этап пайплайна</th>
               <th v-for="profile in profiles" :key="profile.code" class="py-2 px-3 font-semibold text-center border-l border-[#A9B4B9]/20">
                 <div class="flex items-center justify-center gap-2">
                   <span class="text-lg">{{ getProfileIcon(profile.code) }}</span>
                   <div class="flex flex-col text-left">
                     <span>{{ profile.name }}</span>
-                    <span class="text-[10px] font-normal opacity-70">Priority: {{ profile.priority_level }}</span>
+                    <span class="text-[10px] font-normal opacity-70">Приоритет: {{ profile.priority_level }}</span>
                   </div>
                 </div>
               </th>
@@ -38,13 +38,13 @@
               <td v-for="profile in profiles" :key="profile.code + stage" class="py-3 px-3 border-l border-[#A9B4B9]/20">
                 <div class="flex flex-col gap-2">
                   <div>
-                    <label class="block text-[10px] font-bold text-[#566166] uppercase mb-1">Fallback Model</label>
+                    <label class="block text-[10px] font-bold text-[#566166] uppercase mb-1">Запасная модель (Fallback)</label>
                      <select 
                       v-model="getRuleRef(profile.code, stage).fallback_model" 
                       class="field w-full text-xs"
                       @change="markDirty(profile.code, stage)"
                     >
-                      <option :value="null">— auto/router —</option>
+                      <option :value="null">— авто / роутер —</option>
                       <option v-for="m in llmModels" :key="m.api_model_id" :value="m.api_model_id">
                         {{ m.api_model_id }}
                       </option>
@@ -52,21 +52,21 @@
                   </div>
                   
                   <div>
-                    <label class="block text-[10px] font-bold text-[#566166] uppercase mb-1">Strategy on Limit</label>
+                    <label class="block text-[10px] font-bold text-[#566166] uppercase mb-1">Действие при лимите</label>
                     <select 
                       v-model="getRuleRef(profile.code, stage).action_strategy"
                       class="field w-full text-xs"
                       @change="markDirty(profile.code, stage)"
                     >
-                      <option value="fallback_model">Fallback (Downgrade)</option>
-                      <option value="skip">Skip Stage</option>
-                      <option value="fail_fast">Fail Fast (Error)</option>
-                      <option value="queue">Queue (Wait)</option>
+                      <option value="fallback_model">Снизить качество (Fallback)</option>
+                      <option value="skip">Пропустить этап (Skip)</option>
+                      <option value="fail_fast">Остановить (Ошибка)</option>
+                      <option value="queue">В очередь (Ждать)</option>
                     </select>
                   </div>
 
                   <div class="flex items-center gap-2 mt-1" v-if="dirtyRules[`${profile.code}:${stage}`]">
-                    <button class="btn-primary-sm w-full py-1 text-xs" @click="saveRule(profile.code, stage)">Save</button>
+                    <button class="btn-primary-sm w-full py-1 text-xs" @click="saveRule(profile.code, stage)">Сохранить</button>
                   </div>
                 </div>
               </td>
@@ -78,31 +78,31 @@
 
     <!-- Sandbox / Router Simulator -->
     <div class="rounded-2xl border border-[#A9B4B9]/25 bg-white p-4 md:p-6">
-      <h3 class="font-headline text-lg font-bold text-[#2A3439] mb-4">Router Sandbox</h3>
+      <h3 class="font-headline text-lg font-bold text-[#2A3439] mb-4">Песочница роутера (Sandbox)</h3>
       <p class="text-sm text-[#566166] mb-4">
         Протестируйте, какую модель выберет система при определенных условиях.
       </p>
 
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
         <div>
-          <label class="block mb-1 text-sm font-semibold">Profile</label>
+          <label class="block mb-1 text-sm font-semibold">Профиль (Тариф)</label>
           <select v-model="sandboxProfile" class="field w-full">
             <option v-for="p in profiles" :key="p.code" :value="p.code">{{ p.name }}</option>
           </select>
         </div>
         <div>
-          <label class="block mb-1 text-sm font-semibold">Stage</label>
+          <label class="block mb-1 text-sm font-semibold">Этап</label>
           <select v-model="sandboxStage" class="field w-full">
              <option v-for="s in stageNames" :key="s" :value="s">{{ s }}</option>
           </select>
         </div>
         <div>
-          <label class="block mb-1 text-sm font-semibold">Est. Context Size (tokens)</label>
+          <label class="block mb-1 text-sm font-semibold">Ожидаемый размер контекста (токены)</label>
           <input type="number" v-model="sandboxContext" class="field w-full" placeholder="e.g. 5000" />
         </div>
         <div class="flex items-end">
           <button class="btn-primary-sm w-full h-9" @click="testRoute" :disabled="testingRoute">
-            {{ testingRoute ? 'Resolving...' : 'Resolve Route' }}
+            {{ testingRoute ? 'Вычисление...' : 'Проверить маршрут' }}
           </button>
         </div>
       </div>
@@ -208,7 +208,7 @@ async function loadData() {
       sandboxStage.value = stageNames.value[0]
     }
   } catch (e) {
-    error.value = e?.message || 'Failed to load tariffs'
+    error.value = e?.message || 'Ошибка загрузки тарифов'
   }
 }
 
@@ -225,7 +225,7 @@ async function saveRule(profileCode, stageName) {
     dirtyRules[`${profileCode}:${stageName}`] = false
     successMsg.value = `Правило для ${profileCode} / ${stageName} успешно сохранено`
   } catch (e) {
-    error.value = e?.message || 'Save failed'
+    error.value = e?.message || 'Ошибка сохранения'
   }
 }
 

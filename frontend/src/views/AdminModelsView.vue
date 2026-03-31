@@ -2,11 +2,11 @@
   <AdminShell>
     <div class="rounded-2xl border border-[#A9B4B9]/25 bg-white p-4 md:p-6">
       <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 class="font-headline text-xl font-bold text-[#2A3439]">Models</h2>
+        <h2 class="font-headline text-xl font-bold text-[#2A3439]">Модели ИИ</h2>
         <div class="flex gap-2">
-          <button class="btn-secondary" :disabled="loading" @click="loadAll">Refresh</button>
+          <button class="btn-secondary" :disabled="loading" @click="loadAll">Обновить</button>
           <button class="btn-primary" :disabled="syncing" @click="syncModels">
-            {{ syncing ? 'Sync...' : 'Sync Models' }}
+            {{ syncing ? 'Синхронизация...' : 'Синхронизировать' }}
           </button>
         </div>
       </div>
@@ -16,13 +16,13 @@
         <table class="w-full min-w-[980px] text-sm">
           <thead>
             <tr class="border-b border-[#A9B4B9]/30 text-left text-[#566166]">
-              <th class="py-2 pr-3">ui_name</th>
-              <th class="py-2 pr-3">api_model_id</th>
-              <th class="py-2 pr-3">category</th>
-              <th class="py-2 pr-3">preview/stable</th>
-              <th class="py-2 pr-3">enabled</th>
-              <th class="py-2 pr-3">soft limits</th>
-              <th class="py-2 pr-3">usage</th>
+              <th class="py-2 pr-3">Имя в UI</th>
+              <th class="py-2 pr-3">API ID модели</th>
+              <th class="py-2 pr-3">Категория</th>
+              <th class="py-2 pr-3">Статус</th>
+              <th class="py-2 pr-3">Включена</th>
+              <th class="py-2 pr-3">Лимиты</th>
+              <th class="py-2 pr-3">Статистика</th>
             </tr>
           </thead>
           <tbody>
@@ -32,13 +32,13 @@
               <td class="py-2 pr-3">{{ m.category }}</td>
               <td class="py-2 pr-3">
                 <span :class="m.is_preview ? 'text-[#9F403D]' : 'text-green-700'">
-                  {{ m.is_preview ? 'preview' : 'stable' }}
+                  {{ m.is_preview ? 'preview (бета)' : 'stable (стабил.)' }}
                 </span>
               </td>
               <td class="py-2 pr-3">
                 <label class="inline-flex cursor-pointer items-center gap-2">
                   <input type="checkbox" :checked="!!m.is_enabled" @change="toggleEnabled(m, $event)" />
-                  <span>{{ m.is_enabled ? 'on' : 'off' }}</span>
+                  <span>{{ m.is_enabled ? 'вкл' : 'выкл' }}</span>
                 </label>
               </td>
               <td class="py-2 pr-3 text-[#435368]">
@@ -47,9 +47,9 @@
                 <div>RPD: {{ m.rpd ?? '—' }}</div>
               </td>
               <td class="py-2 pr-3 text-[#435368]">
-                <div>req: {{ usageByModel[m.api_model_id]?.requests ?? 0 }}</div>
-                <div>fail: {{ usageByModel[m.api_model_id]?.failed_requests ?? 0 }}</div>
-                <div>phase: {{ usageByModel[m.api_model_id]?.phase ?? '—' }}</div>
+                <div>зап: {{ usageByModel[m.api_model_id]?.requests ?? 0 }}</div>
+                <div>ошиб: {{ usageByModel[m.api_model_id]?.failed_requests ?? 0 }}</div>
+                <div>фаза: {{ usageByModel[m.api_model_id]?.phase ?? '—' }}</div>
               </td>
             </tr>
           </tbody>
@@ -94,7 +94,7 @@ async function loadAll() {
     models.value = m.models || []
     usageRows.value = u.rows || []
   } catch (e) {
-    error.value = e?.message || 'Failed to load models'
+    error.value = e?.message || 'Ошибка загрузки моделей'
   } finally {
     loading.value = false
   }
@@ -107,7 +107,7 @@ async function syncModels() {
     await API.adminSyncModels({ disableMissingFromApi: false })
     await loadAll()
   } catch (e) {
-    error.value = e?.message || 'Sync failed'
+    error.value = e?.message || 'Ошибка синхронизации'
   } finally {
     syncing.value = false
   }
@@ -120,7 +120,7 @@ async function toggleEnabled(model, event) {
     model.is_enabled = checked
   } catch (e) {
     event.target.checked = !!model.is_enabled
-    error.value = e?.message || 'Toggle failed'
+    error.value = e?.message || 'Ошибка переключения состояния'
   }
 }
 

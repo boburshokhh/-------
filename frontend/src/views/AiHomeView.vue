@@ -2,7 +2,7 @@
   <AdminShell>
     <!-- Welcome Header -->
     <div class="mb-8">
-      <h1 class="font-headline text-3xl font-black text-[#2A3439] tracking-tight">AI Control Center</h1>
+      <h1 class="font-headline text-3xl font-black text-[#2A3439] tracking-tight">Центр управления ИИ</h1>
       <p class="text-[15px] text-[#566166] mt-2 max-w-2xl">
         Единая панель управления маршрутизацией ИИ. Управляйте тарифами, отслеживайте перерасход бюджета и контролируйте качество генерации в реальном времени.
       </p>
@@ -17,7 +17,7 @@
 
       <div class="relative z-10">
         <h2 class="font-headline text-xl font-bold text-[#2A3439] flex items-center gap-2">
-          <span>Global AI Mode</span>
+          <span>Глобальный режим работы ИИ</span>
           <span v-if="loadingMode" class="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
         </h2>
         <p class="mt-1 text-sm text-[#566166] max-w-lg">
@@ -55,9 +55,9 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
        <!-- System Alerts -->
        <div class="lg:col-span-2 space-y-4">
-          <h3 class="font-headline text-lg font-bold text-[#2A3439]">System Diagnostics</h3>
+          <h3 class="font-headline text-lg font-bold text-[#2A3439]">Диагностика системы</h3>
           
-          <div v-if="loadingUsage" class="py-8 text-center text-[#A9B4B9]">Analyzing telemetry...</div>
+          <div v-if="loadingUsage" class="py-8 text-center text-[#A9B4B9]">Анализ телеметрии...</div>
           
           <div v-else-if="usageData && usageData.alerts_and_recommendations.length > 0" class="space-y-3">
              <div v-for="(alert, idx) in usageData.alerts_and_recommendations" :key="idx" 
@@ -68,7 +68,7 @@
                 </div>
                 <div>
                    <h4 class="font-bold text-sm uppercase tracking-wide mb-1 opacity-80">
-                     {{ alert.type === 'warning' ? 'Critical Alert' : 'System Warning' }}
+                     {{ alert.type === 'warning' ? 'Критическая ошибка' : 'Предупреждение системы' }}
                    </h4>
                    <p class="text-sm font-medium">{{ alert.message }}</p>
                 </div>
@@ -77,32 +77,32 @@
           <div v-else-if="usageData" class="flex items-center gap-3 p-4 rounded-xl border bg-green-50 border-green-200 text-green-900">
               <span class="text-xl">✅</span>
               <div>
-                 <h4 class="font-bold text-sm uppercase tracking-wide mb-0.5 opacity-80">All Systems Nominal</h4>
+                 <h4 class="font-bold text-sm uppercase tracking-wide mb-0.5 opacity-80">Система работает в штатном режиме</h4>
                  <p class="text-sm font-medium">Квоты в норме, Premium перерасхода не обнаружено.</p>
               </div>
           </div>
 
           <!-- Quick Actions Grid -->
-          <h3 class="font-headline text-lg font-bold text-[#2A3439] mt-8 mb-4">Control Panels</h3>
+          <h3 class="font-headline text-lg font-bold text-[#2A3439] mt-8 mb-4">Разделы управления</h3>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
              <router-link to="/admin/ai/tariffs" class="flex flex-col p-4 rounded-xl border border-[#A9B4B9]/30 bg-white hover:border-blue-400 hover:shadow-sm transition-all group">
                 <span class="text-2xl mb-2 group-hover:scale-110 transition-transform origin-bottom-left">💎</span>
-                <span class="font-bold text-sm text-[#2A3439]">Tariffs Matrix</span>
+                <span class="font-bold text-sm text-[#2A3439]">Матрица тарифов</span>
                 <span class="text-[10px] text-[#566166] mt-1">Правила маршрутизации</span>
              </router-link>
              <router-link to="/admin/ai/policies" class="flex flex-col p-4 rounded-xl border border-[#A9B4B9]/30 bg-white hover:border-blue-400 hover:shadow-sm transition-all group">
                 <span class="text-2xl mb-2 group-hover:scale-110 transition-transform origin-bottom-left">🛡️</span>
-                <span class="font-bold text-sm text-[#2A3439]">Guards &amp; Limits</span>
+                <span class="font-bold text-sm text-[#2A3439]">Лимиты и защита</span>
                 <span class="text-[10px] text-[#566166] mt-1">Ограничения квот</span>
              </router-link>
              <router-link to="/admin/ai/runs" class="flex flex-col p-4 rounded-xl border border-[#A9B4B9]/30 bg-white hover:border-blue-400 hover:shadow-sm transition-all group">
                 <span class="text-2xl mb-2 group-hover:scale-110 transition-transform origin-bottom-left">🚀</span>
-                <span class="font-bold text-sm text-[#2A3439]">Pipeline Runs</span>
+                <span class="font-bold text-sm text-[#2A3439]">Запуски Pipeline</span>
                 <span class="text-[10px] text-[#566166] mt-1">Живые запуски</span>
              </router-link>
              <router-link to="/admin/ai/debug" class="flex flex-col p-4 rounded-xl border border-[#A9B4B9]/30 bg-white hover:border-blue-400 hover:shadow-sm transition-all group">
                 <span class="text-2xl mb-2 group-hover:scale-110 transition-transform origin-bottom-left">🐞</span>
-                <span class="font-bold text-sm text-[#2A3439]">Router Audit</span>
+                <span class="font-bold text-sm text-[#2A3439]">Аудит роутера</span>
                 <span class="text-[10px] text-[#566166] mt-1">Консоль отладки</span>
              </router-link>
           </div>
@@ -110,18 +110,18 @@
 
        <!-- Live Mini Stats (24h) -->
        <div class="space-y-4">
-          <h3 class="font-headline text-lg font-bold text-[#2A3439]">24h Pulse</h3>
+          <h3 class="font-headline text-lg font-bold text-[#2A3439]">Сводка за 24 часа</h3>
           <div class="rounded-xl border border-[#A9B4B9]/25 bg-white p-5 space-y-5" v-if="usageData">
              <div class="flex flex-col">
-                <span class="text-[11px] font-bold text-[#A9B4B9] uppercase tracking-wider mb-1">Pipeline Traffic</span>
-                <span class="text-2xl font-black text-[#2A3439]">{{ formatNum(usageData.hero_metrics.total_requests) }} <span class="text-sm font-normal text-[#566166]">reqs</span></span>
+                <span class="text-[11px] font-bold text-[#A9B4B9] uppercase tracking-wider mb-1">Трафик Pipeline</span>
+                <span class="text-2xl font-black text-[#2A3439]">{{ formatNum(usageData.hero_metrics.total_requests) }} <span class="text-sm font-normal text-[#566166]">зап</span></span>
              </div>
              <div class="flex flex-col">
-                <span class="text-[11px] font-bold text-[#A9B4B9] uppercase tracking-wider mb-1">Generated Cost</span>
+                <span class="text-[11px] font-bold text-[#A9B4B9] uppercase tracking-wider mb-1">Затраты на генерацию</span>
                 <span class="text-2xl font-black text-blue-700">${{ usageData.hero_metrics.estimated_cost_usd.toFixed(2) }}</span>
              </div>
              <div class="flex flex-col">
-                <span class="text-[11px] font-bold text-[#A9B4B9] uppercase tracking-wider mb-1">Downgrades (Fallback Rate)</span>
+                <span class="text-[11px] font-bold text-[#A9B4B9] uppercase tracking-wider mb-1">Снижения качества (Переходы)</span>
                 <div class="flex items-end gap-2">
                    <span class="text-2xl font-black" :class="usageData.hero_metrics.fallback_rate_percent > 5 ? 'text-amber-600' : 'text-green-600'">
                      {{ usageData.hero_metrics.fallback_rate_percent }}%
@@ -129,8 +129,8 @@
                 </div>
              </div>
              <div class="pt-4 border-t border-gray-100 flex justify-between items-center">
-                <span class="text-xs text-[#566166]">Premium Intercepted</span>
-                <span class="text-xs font-bold text-red-600">{{ usageData.hero_metrics.premium_blocked_count }} blocks</span>
+                <span class="text-xs text-[#566166]">Снято Premium запросов</span>
+                <span class="text-xs font-bold text-red-600">{{ usageData.hero_metrics.premium_blocked_count }} блок.</span>
              </div>
           </div>
           <div v-else class="rounded-xl border border-[#A9B4B9]/25 bg-gray-50 p-5 h-48 animate-pulse"></div>
@@ -146,11 +146,11 @@ import { API } from '@/lib/api'
 import AdminShell from '@/components/admin/AdminShell.vue'
 
 const modes = [
-  { id: 'auto', title: 'Auto', label: 'Default' },
-  { id: 'economy', title: 'Economy', label: 'Save Cost' },
-  { id: 'balanced', title: 'Balanced', label: 'Optimal' },
-  { id: 'quality', title: 'Quality', label: 'Max Output' },
-  { id: 'manual', title: 'Manual', label: 'Overrides Only' }
+  { id: 'auto', title: 'Авто', label: 'По умолчанию' },
+  { id: 'economy', title: 'Экономия', label: 'Меньше затрат' },
+  { id: 'balanced', title: 'Баланс', label: 'Оптимальный' },
+  { id: 'quality', title: 'Качество', label: 'Макс. результат' },
+  { id: 'manual', title: 'Ручной', label: 'Без логики ИИ' }
 ]
 
 const policies = reactive({
