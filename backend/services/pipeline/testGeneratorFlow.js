@@ -26,6 +26,7 @@ const modelRouter  = require('../modelRouter');
 const { resolveExecutionMode, estimateQuotaBudget } = require('../quotaBudget');
 const jobProgress  = require('../jobProgress');
 const runRepo      = require('../../db/repositories/runRepo');
+const pgPool       = require('../../db/pgPool');
 const customModeProfilesRepo = require('../../db/repositories/customModeProfilesRepo');
 const customModeService = require('../customModeService');
 
@@ -59,8 +60,13 @@ const {
 const PW = jobProgress.WEIGHT;
 
 /**
- * Резолвинг моделей по stage taxonomy через RoutingEngine (primary path)
- * с fallback на legacy agent-role routing.
+ * Резолвинг моделей по stage taxonomy через RoutingEngine (primary path).
+ *
+ * Упрощение агентного слоя:
+ *  - evaluation_agent полностью исключён (всегда null, не нужен).
+ *  - При успешном V2: только 5 агентов (embedding, structuring, blueprint, generator, backfill).
+ *  - quality_agent (grounding) оставлен для совместимости, но grounding отключён по умолчанию.
+ *  - Legacy routing отображает предупреждение и используется только когда V2 недоступен.
  */
 async function resolvePipelineAgentModels({
     routingMode,
@@ -70,7 +76,6 @@ async function resolvePipelineAgentModels({
     adminOverrides,
     traceId,
     documentId,
-    runId,
 }) {
     const v2 = await modelRouter.resolvePipelineModelsV2({
         routingMode,
@@ -80,12 +85,12 @@ async function resolvePipelineAgentModels({
         adminOverrides,
         traceId,
         documentId,
-        runId,
     });
 
     if (v2) {
         const decisions = {};
         const modelsByAgent = {};
+        // Только стадии с реальным LLM; evaluation_agent исключён.
         const stageToAgent = {
             [STAGE_KEYS.embedding]:             AGENT_ROLES.evidence,
             [STAGE_KEYS.cheap_preprocess]:      AGENT_ROLES.structuring,
@@ -110,14 +115,20 @@ async function resolvePipelineAgentModels({
                 modelsByAgent[agentRole] = m;
             }
         }
-        decisions[AGENT_ROLES.evaluation] = {
-            selectedModel: null, fallbackModel: null,
-            reason: 'evaluation_agent_no_llm', costTier: 'none',
-            isPreview: false, agentRole: AGENT_ROLES.evaluation,
-        };
+        // evaluation_agent не нужен — всегда null, исключён из routing loop
         modelsByAgent[AGENT_ROLES.evaluation] = null;
         return { decisions, modelsByAgent };
     }
+
+    // Legacy path: используется только когда V2 (RoutingEngine) недоступен.
+    // Это устаревший путь; если вы видите это предупреждение регулярно —
+    // проверьте конфигурацию routing rules в БД.
+    console.warn('[PIPELINE] resolvePipelineModelsV2 вернул null — fallback на legacy agent routing');
+    logStructured({
+        level: 'warn', traceId, documentId, phase: 'generate',
+        event: 'legacy_routing_fallback',
+        metadata: { requested_mode: routingMode, reason: 'routing_engine_v2_unavailable' },
+    });
 
     const base = {
         requestedMode: routingMode,
@@ -131,7 +142,9 @@ async function resolvePipelineAgentModels({
     };
     const decisions = {};
     const modelsByAgent = {};
-    for (const agentRole of AGENT_RESOLUTION_ORDER) {
+    // evaluation_agent пропускается — всегда null
+    const activeRoles = AGENT_RESOLUTION_ORDER.filter(r => r !== AGENT_ROLES.evaluation);
+    for (const agentRole of activeRoles) {
         const d = await modelRouter.routeModelForAgent({ ...base, agentRole });
         decisions[agentRole] = d;
         let m = null;
@@ -142,6 +155,7 @@ async function resolvePipelineAgentModels({
         }
         modelsByAgent[agentRole] = m;
     }
+    modelsByAgent[AGENT_ROLES.evaluation] = null;
     return { decisions, modelsByAgent };
 }
 
@@ -425,6 +439,11 @@ async function buildBlueprint({
     return blueprint;
 }
 
+// Минимальный порог качества evidence для передачи intent на LLM.
+// Снижен с 0.3 до 0.15: прежнее значение в связке с SUMMARY_MODE=extractive
+// отбрасывало большинство интентов до LLM — главная причина малого числа вопросов.
+const EVIDENCE_QUALITY_THRESHOLD = 0.15;
+
 // ─── main batch loop ─────────────────────────────────────────────────────────
 
 async function runMainBatchLoop({
@@ -447,11 +466,9 @@ async function runMainBatchLoop({
         const batchNum = Math.floor(batchStart / batchSize) + 1;
         console.log(`[PIPELINE] Batch ${batchNum}/${totalBatches}: ${batch.length} intents`);
 
-        const filteredBatch  = [];
-        const evidenceList   = [];
-        const chunkIdsList   = [];
-
-        for (const intent of batch) {
+        // Параллельный retrieval для всех интентов батча: embedding-запросы независимы,
+        // их параллельное выполнение сокращает задержку в ~N раз (N = batch size).
+        const retrievalResults = await Promise.all(batch.map(async (intent) => {
             const relevantChunks = await rag.hybridRetrieve(
                 `${intent.theme}: ${intent.intent}`, indexedChunks, topK,
                 { embedModel: embedModel || null },
@@ -459,29 +476,36 @@ async function runMainBatchLoop({
             const packets      = rag.buildEvidencePackets(relevantChunks, intent.intent);
             const evidenceText = rag.formatEvidenceForPrompt(packets);
             const ids          = relevantChunks.map(c => c.id);
+            const quality      = scoreEvidenceQuality(evidenceText, intent.intent);
+            return { intent, evidenceText, ids, quality };
+        }));
 
-            const quality = scoreEvidenceQuality(evidenceText, intent.intent);
-            evidenceScores.push(quality.score);
+        const filteredBatch  = [];
+        const evidenceList   = [];
+        const chunkIdsList   = [];
 
-            if (quality.score < 0.3) {
-                console.log(`[PIPELINE] Soft-skip intent "${intent.intent.slice(0, 60)}…" — ${quality.reason}`);
+        for (const r of retrievalResults) {
+            evidenceScores.push(r.quality.score);
+
+            if (r.quality.score < EVIDENCE_QUALITY_THRESHOLD) {
+                console.log(`[PIPELINE] Soft-skip intent "${r.intent.intent.slice(0, 60)}…" — ${r.quality.reason}`);
                 statsSkippedEvidence++;
                 logStructured({
                     level: 'warn', traceId, documentId, phase: 'generate',
                     event: 'intent_skipped_weak_evidence',
-                    reasonCode: evidenceReasonToCode(quality.reason),
+                    reasonCode: evidenceReasonToCode(r.quality.reason),
                     defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
-                    metrics: { evidence_score: quality.score },
-                    metadata: { intent_preview: intent.intent.slice(0, 120), reason: quality.reason },
+                    metrics: { evidence_score: r.quality.score },
+                    metadata: { intent_preview: r.intent.intent.slice(0, 120), reason: r.quality.reason },
                 });
                 continue;
             }
 
             statsRetrievalPassed++;
-            filteredBatch.push(intent);
-            evidenceList.push(evidenceText);
-            chunkIdsList.push(ids);
-            rag.updateCoverageMap(coverageMap, ids);
+            filteredBatch.push(r.intent);
+            evidenceList.push(r.evidenceText);
+            chunkIdsList.push(r.ids);
+            rag.updateCoverageMap(coverageMap, r.ids);
         }
 
         if (filteredBatch.length === 0) {
@@ -517,8 +541,7 @@ async function runMainBatchLoop({
             phase: 'generate', stage: 'llm_batch', workDelta: PW.GEN_BATCH,
             detail: `Пакет ${batchNum}/${totalBatches} (накоплено ${allQuestions.length})`,
         });
-
-        if (batchStart + batchSize < blueprintWithDifficulty.length) await sleep(1200);
+        // sleep(1200) удалён: RPM-регулирование выполняет quotaGuard.assertWithinFreeTierQuota.
     }
 
     return {
@@ -570,12 +593,13 @@ async function runBackfillLoop({
             const bfChunkIdsList = [];
             const bfFiltered     = [];
 
+            // Backfill: retrieval по одному чанку, без embedding API — синхронно достаточно.
             for (const intent of batchIntents) {
                 const chunkRef     = intent._chunkRef;
                 const packets      = rag.buildEvidencePackets([chunkRef], intent.intent);
                 const evidenceText = rag.formatEvidenceForPrompt(packets);
                 const quality      = scoreEvidenceQuality(evidenceText, intent.intent);
-                if (quality.score < 0.3) { statsSkippedEvidence++; continue; }
+                if (quality.score < EVIDENCE_QUALITY_THRESHOLD) { statsSkippedEvidence++; continue; }
                 bfFiltered.push(intent);
                 bfEvidenceList.push(evidenceText);
                 bfChunkIdsList.push([chunkRef.id]);
@@ -605,14 +629,14 @@ async function runBackfillLoop({
 
             progress({ phase: 'generate', stage: 'backfill_batch', workDelta: PW.GEN_BATCH,
                 detail: `Добор: раунд ${round}, пакет ${bNum}/${totalBF}` });
-            if (bs + batchSize < backfillWithDiff.length) await sleep(1200);
+            // sleep(1200) удалён — RPM управляется quotaGuard.
         }
 
         if (newRawQuestions.length === 0) { console.warn(`[PIPELINE] Backfill round ${round}: нет новых вопросов`); break; }
 
         const embedBatch = (texts) => rag.getBatchEmbeddings(texts, 3, embedModel || null);
         const dedupedNew = newRawQuestions.length > 1
-            ? await semanticDedup(newRawQuestions, embedBatch, config.DEDUP_THRESHOLD || 0.88)
+            ? await semanticDedup(newRawQuestions, embedBatch, config.DEDUP_THRESHOLD || 0.85)
             : newRawQuestions;
 
         const filtered = dedupedNew.filter(q =>
@@ -813,9 +837,27 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         console.warn(`[PIPELINE] Could not create generation_run: ${e.message}`);
     }
 
+    // Связываем решения роутинга с этим run_id: routing engine записывает их по traceId
+    // до создания run (run ещё не существует в момент вызова resolvePipelineModelsV2).
+    if (runId && traceId) {
+        try {
+            await pgPool.query(
+                `UPDATE ai_routing_decisions
+                    SET run_id = $1
+                  WHERE trace_id = $2
+                    AND run_id IS NULL`,
+                [runId, traceId],
+            );
+        } catch (e) {
+            console.warn(`[PIPELINE] Could not link routing decisions to run: ${e.message}`);
+        }
+    }
+
+    // Эмитируем pipeline events для агентов (пропускаем evaluation_agent — он всегда null).
     for (const agentRole of AGENT_RESOLUTION_ORDER) {
+        if (agentRole === AGENT_ROLES.evaluation) continue; // always null, not needed
         const dec = agentDecisions[agentRole];
-        if (dec) await modelRouter.emitRouterDecisionToPipeline(runId, documentId, traceId, dec);
+        if (dec && dec.selectedModel) await modelRouter.emitRouterDecisionToPipeline(runId, documentId, traceId, dec);
     }
 
     logStructured({

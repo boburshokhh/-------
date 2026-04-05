@@ -1,72 +1,63 @@
 <template>
-  <div class="flex min-w-0 flex-col gap-5 rounded-xl border border-[#A9B4B9]/25 bg-[#FFFFFF] p-5 tonal-sculpt-shadow md:p-6 lg:min-h-0 lg:self-stretch">
-    <AiModeHero
-      heading-id="ai-mode-heading"
-      :use-server-policy="useServerPolicy"
-      :disabled="isBusy"
-      @update:use-server-policy="onToggleServerPolicy"
-    />
-
-    <!-- Контекст документа -->
-    <p
-      v-if="hasFile"
-      class="rounded-lg border border-[#A9B4B9]/20 bg-[#F0F7FF] px-3 py-2 text-xs text-[#2A3439]"
-    >
-      <span class="font-semibold">Файл выбран:</span>
-      {{ fileName }} — прогноз моделей уточнится при запуске генерации.
-    </p>
-    <p
-      v-else
-      class="rounded-lg border border-dashed border-[#A9B4B9]/35 bg-[#F8FAFB] px-3 py-2 text-xs text-[#566166]"
-    >
-      Документ ещё не загружен — ниже показан типичный прогноз для выбранного режима.
-    </p>
-
-    <RoutingModeCardGrid
-      :selected-mode="cardMode"
-      :use-server-policy="useServerPolicy"
-      :disabled="isBusy"
-      @select="onSelectCardMode"
-    />
-
-    <div
-      v-if="!useServerPolicy && customModeOptions.length"
-      class="space-y-2 rounded-xl border border-[#A9B4B9]/25 bg-[#F8FAFB] p-4"
-    >
-      <p class="font-headline text-sm font-bold text-[#2A3439]">
-        Кастомный режим
-      </p>
-      <p class="text-xs leading-relaxed text-[#566166]">
-        Выберите профиль, созданный в админке. Он будет передан в генерацию как запрошенный режим.
-      </p>
-      <label for="custom-mode-select" class="sr-only">Кастомный режим</label>
-      <select
-        id="custom-mode-select"
-        v-model="customModeCode"
-        :disabled="isBusy"
-        class="w-full rounded-xl border border-[#A9B4B9]/35 bg-white px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
+  <div
+    class="rounded-xl border border-[#A9B4B9]/25 bg-[#FFFFFF] p-5 tonal-sculpt-shadow md:p-6"
+  >
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2
+        id="ai-mode-heading"
+        class="font-headline text-base font-bold text-[#2A3439] md:text-lg"
       >
-        <option value="">— выберите кастомный режим —</option>
-        <option
-          v-for="m in customModeOptions"
-          :key="m.code"
-          :value="String(m.code).toLowerCase()"
-        >
-          {{ m.name || m.code }} ({{ m.code }})
-        </option>
-      </select>
+        Режим генерации
+      </h2>
+      <span
+        v-if="routingLoading"
+        class="text-xs text-[#566166]"
+        aria-live="polite"
+      >Обновление…</span>
+    </div>
+    <p class="mt-1 text-xs text-[#566166]">
+      Авто — политика сервера. Остальное — явный баланс стоимости и качества.
+    </p>
+
+    <!-- Сегменты: переносятся на узком экране -->
+    <div
+      class="mt-4 flex flex-wrap gap-2"
+      role="radiogroup"
+      aria-labelledby="ai-mode-heading"
+    >
+      <button
+        v-for="item in presetItems"
+        :key="item.mode"
+        type="button"
+        role="radio"
+        :aria-checked="isSegmentSelected(item.mode)"
+        :disabled="isBusy"
+        class="min-h-[40px] rounded-xl border px-3 py-2 text-left text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-[#3755C3] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        :class="
+          isSegmentSelected(item.mode)
+            ? 'border-[#3755C3] bg-[#3755C3]/8 text-[#2A3439] shadow-sm ring-1 ring-[#3755C3]/25'
+            : 'border-[#A9B4B9]/35 bg-[#F8FAFB] text-[#2A3439] hover:border-[#3755C3]/40'
+        "
+        @click="selectPreset(item.mode)"
+      >
+        {{ item.label }}
+      </button>
     </div>
 
-    <!-- Manual: модель -->
+    <p
+      v-if="isCustomActive && activeCustomLabel"
+      class="mt-3 text-xs text-[#435368]"
+    >
+      Активен профиль админки: <strong>{{ activeCustomLabel }}</strong>
+    </p>
+
+    <!-- Ручная модель -->
     <div
-      v-if="!useServerPolicy && cardMode === 'manual'"
-      class="space-y-2 rounded-xl border border-amber-200/80 bg-amber-50/50 p-4"
+      v-if="showManualModel"
+      class="mt-4 space-y-2 rounded-xl border border-amber-200/80 bg-amber-50/50 p-4"
     >
       <p class="font-headline text-sm font-bold text-[#2A3439]">
-        Модель для всех этапов
-      </p>
-      <p class="text-xs leading-relaxed text-[#566166]">
-        В режиме Manual одна выбранная модель используется на стадиях пайплайна (если разрешено квотой и политиками), без авто-подбора по этапам.
+        Модель для этапов
       </p>
       <label
         for="ai-manual-model"
@@ -97,61 +88,70 @@
         v-if="selectedModelLimits"
         class="text-xs leading-relaxed text-[#566166]"
       >
-        Free tier (локальный учёт): до {{ selectedModelLimits.rpd }} запросов/сутки (UTC),
+        Локальные лимиты: до {{ selectedModelLimits.rpd }} запросов/сутки (UTC),
         до {{ selectedModelLimits.rpm }} запросов/мин.
       </p>
-      <button
-        type="button"
-        class="w-full rounded-xl border border-[#3755C3]/40 bg-white py-2.5 text-sm font-semibold text-[#3755C3] transition hover:bg-[#3755C3]/5"
-        :disabled="isBusy || !store.state.selectedModel"
-        @click="scrollToUpload"
-      >
-        Зафиксировать модель и продолжить
-      </button>
     </div>
 
-    <RoutingForecastPanel
-      :snapshot="routingSnapshot"
-      :loading="routingLoading"
-      :error="routingError"
-      :has-file="hasFile"
-      :health-status="healthStatus"
-    />
-
-    <div class="flex flex-col gap-2 border-t border-[#A9B4B9]/20 pt-4 sm:flex-row sm:items-center sm:justify-between">
-      <button
-        type="button"
-        class="rounded-xl bg-gradient-to-r from-[#3755C3] to-[#2848B7] px-5 py-2.5 text-sm font-bold text-[#F8F7FF] shadow-md transition hover:opacity-90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+    <!-- Кастомные режимы из админки -->
+    <details
+      v-if="customModeOptions.length"
+      class="mt-4 rounded-xl border border-[#A9B4B9]/25 bg-[#F8FAFB] p-4"
+    >
+      <summary class="cursor-pointer select-none font-headline text-sm font-semibold text-[#2A3439]">
+        Дополнительно: кастомный режим
+      </summary>
+      <p class="mt-2 text-xs leading-relaxed text-[#566166]">
+        Профиль из админки передаётся в генерацию как запрошенный режим.
+      </p>
+      <label
+        for="custom-mode-select"
+        class="sr-only"
+      >Кастомный режим</label>
+      <select
+        id="custom-mode-select"
+        v-model="customModeCode"
         :disabled="isBusy"
-        @click="scrollToUpload"
+        class="mt-3 w-full rounded-xl border border-[#A9B4B9]/35 bg-white px-4 py-3 text-sm font-medium text-[#2A3439] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3755C3] disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {{ primaryCtaLabel }}
-      </button>
-      <button
-        type="button"
-        class="text-sm font-medium text-[#435368] underline-offset-2 hover:underline"
-        :disabled="isBusy"
-        @click="resetToAuto"
-      >
-        Вернуться к политике сервера (Auto)
-      </button>
-    </div>
+        <option value="">
+          — не использовать кастомный профиль —
+        </option>
+        <option
+          v-for="m in customModeOptions"
+          :key="m.code"
+          :value="String(m.code).toLowerCase()"
+        >
+          {{ m.name || m.code }} ({{ m.code }})
+        </option>
+      </select>
+    </details>
 
     <p
-      v-if="quotaTierLabel"
-      class="text-center text-[11px] text-[#566166]"
+      v-if="routingError"
+      class="mt-3 text-xs text-[#9F403D]"
+      role="alert"
     >
-      Квота: {{ quotaTierLabel }}
+      {{ routingError }}
     </p>
+
+    <button
+      v-if="!useServerPolicy || isCustomActive"
+      type="button"
+      class="mt-4 text-sm font-medium text-[#435368] underline-offset-2 hover:underline disabled:opacity-50"
+      :disabled="isBusy"
+      @click="resetToAuto"
+    >
+      Сбросить в «Авто (сервер)»
+    </button>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue';
-import AiModeHero from '@/components/upload/AiModeHero.vue';
-import RoutingModeCardGrid from '@/components/upload/RoutingModeCardGrid.vue';
-import RoutingForecastPanel from '@/components/upload/RoutingForecastPanel.vue';
 import { useAppStore } from '@/stores/appStore';
+
+const PRESET_CODES = ['auto', 'economy', 'balanced', 'quality', 'manual'];
 
 defineProps({
   isBusy: { type: Boolean, default: false },
@@ -161,21 +161,37 @@ defineProps({
 
 const store = useAppStore();
 
-const hasFile = computed(() => !!store.state.upload.file);
-const fileName = computed(() => store.state.upload.file?.name || '');
-const routingSnapshot = computed(() => store.state.generationRouting);
+const presetItems = [
+  { mode: 'auto', label: 'Авто' },
+  { mode: 'economy', label: 'Эконом' },
+  { mode: 'balanced', label: 'Баланс' },
+  { mode: 'quality', label: 'Качество' },
+  { mode: 'manual', label: 'Вручную' },
+];
+
 const modelOptions = computed(() => store.state.models || []);
 const generationModes = computed(() => store.state.generationModes || []);
 const customModeOptions = computed(() =>
-  generationModes.value.filter((m) => !['auto', 'economy', 'balanced', 'quality', 'manual'].includes(String(m?.code || '').toLowerCase())),
+  generationModes.value.filter((m) => !PRESET_CODES.includes(String(m?.code || '').toLowerCase())),
 );
 
-const healthStatus = computed(() => store.state.diagnostics.health?.status || '');
+const routingMode = computed(() => String(store.state.routingModeUser || 'auto').toLowerCase());
 
-const quotaTierLabel = computed(() => {
-  const q = store.state.diagnostics.health?.geminiQuota?.tier;
-  return q ? String(q).toUpperCase() : '';
+const isCustomActive = computed(() =>
+  customModeOptions.value.some((m) => String(m.code).toLowerCase() === routingMode.value),
+);
+
+const activeCustomLabel = computed(() => {
+  if (!isCustomActive.value) return '';
+  const m = customModeOptions.value.find((x) => String(x.code).toLowerCase() === routingMode.value);
+  return m ? (m.name || m.code) : '';
 });
+
+const useServerPolicy = computed(() => routingMode.value === 'auto');
+
+const showManualModel = computed(
+  () => !isCustomActive.value && routingMode.value === 'manual',
+);
 
 const selectedModelLimits = computed(() => {
   if (store.state.modelChoiceMode !== 'manual' || !store.state.selectedModel) return null;
@@ -183,30 +199,35 @@ const selectedModelLimits = computed(() => {
   return m?.limits || null;
 });
 
-const useServerPolicy = computed(() => store.state.routingModeUser === 'auto');
+function isSegmentSelected(mode) {
+  const m = String(mode).toLowerCase();
+  if (isCustomActive.value) return false;
+  return routingMode.value === m;
+}
 
-/** Пустая строка при Auto — ни одна карточка не подсвечивается */
-const cardMode = computed(() => {
-  const m = store.state.routingModeUser || 'auto';
-  if (m === 'auto') return '';
-  return m;
-});
-
-const primaryCtaLabel = computed(() => {
-  if (!useServerPolicy.value && cardMode.value === 'manual' && !store.state.selectedModel) {
-    return 'Выберите модель выше';
+function selectPreset(mode) {
+  const m = String(mode).toLowerCase();
+  store.actions.setRoutingModeUser(m);
+  if (m === 'manual') {
+    const sel = store.state.selectedModel || store.state.defaultModel;
+    store.actions.setModelChoice('manual', sel || '');
+  } else {
+    store.actions.setModelChoice('auto', '');
   }
-  return 'Продолжить к загрузке файла';
-});
+}
 
 const customModeCode = computed({
   get() {
-    const current = String(store.state.routingModeUser || 'auto').toLowerCase();
-    return customModeOptions.value.some((m) => String(m.code).toLowerCase() === current) ? current : '';
+    const current = routingMode.value;
+    return customModeOptions.value.some((x) => String(x.code).toLowerCase() === current) ? current : '';
   },
   set(val) {
     const code = String(val || '').trim().toLowerCase();
-    if (!code) return;
+    if (!code) {
+      store.actions.setRoutingModeUser('balanced');
+      store.actions.setModelChoice('auto', '');
+      return;
+    }
     store.actions.setRoutingModeUser(code);
     store.actions.setModelChoice('auto', '');
   },
@@ -221,40 +242,8 @@ const modelDropdownValue = computed({
   },
 });
 
-function onToggleServerPolicy(checked) {
-  if (checked) {
-    store.actions.setRoutingModeUser('auto');
-    store.actions.setModelChoice('auto', '');
-  } else {
-    const cur = store.state.routingModeUser;
-    const next = cur === 'auto' ? 'balanced' : cur;
-    store.actions.setRoutingModeUser(next);
-    if (next === 'manual') {
-      const m = store.state.selectedModel || store.state.defaultModel;
-      if (m) store.actions.setModelChoice('manual', m);
-    } else {
-      store.actions.setModelChoice('auto', '');
-    }
-  }
-}
-
-function onSelectCardMode(mode) {
-  store.actions.setRoutingModeUser(mode);
-  if (mode === 'manual') {
-    const m = store.state.selectedModel || store.state.defaultModel;
-    store.actions.setModelChoice('manual', m || '');
-  } else {
-    store.actions.setModelChoice('auto', '');
-  }
-}
-
 function resetToAuto() {
   store.actions.setRoutingModeUser('auto');
   store.actions.setModelChoice('auto', '');
-}
-
-function scrollToUpload() {
-  const el = document.getElementById('upload-zone-block');
-  el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 </script>

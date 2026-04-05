@@ -21,10 +21,12 @@ const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
 
 function buildBatchPrompt(intents, evidenceList) {
     const lines = [`Создай ${intents.length} вопрос(а/ов) формата multiple_choice — по одному на каждый intent.\n`];
-    let maxEvidenceChars = 2500;
-    if (intents.length === 1) maxEvidenceChars = 3500;
-    else if (intents.length === 2) maxEvidenceChars = 2000;
-    else maxEvidenceChars = 1500;
+    // Увеличен контекст: прежние 1500 символов при batch≥3 давали LLM <15% исходного чанка.
+    // Теперь передаём достаточно текста для формирования точных дистракторов.
+    let maxEvidenceChars;
+    if (intents.length === 1) maxEvidenceChars = 7000;
+    else if (intents.length === 2) maxEvidenceChars = 5000;
+    else maxEvidenceChars = 4000;
     
     for (let i = 0; i < intents.length; i++) {
         const intent = intents[i];

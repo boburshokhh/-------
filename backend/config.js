@@ -81,10 +81,17 @@ module.exports = {
     'gemini-1.5-flash': { rpm: 15, tpm: 1000000, rpd: 1500 },
     'gemini-2.5-flash': { rpm: 7, tpm: 250000, rpd: 20 },
     'gemini-2.5-flash-lite': { rpm: 10, tpm: 250000, rpd: 20 },
+    'gemini-2.0-flash': { rpm: 15, tpm: 1000000, rpd: 200 },
+    'gemini-2.0-flash-lite': { rpm: 30, tpm: 1000000, rpd: 200 },
+    'gemini-2.5-pro': { rpm: 2, tpm: 32000, rpd: 25 },
+    'gemini-pro-latest': { rpm: 2, tpm: 32000, rpd: 50 },
+    'gemini-3-flash-preview': { rpm: 10, tpm: 250000, rpd: 25 },
+    'gemini-3.1-pro-preview': { rpm: 2, tpm: 32000, rpd: 10 },
+    'gemini-3-pro-preview': { rpm: 2, tpm: 32000, rpd: 10 },
     'gemini-embedding-001': { rpm: 100, tpm: 100000, rpd: 1500 },
   },
   /** Если model id не в FREE_TIER_QUOTAS — консервативный дефолт */
-  FREE_TIER_QUOTA_DEFAULT: { rpm: 5, tpm: 250000, rpd: 20 },
+  FREE_TIER_QUOTA_DEFAULT: { rpm: 2, tpm: 32000, rpd: 20 },
   LLM_MAX_RETRIES: 3,
   /**
    * Summary generation strategy for the indexer (primary facts in summary_text).

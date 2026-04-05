@@ -293,6 +293,24 @@ async function start() {
         process.exit(1);
     }
 
+    // Cleanup зависших запусков: при перезапуске сервера запуски, оставшиеся в статусе
+    // 'running' более 2 часов, помечаются как 'failed' — они никогда не завершатся.
+    try {
+        const zombieResult = await pgPool.query(`
+            UPDATE generation_runs
+            SET status        = 'failed',
+                error_message = 'Interrupted by server restart',
+                finished_at   = NOW()
+            WHERE status     = 'running'
+              AND started_at < NOW() - INTERVAL '2 hours'
+        `);
+        if (zombieResult.rowCount > 0) {
+            console.warn(`[INIT] Marked ${zombieResult.rowCount} zombie run(s) as failed (were stuck in 'running')`);
+        }
+    } catch (err) {
+        console.warn('[INIT] Zombie cleanup warning:', err.message);
+    }
+
     // Порт до init хранилища: при STORAGE_BACKEND=minio вызов MinIO до listen мог долго висеть → Docker healthcheck unhealthy, сайт недоступен.
     app.listen(config.PORT, '0.0.0.0', () => {
         const hasKey = config.GEMINI_API_KEY ? true : false;

@@ -1,27 +1,29 @@
 <template>
   <AcademicLayout>
     <div class="flex-grow">
-      <!-- Hero: заголовок + компактное описание снизу -->
-      <section class="max-w-7xl mx-auto px-6 pt-12 pb-8 text-center md:pt-14 md:pb-10">
-        <h1 class="font-headline font-extrabold text-3xl sm:text-4xl md:text-5xl text-[#2A3439] tracking-tight max-w-3xl mx-auto leading-tight">
-          Превратите документы в <span class="text-[#3755C3]">интерактивные тесты</span>
-        </h1>
-        <p
-          class="mx-auto mt-4 max-w-md text-[11px] leading-snug text-[#566166] sm:text-xs sm:max-w-lg sm:leading-relaxed"
-        >
-          Загрузите PDF или DOCX: система проиндексирует документ и сгенерирует тест. Ниже — режим маршрутизации и выбор модели (или авто).
-        </p>
-      </section>
+      <section class="mx-auto max-w-2xl px-6 pb-20 pt-10 md:pt-12">
+        <header class="text-center">
+          <h1 class="font-headline text-2xl font-extrabold leading-tight tracking-tight text-[#2A3439] sm:text-3xl md:text-4xl">
+            Документы → <span class="text-[#3755C3]">тесты</span>
+          </h1>
+          <p class="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[#566166]">
+            Загрузите PDF или DOCX: индексация и генерация вопросов. Сначала выберите режим, затем файл.
+          </p>
+        </header>
 
-      <!-- Два блока рядом: загрузка | модель; при прогрессе — на всю ширину -->
-      <section class="max-w-7xl mx-auto px-6 pb-24">
         <div
           v-if="!showProgressInline"
-          class="grid grid-cols-1 items-start gap-6 lg:grid-cols-2 lg:gap-8"
+          class="mt-8 space-y-6"
         >
+          <AiModeSection
+            :is-busy="isBusy"
+            :routing-loading="routingLoading"
+            :routing-error="routingSnapshotError"
+          />
+
           <div
             id="upload-zone-block"
-            class="min-w-0 scroll-mt-24"
+            class="scroll-mt-24"
           >
             <UploadZone
               :disabled="isBusy"
@@ -33,16 +35,11 @@
               @file-selected="handleUpload"
             />
           </div>
-
-          <AiModeSection
-            :is-busy="isBusy"
-            :routing-loading="routingLoading"
-            :routing-error="routingSnapshotError"
-          />
         </div>
 
         <GenerationProgress
           v-else
+          class="mt-8"
           :percent="store.state.upload.progress.percent"
           :phase="store.state.upload.progress.phase"
           :stage="store.state.upload.progress.stage"
@@ -55,26 +52,10 @@
           :routing-result="store.state.upload.routingSummary"
         />
 
-        <div v-if="canGoToTest" class="mt-10 flex flex-col items-center gap-4">
-          <div
-            v-if="store.state.upload.generationMetrics"
-            class="max-w-2xl rounded-xl border border-[#A9B4B9]/25 bg-white p-4 text-left text-sm text-[#566166]"
-          >
-            <p class="font-headline text-xs font-bold uppercase tracking-wide text-[#435368]">Итог маршрутизации</p>
-            <ul class="mt-2 list-disc space-y-1 pl-4">
-              <li v-if="store.state.upload.generationMetrics.routing_mode_effective">
-                Режим: запрошен <strong>{{ store.state.upload.generationMetrics.routing_mode_requested }}</strong>
-                → эффективный <strong>{{ store.state.upload.generationMetrics.routing_mode_effective }}</strong>
-              </li>
-              <li v-if="store.state.upload.generationMetrics.pipeline_execution_mode">
-                Пайплайн: <strong>{{ store.state.upload.generationMetrics.pipeline_execution_mode }}</strong>
-                <span v-if="store.state.upload.generationMetrics.quota_offline" class="text-amber-800"> (downgrade: квота)</span>
-              </li>
-              <li v-if="store.state.upload.generationMetrics.degraded_reasons?.length">
-                Деградация: {{ store.state.upload.generationMetrics.degraded_reasons.join(', ') }}
-              </li>
-            </ul>
-          </div>
+        <div
+          v-if="canGoToTest"
+          class="mt-10 flex justify-center"
+        >
           <button
             class="rounded-xl bg-gradient-to-r from-[#3755C3] to-[#2848B7] px-8 py-3 text-sm font-bold tracking-wide text-[#F8F7FF] shadow-lg transition-all hover:opacity-90 active:scale-95"
             @click="goToTest"
@@ -83,99 +64,7 @@
           </button>
         </div>
       </section>
-
-      <section class="max-w-7xl mx-auto px-6 pb-12">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div class="bg-[#FFFFFF] rounded-xl border border-[#A9B4B9]/25 p-5">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="font-headline font-bold text-[#2A3439]">Статус backend</h3>
-              <button
-                class="text-xs px-3 py-1 rounded-lg bg-[#E1E9EE] text-[#435368] hover:bg-[#D9E4EA]"
-                :disabled="healthLoading"
-                @click="loadHealth"
-              >
-                Обновить
-              </button>
-            </div>
-            <p v-if="store.state.diagnostics.healthError" class="text-sm text-[#9F403D]">
-              {{ store.state.diagnostics.healthError }}
-            </p>
-            <template v-else>
-              <p class="text-sm text-[#566166]">Сервис: <span class="font-semibold text-[#2A3439]">{{ healthStatus }}</span></p>
-              <p class="text-sm text-[#566166]">API-ключ: <span class="font-semibold text-[#2A3439]">{{ hasApiKeyLabel }}</span></p>
-              <p class="text-xs text-[#566166] mt-1">Последняя проверка: {{ healthTimestamp }}</p>
-            </template>
-          </div>
-
-          <div class="bg-[#FFFFFF] rounded-xl border border-[#A9B4B9]/25 p-5">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="font-headline font-bold text-[#2A3439]">Backend логи</h3>
-              <button
-                class="text-xs px-3 py-1 rounded-lg bg-[#E1E9EE] text-[#435368] hover:bg-[#D9E4EA]"
-                :disabled="logsLoading"
-                @click="loadLogs"
-              >
-                Обновить
-              </button>
-            </div>
-            <p v-if="store.state.diagnostics.logsError" class="text-sm text-[#9F403D]">
-              {{ store.state.diagnostics.logsError }}
-            </p>
-            <template v-else>
-              <p class="text-xs text-[#566166] mb-2">Обновлено: {{ logsUpdatedAtLabel }}</p>
-              <div class="max-h-56 overflow-auto rounded-lg bg-[#F0F4F7] p-3 space-y-2">
-                <p
-                  v-for="(row, idx) in logsPreview"
-                  :key="`${row.ts || ''}-${idx}`"
-                  class="text-xs text-[#2A3439] font-mono break-all"
-                >
-                  [{{ row.level || 'INFO' }}] {{ row.message || '' }}
-                </p>
-                <p v-if="!logsPreview.length" class="text-xs text-[#566166]">Логи пока недоступны</p>
-              </div>
-            </template>
-          </div>
-        </div>
-      </section>
-
-      <section class="max-w-7xl mx-auto px-6 pb-12">
-        <div class="bg-[#FFFFFF] rounded-xl border border-[#A9B4B9]/25 p-5">
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="font-headline font-bold text-[#2A3439]">Агенты маршрутизации (из БД)</h3>
-            <button
-              class="text-xs px-3 py-1 rounded-lg bg-[#E1E9EE] text-[#435368] hover:bg-[#D9E4EA]"
-              :disabled="agentsLoading"
-              @click="loadAgents"
-            >
-              Обновить
-            </button>
-          </div>
-
-          <p v-if="agentsError" class="text-sm text-[#9F403D]">
-            {{ agentsError }}
-          </p>
-          <template v-else>
-            <p class="text-xs text-[#566166] mb-3">Обновлено: {{ agentsUpdatedAtLabel }}</p>
-            <div class="flex flex-wrap gap-2">
-              <span
-                v-for="agent in agentsList"
-                :key="agent.id"
-                class="rounded-lg border border-[#A9B4B9]/30 bg-[#F0F4F7] px-3 py-1.5 text-xs text-[#2A3439]"
-              >
-                {{ agent.label }} ({{ agent.id }})
-              </span>
-              <p v-if="!agentsList.length" class="text-xs text-[#566166]">
-                Агенты пока не найдены в таблице `ai_routing_rules`.
-              </p>
-            </div>
-          </template>
-        </div>
-      </section>
-
-      <!-- Bento-секция с фичами -->
-      <BentoFeatures />
     </div>
-
   </AcademicLayout>
 </template>
 
@@ -185,21 +74,14 @@ import { useRouter } from 'vue-router'
 import AcademicLayout from '@/layouts/AcademicLayout.vue'
 import UploadZone from '@/components/upload/UploadZone.vue'
 import GenerationProgress from '@/components/upload/GenerationProgress.vue'
-import BentoFeatures from '@/components/upload/BentoFeatures.vue'
 import AiModeSection from '@/components/upload/AiModeSection.vue'
 import { API, createClientJobId } from '@/lib/api'
 import { useAppStore } from '@/stores/appStore'
 
 const router = useRouter()
 const store = useAppStore()
-const healthLoading = ref(false)
-const logsLoading = ref(false)
 const routingLoading = ref(false)
 const routingSnapshotError = ref('')
-const agentsLoading = ref(false)
-const agentsError = ref('')
-const agentsList = ref([])
-const agentsUpdatedAt = ref(0)
 let pollTimer = null
 let pollActive = false
 
@@ -213,8 +95,6 @@ const selectedModelLabel = computed(() => {
   return store.state.selectedModel || store.state.defaultModel || 'LLM'
 })
 
-const healthStatus = computed(() => store.state.diagnostics.health?.status || 'unknown')
-const hasApiKeyLabel = computed(() => store.state.diagnostics.health?.hasApiKey ? 'настроен' : 'не настроен')
 const uploadLimits = computed(() => store.state.diagnostics.health?.uploadLimits || {})
 const allowedMimes = computed(() => uploadLimits.value.allowedMimes || [])
 const maxPages = computed(() => Number(uploadLimits.value.maxPages || 30))
@@ -232,21 +112,6 @@ const uploadLimitsText = computed(() => {
   if (allowedMimes.value.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) labels.push('DOCX')
   const formatsLabel = labels.length ? labels.join(', ') : 'PDF'
   return `Поддерживаются ${formatsLabel}, максимум ${maxPages.value} страниц и до ${maxFileSizeMb.value} МБ`
-})
-const healthTimestamp = computed(() => {
-  const ts = store.state.diagnostics.health?.timestamp
-  if (!ts) return '—'
-  const dt = new Date(ts)
-  return Number.isNaN(dt.getTime()) ? String(ts) : dt.toLocaleString('ru-RU')
-})
-const logsUpdatedAtLabel = computed(() => {
-  if (!store.state.diagnostics.logsUpdatedAt) return '—'
-  return new Date(store.state.diagnostics.logsUpdatedAt).toLocaleTimeString('ru-RU')
-})
-const logsPreview = computed(() => (store.state.diagnostics.logs || []).slice(-20))
-const agentsUpdatedAtLabel = computed(() => {
-  if (!agentsUpdatedAt.value) return '—'
-  return new Date(agentsUpdatedAt.value).toLocaleTimeString('ru-RU')
 })
 
 async function loadRoutingSnapshot() {
@@ -276,9 +141,7 @@ onMounted(async () => {
     API.getModels(),
     API.getGenerationModes(),
     loadHealth(),
-    loadLogs(),
     loadRoutingSnapshot(),
-    loadAgents(),
   ])
   store.actions.setModels(modelsPayload)
   store.actions.setGenerationModes(generationModesPayload?.modes || [])
@@ -344,40 +207,11 @@ async function pollProgress() {
 }
 
 async function loadHealth() {
-  healthLoading.value = true
   try {
     const payload = await API.getHealth()
     store.actions.setHealth(payload)
   } catch (error) {
     store.actions.setHealthError(error?.message || 'Не удалось получить статус сервиса')
-  } finally {
-    healthLoading.value = false
-  }
-}
-
-async function loadLogs() {
-  logsLoading.value = true
-  try {
-    const payload = await API.getLogs(100)
-    store.actions.setLogs(payload?.logs || [])
-  } catch (error) {
-    store.actions.setLogsError(error?.message || 'Не удалось получить логи')
-  } finally {
-    logsLoading.value = false
-  }
-}
-
-async function loadAgents() {
-  agentsLoading.value = true
-  agentsError.value = ''
-  try {
-    const payload = await API.getAgents()
-    agentsList.value = Array.isArray(payload?.agents) ? payload.agents : []
-    agentsUpdatedAt.value = Date.now()
-  } catch (error) {
-    agentsError.value = error?.message || 'Не удалось получить список агентов'
-  } finally {
-    agentsLoading.value = false
   }
 }
 
