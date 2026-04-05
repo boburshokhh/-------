@@ -203,13 +203,15 @@ function buildLocalThemesFromSections(indexedChunks) {
 function computeIntentsPerTheme(richThemes, totalTarget) {
     const weights = richThemes.map(t => (t.importance || 2) * (t.suggestedCount || 3));
     const totalWeight = weights.reduce((s, w) => s + w, 0);
-    const counts = weights.map(w => Math.max(2, Math.round((w / totalWeight) * totalTarget)));
+    // Minimum 1 intent per theme (was 2 — forced intents from sparse sections
+    // that couldn't pass evidence quality and just wasted retrieval quota).
+    const counts = weights.map(w => Math.max(1, Math.round((w / totalWeight) * totalTarget)));
     let diff = counts.reduce((s, n) => s + n, 0) - totalTarget;
     let idx = 0;
     let loopGuard = 0;
     while (diff > 0) {
         const i = idx % counts.length;
-        if (counts[i] > 2 || loopGuard > counts.length * 2) { counts[i]--; diff--; }
+        if (counts[i] > 1 || loopGuard > counts.length * 2) { counts[i]--; diff--; }
         idx++;
         loopGuard++;
         if (idx > counts.length * 100) break;
@@ -219,15 +221,37 @@ function computeIntentsPerTheme(richThemes, totalTarget) {
     return counts;
 }
 
+/**
+ * Локальный fallback-blueprint без LLM.
+ *
+ * Изменение: интенты теперь варьируются по уровням Bloom Taxonomy вместо
+ * одинакового "Проверить понимание: X" для каждого слота темы.
+ * Это создаёт семантически разные embedding-запросы для каждого интента
+ * в рамках одной темы → hybridRetrieve возвращает разные чанки → меньше
+ * дубликатов в generation stage.
+ */
 function buildBlueprintFallbackLocal(richThemes, perTheme) {
+    const BLOOM_VERBS = {
+        remember:  'Назвать и воспроизвести',
+        understand: 'Объяснить принцип',
+        apply:     'Применить на практике',
+        analyze:   'Проанализировать и сравнить',
+    };
+    const DEFAULT_VERB = 'Проверить знание';
+
     const fallback = [];
     for (let ti = 0; ti < richThemes.length; ti++) {
         const t = richThemes[ti];
+        const candidates = Array.isArray(t.difficultyCandidates) && t.difficultyCandidates.length > 0
+            ? t.difficultyCandidates
+            : ['understand'];
         for (let i = 0; i < perTheme[ti]; i++) {
+            const level = candidates[i % candidates.length];
+            const verb = BLOOM_VERBS[level] || DEFAULT_VERB;
             fallback.push({
                 theme: t.topic,
                 section: t.section,
-                intent: `Проверить понимание: ${t.topic}`,
+                intent: `${verb}: ${t.topic}`,
                 type: 'multiple_choice',
             });
         }
@@ -260,8 +284,10 @@ async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, ta
         : '';
     const outlineText = buildDocumentOutline(indexedChunks);
 
-    const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
-    const maxAttempts = 5;
+    const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 30000;
+    // Reduced from 5 to 2: if the model fails twice, the improved local fallback
+    // is faster and more reliable than 3+ more retries with exponential backoff.
+    const maxAttempts = 2;
     let lastError;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -298,10 +324,14 @@ ${digest}
 
             if (list && list.length > 0) {
                 const normalized = list.map(item => ({ ...item, type: 'multiple_choice' }));
-                if (normalized.length < Math.floor(totalQuestions * 0.8)) {
-                    throw new Error(`Слишком мало intents: ${normalized.length} < ${totalQuestions}`);
+                // Accept any result with at least 5 intents (was 80% of totalQuestions).
+                // A partial blueprint with 5-20 intents is far more valuable than
+                // 3 more retries + exponential backoff that can add 60-120 seconds.
+                const minAcceptable = Math.min(5, totalQuestions);
+                if (normalized.length < minAcceptable) {
+                    throw new Error(`Blueprint слишком мал: ${normalized.length} intents (минимум ${minAcceptable})`);
                 }
-                return normalized;
+                return normalized.slice(0, totalQuestions);
             }
             throw new Error('Пустой план вопросов');
         } catch (err) {
@@ -320,186 +350,10 @@ ${digest}
     throwAfterGeminiRetriesFailed('buildThemesAndBlueprint', lastError);
 }
 
-async function extractThemes(indexedChunks, fullText, model = null, targetCount = null, options = null) {
-    const opts = options && typeof options === 'object' ? options : {};
-    const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const targetFastModel = resolveBlueprintModelTarget(model);
-    const llmModel = await quotaGuard.getAvailableModel(targetFastModel);
-
-    const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze'];
-    const OLD_TO_BLOOM = { easy: 'remember', medium: 'understand', hard: 'analyze' };
-
-    const structuralEstimate = estimateThemeCount(indexedChunks, fullText);
-    const targetThemes = targetCount
-        ? Math.max(structuralEstimate, Math.min(10, Math.ceil(targetCount / 3)))
-        : structuralEstimate;
-
-    if (await quotaGuard.isRpdExhaustedForModel(llmModel)) {
-        console.warn('[BLUEPRINT] extractThemes: дневной лимит LLM исчерпан — собираем темы локально из разделов');
-        return buildLocalThemesFromSections(indexedChunks);
-    }
-
-    const digest = buildSummaryDigest(indexedChunks, fullText);
-
-    const uniqueSections = [...new Set(
-        (indexedChunks || []).map(c => (c.section || c.heading || '').trim()).filter(Boolean)
-    )];
-    const sectionListText = uniqueSections.length > 0
-        ? `\n\nРАЗДЕЛЫ ДОКУМЕНТА (${uniqueSections.length}):\n${uniqueSections.map((s, i) => `${i + 1}. ${s}`).join('\n')}`
-        : '';
-    const outlineText = buildDocumentOutline(indexedChunks);
-
-    const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
-    const maxAttempts = 5;
-    let lastError;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            await quotaGuard.assertWithinFreeTierQuota(llmModel);
-            const ai = await getAiClient();
-            const genPromise = ai.models.generateContent({
-                model: llmModel,
-                contents: `Ты анализируешь техническую/учебную документацию. Твоя задача — выделить КОНКРЕТНЫЕ, ГРАНУЛЯРНЫЕ темы из документа, представленного секциями с фактами.${sectionListText}${outlineText}
-
-ТРЕБОВАНИЯ К ТЕМАМ:
-1. Каждая тема — конкретная подтема из ОДНОГО раздела, НЕ обобщение всего документа.
-2. Для технических документов ОБЯЗАТЕЛЬНО выделяй отдельные темы для:
-   - Порядок/процедура эксплуатации (если есть)
-   - Техническое обслуживание (если есть)
-   - Диагностика и устранение неисправностей (если есть)
-   - Меры безопасности и предупреждения (если есть)
-   - Параметры и технические характеристики (если есть)
-   - Отдельные режимы работы (если есть)
-3. НЕ создавай тему «Общая информация» или «Основные концепции» — только конкретные темы.
-4. Не создавай темы, которые сводятся только к названиям глав/разделов без предметного содержания (например «Глава 1 — введение»). Название темы должно отражать суть материала (процедура, параметр, режим, диагностика).
-5. Каждая тема должна быть достаточно конкретной для создания 2–5 проверочных вопросов с опорой на факты и числа из текста, где они есть.
-6. Выдели ровно ${targetThemes} тем, равномерно охватывающих весь документ.
-
-Для каждой темы укажи:
-- topic: конкретное название темы (например: «Порядок замены фильтра», «Коды ошибок системы», «Предельно допустимые температуры»; не используй «Глава N» как название темы)
-- section: название раздела документа (из списка разделов выше или из заголовка чанка)
-- importance: важность 1–3 (3 = критически важная для понимания и безопасности)
-- suggestedCount: рекомендуемое число вопросов (2–5)
-- difficultyCandidates: массив из 1–3 уровней Bloom Taxonomy: "remember", "understand", "apply", "analyze"
-
-Материал (разбит по разделам):
-${digest}
-
-Верни JSON массив из ровно ${targetThemes} объектов. Никакого другого текста (поле topic без ссылок «Глава/Раздел N» как единственного содержания):
-[{"topic":"...","section":"...","importance":2,"suggestedCount":3,"difficultyCandidates":["understand","apply"]},...]`,
-                config: { temperature: 0.2, responseMimeType: 'application/json' },
-            });
-            const response = await withTimeout(genPromise, reqTimeout, '[BLUEPRINT] extractThemes generateContent');
-            await quotaGuard.recordGeminiCall(llmModel);
-
-            const parsed = extractJSON(response.text);
-            let themes = Array.isArray(parsed) ? parsed : (parsed.themes && Array.isArray(parsed.themes) ? parsed.themes : null);
-
-            if (themes && themes.length > 0) {
-                themes = themes.map((t, i) => {
-                    let candidates = Array.isArray(t.difficultyCandidates) && t.difficultyCandidates.length > 0
-                        ? t.difficultyCandidates : ['understand'];
-                    candidates = candidates.map(d => OLD_TO_BLOOM[d] || d).filter(d => BLOOM_LEVELS.includes(d));
-                    if (candidates.length === 0) candidates = ['understand'];
-                    return {
-                        topic: (t.topic || t.name || String(t)).trim(),
-                        section: (t.section || `Раздел ${i + 1}`).trim(),
-                        importance: Math.min(3, Math.max(1, Number(t.importance) || 2)),
-                        suggestedCount: Math.min(5, Math.max(2, Number(t.suggestedCount) || 3)),
-                        difficultyCandidates: candidates,
-                    };
-                });
-                console.log(`[BLUEPRINT] extractThemes: ${themes.length} тем из ${indexedChunks ? indexedChunks.length : 0} чанков (${uniqueSections.length} разделов)`);
-                if (themes.length < Math.ceil(targetThemes * 0.6)) {
-                    console.warn(`[BLUEPRINT] extractThemes: LLM вернул меньше тем (${themes.length}) чем ожидалось (${targetThemes})`);
-                }
-                return themes;
-            }
-            throw new Error('Пустой список тем');
-        } catch (err) {
-            lastError = err;
-            if (err.type === 'QUOTA_EXCEEDED') break;
-            const g = parseGeminiApiError(err);
-            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, err);
-            console.warn(`[BLUEPRINT] extractThemes попытка ${attempt}/${maxAttempts}: ${err.message}`);
-            if (g.isDailyFreeTierQuota) break;
-            if (attempt < maxAttempts) {
-                if (onRetry) onRetry({ attempt, maxAttempts, parsed: g, message: String(err.message || '') });
-                await sleepForGeminiRetry(g, attempt, maxAttempts, sleep);
-            }
-        }
-    }
-    throwAfterGeminiRetriesFailed('extractThemes', lastError);
-}
-
-async function buildQuestionBlueprint(themes, targetMin, targetMax, model = null, options = null) {
-    const opts = options && typeof options === 'object' ? options : {};
-    const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
-    const targetFastModel = resolveBlueprintModelTarget(model);
-    const llmModel = await quotaGuard.getAvailableModel(targetFastModel);
-    
-    const richThemes = themes.map(t => typeof t === 'string'
-        ? { topic: t, section: 'Документ', importance: 2, suggestedCount: 3, difficultyCandidates: ['understand'] }
-        : t
-    );
-    const totalTarget = Math.round((targetMin + targetMax) / 2);
-    const perTheme = computeIntentsPerTheme(richThemes, totalTarget);
-    const expectedCount = perTheme.reduce((s, n) => s + n, 0);
-    const themesForPrompt = richThemes.map((t, i) =>
-        `${i + 1}. [${t.section}] ${t.topic} → ${perTheme[i]} вопросов`
-    ).join('\n');
-
-    if (await quotaGuard.isRpdExhaustedForModel(llmModel)) {
-        console.warn('[BLUEPRINT] buildBlueprint: дневной лимит LLM исчерпан — локальный план без API');
-        return buildBlueprintFallbackLocal(richThemes, perTheme);
-    }
-
-    const reqTimeout = config.GEMINI_REQUEST_TIMEOUT_MS || 0;
-    const maxAttempts = 5;
-    let lastError;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            await quotaGuard.assertWithinFreeTierQuota(llmModel);
-            const ai = await getAiClient();
-            const genPromise = ai.models.generateContent({
-                model: llmModel,
-                contents: `Ты создаёшь план проверочного теста. Все вопросы — формата multiple_choice (4 варианта, 1 правильный).\n\nДля каждой темы придумай РОВНО указанное число конкретных «намерений вопроса» (question intent) — что именно нужно проверить (1–2 предложения): факты, процедуры, числовые нормы, последовательность шагов, сравнение режимов. Запрещены intents про структуру документа («что в какой главе», перечисление заголовков). Если в теме есть технические параметры — минимум половины intents должны касаться измеримых величин или логики процесса.\n\nТемы (формат: N. [Раздел] Тема → кол-во вопросов):\n${themesForPrompt}\n\nВерни JSON массив ровно из ${expectedCount} объектов:\n[\n  {"theme":"...","section":"...","intent":"...","type":"multiple_choice"},\n  ...\n]\nНикакого другого текста.`,
-                config: { temperature: 0.3, responseMimeType: 'application/json' },
-            });
-            const response = await withTimeout(genPromise, reqTimeout, '[BLUEPRINT] buildBlueprint generateContent');
-            await quotaGuard.recordGeminiCall(llmModel);
-            const parsed = extractJSON(response.text);
-            const list = Array.isArray(parsed) ? parsed : (parsed.intents && Array.isArray(parsed.intents) ? parsed.intents : null);
-
-            if (list && list.length > 0) {
-                const normalized = list.map(item => ({ ...item, type: 'multiple_choice' }));
-                if (normalized.length < Math.floor(expectedCount * 0.8)) {
-                    throw new Error(`Слишком мало intents: ${normalized.length} < ${expectedCount}`);
-                }
-                return normalized;
-            }
-            throw new Error('Пустой blueprint');
-        } catch (err) {
-            lastError = err;
-            if (err.type === 'QUOTA_EXCEEDED') break;
-            const g = parseGeminiApiError(err);
-            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, err);
-            console.warn(`[BLUEPRINT] buildBlueprint попытка ${attempt}/${maxAttempts}: ${err.message}`);
-            if (g.isDailyFreeTierQuota) break;
-            if (attempt < maxAttempts) {
-                if (onRetry) onRetry({ attempt, maxAttempts, parsed: g, message: String(err.message || '') });
-                await sleepForGeminiRetry(g, attempt, maxAttempts, sleep);
-            }
-        }
-    }
-    throwAfterGeminiRetriesFailed('buildQuestionBlueprint', lastError);
-}
-
 module.exports = {
     estimateThemeCount,
     buildLocalThemesFromSections,
     buildThemesAndBlueprint,
-    extractThemes,
     buildQuestionBlueprint,
     computeIntentsPerTheme,
     buildBlueprintFallbackLocal

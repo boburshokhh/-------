@@ -7,7 +7,7 @@ const { parseGeminiApiError, sleepForGeminiRetry, withTimeout } = require('./gem
 const { getQueryEmbedding, getBatchEmbeddings, hybridRetrieve, mmrSelect, lexicalScore } = require('./rag/retriever');
 const { detectSectionHint, resolveChunkEvidence, buildSummaryDigest, buildEvidencePackets, formatEvidenceForPrompt } = require('./rag/evidenceBuilder');
 const {
-    estimateThemeCount, buildLocalThemesFromSections, buildThemesAndBlueprint, extractThemes,
+    estimateThemeCount, buildLocalThemesFromSections, buildThemesAndBlueprint,
     buildQuestionBlueprint, computeIntentsPerTheme, buildBlueprintFallbackLocal
 } = require('./generation/blueprintService');
 const { cosineSimilarity } = require('./nlp/similarity');
@@ -90,7 +90,7 @@ function formatCoverageReport(coverageMap) {
 }
 
 module.exports = {
-    hybridRetrieve, extractThemes, buildQuestionBlueprint, buildThemesAndBlueprint, buildLocalThemesFromSections, buildBlueprintFallbackLocal, computeIntentsPerTheme,
+    hybridRetrieve, buildQuestionBlueprint, buildThemesAndBlueprint, buildLocalThemesFromSections, buildBlueprintFallbackLocal, computeIntentsPerTheme,
     buildEvidencePackets, formatEvidenceForPrompt,
     buildCoverageMap, updateCoverageMap, formatCoverageReport,
     cosineSimilarity, getQueryEmbedding, getBatchEmbeddings,

@@ -120,11 +120,16 @@ function buildSummaryDigest(indexedChunks, fullText, maxTotalChars = 18000) {
 
     let summaryChunks = 0, layeredChunks = 0, textChunks = 0;
     const blocks = [];
-    let totalChars = 0;
 
     const maxExDigest = 6;
     const maxLlmDigest = 6;
     const snippetChars = 380;
+
+    // Per-section budget guarantees ALL sections appear in the digest.
+    // Previously a hard break after 18K chars meant sections at the end were
+    // completely dropped → blueprint generated zero intents for those topics.
+    // Now every section gets at minimum 300 chars (header + at least one fact).
+    const perSectionBudget = Math.max(300, Math.floor(maxTotalChars / Math.max(1, sectionMap.size)));
 
     for (const [sectionName, chunks] of sectionMap) {
         const sectionHeader = `\n══════════════════════════════════\nРАЗДЕЛ: ${sectionName}\n══════════════════════════════════`;
@@ -168,15 +173,11 @@ function buildSummaryDigest(indexedChunks, fullText, maxTotalChars = 18000) {
             else textChunks++;
         }
 
-        if (totalChars + sectionBlock.length > maxTotalChars) {
-            const remaining = maxTotalChars - totalChars;
-            if (remaining > 150) {
-                blocks.push(sectionBlock.slice(0, remaining) + '\n...[Раздел усечён из-за лимита контекста]');
-            }
-            break;
+        // Trim section to per-section budget instead of hard-stopping.
+        if (sectionBlock.length > perSectionBudget) {
+            sectionBlock = sectionBlock.slice(0, perSectionBudget) + '\n...[Раздел усечён из-за лимита контекста]';
         }
         blocks.push(sectionBlock);
-        totalChars += sectionBlock.length;
     }
 
     console.log(`[RAG] buildSummaryDigest: ${blocks.length} разделов из ${sectionMap.size} (layered=${layeredChunks}, summary=${summaryChunks}, text/extractive=${textChunks})`);
