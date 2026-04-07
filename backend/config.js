@@ -27,6 +27,12 @@ module.exports = {
   API_RATE_LIMIT_MAX: parseRateMax(process.env.API_RATE_LIMIT_MAX, 100),
   /** Админка дергает много эндпоинтов параллельно — отдельный более высокий потолок. */
   ADMIN_API_RATE_LIMIT_MAX: parseRateMax(process.env.ADMIN_API_RATE_LIMIT_MAX, 800),
+  /** Лимит POST /api/upload за окно (по умолчанию 30 / 15 мин). */
+  UPLOAD_RATE_LIMIT_WINDOW_MS: (() => {
+    const w = parseInt(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS, 10);
+    return Number.isFinite(w) && w >= 60_000 ? w : 15 * 60 * 1000;
+  })(),
+  UPLOAD_RATE_LIMIT_MAX: parseRateMax(process.env.UPLOAD_RATE_LIMIT_MAX, 30),
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   MAX_FILE_SIZE_MB: parseInt(process.env.MAX_FILE_SIZE_MB) || 10,
   CHUNK_TOKEN_LIMIT: parseInt(process.env.CHUNK_TOKEN_LIMIT) || 2500,
@@ -60,8 +66,14 @@ module.exports = {
   CHAR_LENGTH_PER_QUESTION: parseInt(process.env.CHAR_LENGTH_PER_QUESTION, 10) || 2000,
   LLM_MODEL: process.env.LLM_MODEL || 'gemini-2.5-flash',
   LLM_FAST_MODEL: process.env.LLM_FAST_MODEL || 'gemini-1.5-flash',
-  /** Free tier (ориентир для защиты от злоупотреблений; сверяйте с AI Studio для своего ключа) */
+  /** Free tier (ориентир для отображения; сверяйте с AI Studio для своего ключа) */
   GEMINI_QUOTA_TIER: 'free',
+  /**
+   * Локальная блокировка по RPM/RPD до лимитов Google (учёт в БД).
+   * По умолчанию выключено: при платном/высоком тарифе лимиты редко упираются, режет только искусственно.
+   * Включить: LOCAL_GEMINI_QUOTA_ENABLED=true
+   */
+  LOCAL_GEMINI_QUOTA_ENABLED: process.env.LOCAL_GEMINI_QUOTA_ENABLED === 'true',
   // Только Text-out модели с доступными лимитами (RPM/TPM/RPD)
   LLM_MODELS: [
     { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (15 RPM, 1M TPM, 1500 RPD)' },

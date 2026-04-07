@@ -104,11 +104,16 @@ export const API = {
     if (opts.modelId) formData.append('model', opts.modelId);
     if (opts.forceOffline) formData.append('forceOffline', 'true');
     if (opts.routingMode) formData.append('routingMode', String(opts.routingMode));
+    /** Дублируем id задачи в теле: после multer сервер сможет сопоставить job даже без заголовка. */
+    if (opts.jobId) formData.append('jobId', String(opts.jobId));
 
     const headers = {};
     if (opts.jobId) headers['X-Job-Id'] = opts.jobId;
 
-    return request('/upload', {
+    /** Query доступен до парсинга multipart — надёжно при nginx/proxy, где заголовок могут срезать. */
+    const q = opts.jobId ? `?jobId=${encodeURIComponent(String(opts.jobId))}` : '';
+
+    return request(`/upload${q}`, {
       method: 'POST',
       body: formData,
       headers,

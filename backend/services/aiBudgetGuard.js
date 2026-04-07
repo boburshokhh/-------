@@ -21,6 +21,11 @@ function guardCfg() {
     return config.AI_BUDGET_GUARDS || {};
 }
 
+function budgetGuardsActive() {
+    if (config.LOCAL_GEMINI_QUOTA_ENABLED !== true) return false;
+    return guardCfg().enabled !== false;
+}
+
 function getLimitsForModel(modelId) {
     if (!modelId) return null;
     return config.FREE_TIER_QUOTAS[modelId] || config.FREE_TIER_QUOTA_DEFAULT || null;
@@ -69,7 +74,7 @@ function isPreviewModelId(modelId) {
  */
 async function canUseModelForStage(modelId, stage) {
     const g = guardCfg();
-    if (g.enabled === false) {
+    if (!budgetGuardsActive()) {
         return { allowed: true, reason: null };
     }
     if (!modelId || !BUCKETS.includes(stage)) {
@@ -168,7 +173,7 @@ async function getUsageSnapshot() {
         source: 'ai_model_usage',
     };
 
-    if (!fp || g.enabled === false) {
+    if (!fp || !budgetGuardsActive()) {
         return empty;
     }
 
@@ -255,8 +260,7 @@ function createBudgetError(message, details) {
  * Мягкая проверка бюджета (после assertWithinFreeTierQuota).
  */
 async function assertBudgetAllows(modelId, opts = {}) {
-    const g = guardCfg();
-    if (g.enabled === false) return;
+    if (!budgetGuardsActive()) return;
     const stage = opts.stage || inferBudgetPhaseFromModel(modelId, opts);
     const { allowed, reason, suggestedModel } = await canUseModelForStage(modelId, stage);
     if (!allowed) {
@@ -274,8 +278,7 @@ async function assertBudgetAllows(modelId, opts = {}) {
 }
 
 async function recordAiModelUsageSuccess(modelId, opts = {}) {
-    const g = guardCfg();
-    if (g.enabled === false) return;
+    if (!budgetGuardsActive()) return;
     const fp = await getKeyFingerprint();
     if (!fp || !modelId) return;
     const phase = inferBudgetPhaseFromModel(modelId, opts);
@@ -292,8 +295,7 @@ async function recordAiModelUsageSuccess(modelId, opts = {}) {
 }
 
 async function recordAiModelUsageFailure(modelId, opts = {}) {
-    const g = guardCfg();
-    if (g.enabled === false) return;
+    if (!budgetGuardsActive()) return;
     const fp = await getKeyFingerprint();
     if (!fp || !modelId) return;
     const phase = inferBudgetPhaseFromModel(modelId, opts);

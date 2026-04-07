@@ -67,6 +67,8 @@ const modelLabel = computed(() => {
 
 let pollTimer = null
 let pollActive = false
+let job404Streak = 0
+const JOB_404_GIVE_UP = 45
 
 function stopPolling() {
   pollActive = false
@@ -91,6 +93,7 @@ async function pollProgress() {
   if (!jobId) return
   try {
     const progress = await API.getJobProgress(jobId)
+    job404Streak = 0
     store.actions.setUploadProgress(progress)
     if (progress.phase === 'done' && store.state.upload.testId) {
       stopPolling()
@@ -105,6 +108,13 @@ async function pollProgress() {
       return
     }
     if (error?.status === 404) {
+      const transient = ['uploading', 'processing'].includes(store.state.upload.status)
+      if (transient) {
+        job404Streak += 1
+        if (job404Streak < JOB_404_GIVE_UP) {
+          return
+        }
+      }
       stopPolling()
       if (store.state.upload.testId) {
         router.replace({ path: '/test', query: { testId: String(store.state.upload.testId) } })
@@ -123,6 +133,7 @@ onMounted(async () => {
     router.replace('/zagruzka')
     return
   }
+  job404Streak = 0
   pollActive = true
   void pollLoop()
 })

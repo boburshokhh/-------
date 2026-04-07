@@ -70,8 +70,8 @@ const adminApiLimiter = rateLimit({
 });
 
 const uploadLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
+    windowMs: config.UPLOAD_RATE_LIMIT_WINDOW_MS,
+    max: config.UPLOAD_RATE_LIMIT_MAX,
     message: { error: 'Слишком много загрузок, попробуйте позже' },
 });
 

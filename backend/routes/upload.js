@@ -20,10 +20,21 @@ const customModeProfilesRepo = require('../db/repositories/customModeProfilesRep
 const router = express.Router();
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 
-function registerUploadJobStub(req, res, next) {
-    const incomingJobId = (typeof req.get === 'function' && req.get('X-Job-Id'))
+/**
+ * Клиентский id задачи: заголовок (предпочтительно), иначе ?jobId= в URL.
+ * Поля multipart здесь ещё недоступны — см. resolveJobIdAfterUpload ниже.
+ */
+function pickJobIdBeforeMulter(req) {
+    const h = typeof req.get === 'function' && req.get('X-Job-Id')
         ? String(req.get('X-Job-Id')).trim()
         : '';
+    if (h) return h;
+    const q = req.query && req.query.jobId != null ? String(req.query.jobId).trim() : '';
+    return q;
+}
+
+function registerUploadJobStub(req, res, next) {
+    const incomingJobId = pickJobIdBeforeMulter(req);
     if (incomingJobId && JOB_ID_RE.test(incomingJobId)) {
         jobProgress.logJobProgress(incomingJobId, {
             phase: 'upload',
@@ -40,6 +51,13 @@ function registerUploadJobStub(req, res, next) {
                 content_length: cl != null && cl !== '' ? cl : null,
             },
         });
+        jobProgress.flushPersist(incomingJobId)
+            .then(() => next())
+            .catch((err) => {
+                console.error('[UPLOAD] flushPersist:', err.message);
+                next();
+            });
+        return;
     }
     next();
 }
@@ -93,13 +111,12 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         console.warn(`[UPLOAD] Имя файла нормализовано: raw="${originalNameRaw}" → display="${displayName}"`);
     }
 
-    const incomingJobId = (typeof req.get === 'function' && req.get('X-Job-Id'))
-        ? String(req.get('X-Job-Id')).trim()
-        : '';
+    const fromBody = req.body && typeof req.body.jobId === 'string' ? String(req.body.jobId).trim() : '';
+    const incomingJobId = pickJobIdBeforeMulter(req) || fromBody;
     if (incomingJobId && !JOB_ID_RE.test(incomingJobId)) {
         return res.status(400).json({
-            error: 'Некорректный X-Job-Id',
-            details: 'Разрешены только латиница, цифры, "_" и "-", длина до 80 символов',
+            error: 'Некорректный идентификатор задачи',
+            details: 'Задайте корректный X-Job-Id, query ?jobId= или поле form jobId (латиница, цифры, «_», «-», до 80 символов)',
         });
     }
     const jobId = incomingJobId || uuidv4();
@@ -126,7 +143,13 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         }
 
         const parseResult = await parseDocument(filePath, file.mimetype);
-        const { text, pageCount, rawText, diagnostics } = parseResult;
+        const {
+            text,
+            pageCount,
+            rawText,
+            diagnostics: diagnosticsRaw,
+        } = parseResult;
+        const diagnostics = diagnosticsRaw && typeof diagnosticsRaw === 'object' ? diagnosticsRaw : {};
 
         report({
             phase: 'parse',
@@ -228,11 +251,18 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
             if (builtInModes.has(routingModeRaw)) {
                 routingMode = routingModeRaw;
             } else {
-                const customMode = await customModeProfilesRepo.getProfileByCode(routingModeRaw);
-                if (customMode && !customMode.is_archived && !customMode.is_disabled) {
-                    routingMode = routingModeRaw;
-                } else if (routingModeRaw) {
-                    console.warn(`[UPLOAD] Неизвестный routingMode "${routingModeRaw}", использован ${routingMode}`);
+                try {
+                    const customMode = await customModeProfilesRepo.getProfileByCode(routingModeRaw);
+                    if (customMode && !customMode.is_archived && !customMode.is_disabled) {
+                        routingMode = routingModeRaw;
+                    } else if (routingModeRaw) {
+                        console.warn(`[UPLOAD] Неизвестный routingMode "${routingModeRaw}", использован ${routingMode}`);
+                    }
+                } catch (e) {
+                    // Не валим upload из-за проблем с таблицами custom modes.
+                    console.warn(
+                        `[UPLOAD] Ошибка проверки routingMode "${routingModeRaw}" (${e.message}); использован ${routingMode}`,
+                    );
                 }
             }
         }

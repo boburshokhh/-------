@@ -23,6 +23,10 @@ function getLimitsForModel(modelId) {
     return config.FREE_TIER_QUOTAS[modelId] || config.FREE_TIER_QUOTA_DEFAULT || null;
 }
 
+function isLocalQuotaEnforced() {
+    return config.LOCAL_GEMINI_QUOTA_ENABLED === true;
+}
+
 function createQuotaError(message, details) {
     const e = new Error(message);
     e.status = 429;
@@ -39,6 +43,8 @@ function sleep(ms) {
 
 async function assertWithinFreeTierQuota(modelId, opts = {}) {
     if (!modelId) return;
+    if (!isLocalQuotaEnforced()) return;
+
     const limits = getLimitsForModel(modelId);
     if (!limits) return;
 
@@ -78,6 +84,7 @@ async function assertWithinFreeTierQuota(modelId, opts = {}) {
  */
 async function isRpdExhaustedForModel(modelId) {
     if (!modelId) return false;
+    if (!isLocalQuotaEnforced()) return false;
     const limits = getLimitsForModel(modelId);
     if (!limits) return false;
     const fp = await getKeyFingerprint();
@@ -87,6 +94,7 @@ async function isRpdExhaustedForModel(modelId) {
 }
 
 async function waitUntilQuotaAllows(modelId, options = {}) {
+    if (!isLocalQuotaEnforced()) return;
     const maxWaitMs = options.maxWaitMs ?? (config.QUOTA_RPM_WAIT_MAX_MS || 60000);
     const pollMs = options.pollMs ?? 500;
     const deadline = Date.now() + maxWaitMs;
@@ -130,6 +138,7 @@ async function waitUntilQuotaAllows(modelId, options = {}) {
  * @returns {Promise<boolean>} true если учёт обновлён
  */
 async function syncFromGoogle429(modelId, err) {
+    if (!isLocalQuotaEnforced()) return false;
     const p = parseGeminiApiError(err);
     if (!p.isResourceExhausted) return false;
 
@@ -172,7 +181,12 @@ async function recordGeminiCall(modelId, opts = {}) {
     if (!fp) return;
 
     const date = utcDateString();
-    await quotaRepo.recordUsage(fp, date, modelId);
+    if (isLocalQuotaEnforced()) {
+        await quotaRepo.recordUsage(fp, date, modelId);
+        if (config.AI_BUDGET_GUARDS?.enabled !== false && opts.recordAiUsage !== false) {
+            await aiBudgetGuard.recordAiModelUsageSuccess(modelId, opts);
+        }
+    }
 
     if (opts.phase && opts.traceId) {
         let entry = phaseCounters.get(opts.traceId);
@@ -182,10 +196,6 @@ async function recordGeminiCall(modelId, opts = {}) {
         }
         entry[opts.phase] = (entry[opts.phase] || 0) + 1;
     }
-
-    if (config.AI_BUDGET_GUARDS?.enabled !== false && opts.recordAiUsage !== false) {
-        await aiBudgetGuard.recordAiModelUsageSuccess(modelId, opts);
-    }
 }
 
 /**
@@ -193,7 +203,6 @@ async function recordGeminiCall(modelId, opts = {}) {
  */
 async function recordGeminiFailure(modelId, opts = {}) {
     if (!modelId) return;
-    if (config.AI_BUDGET_GUARDS?.enabled === false) return;
     await aiBudgetGuard.recordAiModelUsageFailure(modelId, opts);
 }
 
@@ -210,6 +219,14 @@ function resetUsageForNewApiKey() {
 }
 
 async function getUsageSummaryPublic() {
+    if (!isLocalQuotaEnforced()) {
+        return {
+            tier: config.GEMINI_QUOTA_TIER || 'free',
+            usageDateUtc: utcDateString(),
+            perModel: {},
+            localQuotaEnforced: false,
+        };
+    }
     const fp = await getKeyFingerprint();
     const date = utcDateString();
     const rows = fp ? await quotaRepo.getUsageSummary(fp, date) : [];
@@ -240,6 +257,7 @@ async function getUsageSummaryPublic() {
         tier: config.GEMINI_QUOTA_TIER || 'free',
         usageDateUtc: date,
         perModel,
+        localQuotaEnforced: true,
     };
 }
 

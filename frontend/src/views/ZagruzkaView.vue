@@ -84,6 +84,9 @@ const routingLoading = ref(false)
 const routingSnapshotError = ref('')
 let pollTimer = null
 let pollActive = false
+/** Подряд 404 при опросе /api/jobs (мульти-инстанс / гонка до регистрации задачи). */
+let job404Streak = 0
+const JOB_404_GIVE_UP = 45
 
 const isBusy = computed(() => ['uploading', 'processing'].includes(store.state.upload.status))
 const showProgressInline = computed(() => ['uploading', 'processing', 'done'].includes(store.state.upload.status))
@@ -156,6 +159,7 @@ onUnmounted(() => {
 
 function startPolling() {
   stopPolling()
+  job404Streak = 0
   pollActive = true
   void pollLoop()
 }
@@ -184,6 +188,7 @@ async function pollProgress() {
   if (!jobId) return
   try {
     const progress = await API.getJobProgress(jobId)
+    job404Streak = 0
     store.actions.setUploadProgress(progress)
     if (progress.phase === 'done' || progress.phase === 'error') {
       stopPolling()
@@ -193,9 +198,13 @@ async function pollProgress() {
       return
     }
     if (error?.status === 404) {
-      // Пока ждём первый ответ по задаче, 404 возможен из‑за гонки сети; после успешного poll статус станет processing.
-      if (store.state.upload.status === 'uploading') {
-        return
+      // Гонка до registerUploadJobStub, балансировщик на другой инстанс, или таблица job_progress не на всех нодах.
+      const transient = ['uploading', 'processing'].includes(store.state.upload.status)
+      if (transient) {
+        job404Streak += 1
+        if (job404Streak < JOB_404_GIVE_UP) {
+          return
+        }
       }
       stopPolling()
       store.actions.failUpload('Прогресс задачи не найден (сервер перезапущен, истёк TTL или запрос не дошёл до приложения). Загрузите файл снова.')

@@ -1,7 +1,10 @@
 const { logStructured } = require('../utils/observability');
+const jobProgressRepo = require('../db/repositories/jobProgressRepo');
 
 /**
  * In-memory прогресс длительных задач (загрузка → индекс → генерация).
+ * Дублируется в PostgreSQL (таблица job_progress), чтобы GET /api/jobs/:id работал
+ * при нескольких инстансах за балансировщиком и не терялся при рестарте в пределах TTL.
  * Клиент передаёт X-Job-Id и опрашивает GET /api/jobs/:jobId
  *
  * Процент считается от объёма работ (workDone / workTotal), а не «на глаз».
@@ -14,6 +17,58 @@ const progressHistory = new Map();
 
 const TTL_MS = 30 * 60 * 1000;
 const MAX_HISTORY = 100;
+const PERSIST_DEBOUNCE_MS = 80;
+
+const persistTimers = new Map();
+let persistWarned = false;
+
+function buildSnapshot(jobId) {
+    const e = store.get(jobId);
+    if (!e) return null;
+    const hist = progressHistory.get(jobId) || [];
+    return {
+        current: { ...e },
+        history: hist.map((h) => ({ ...h })),
+    };
+}
+
+function clearPersistTimer(jobId) {
+    const t = persistTimers.get(jobId);
+    if (t) {
+        clearTimeout(t);
+        persistTimers.delete(jobId);
+    }
+}
+
+async function persistToDb(jobId) {
+    const snapshot = buildSnapshot(jobId);
+    if (!snapshot) return;
+    try {
+        await jobProgressRepo.upsert(jobId, snapshot);
+    } catch (err) {
+        if (!persistWarned) {
+            persistWarned = true;
+            console.warn('[JOB_PROGRESS] Не удалось сохранить прогресс в БД (будет только в памяти процесса):', err.message);
+        }
+    }
+}
+
+function schedulePersist(jobId) {
+    clearPersistTimer(jobId);
+    const t = setTimeout(() => {
+        persistTimers.delete(jobId);
+        void persistToDb(jobId);
+    }, PERSIST_DEBOUNCE_MS);
+    persistTimers.set(jobId, t);
+}
+
+/**
+ * Сразу записать текущее состояние задачи в БД (после первого log в middleware upload).
+ */
+async function flushPersist(jobId) {
+    clearPersistTimer(jobId);
+    await persistToDb(jobId);
+}
 
 /** Веса этапов (условные единицы «тяжёлых» шагов) — согласованы с indexer + generator */
 const WEIGHT = {
@@ -49,9 +104,11 @@ function getAccum(jobId) {
 }
 
 function cleanupJob(jobId) {
+    clearPersistTimer(jobId);
     store.delete(jobId);
     workAccum.delete(jobId);
     progressHistory.delete(jobId);
+    void jobProgressRepo.remove(jobId).catch(() => {});
 }
 
 function appendHistory(jobId, row) {
@@ -132,25 +189,47 @@ function setJob(jobId, data) {
     store.set(jobId, { ...data, updatedAt: Date.now() });
 }
 
-function getJob(jobId) {
+async function getJob(jobId) {
     const e = store.get(jobId);
-    if (!e) return null;
-    if (Date.now() - e.updatedAt > TTL_MS) {
-        logStructured({
-            level: 'warn',
-            traceId: jobId,
-            phase: e.phase || null,
-            event: 'job_state_expired',
-            metadata: {
-                last_updated_at: e.updatedAt,
-                ttl_ms: TTL_MS,
-            },
-        });
-        cleanupJob(jobId);
+    if (e) {
+        if (Date.now() - e.updatedAt > TTL_MS) {
+            logStructured({
+                level: 'warn',
+                traceId: jobId,
+                phase: e.phase || null,
+                event: 'job_state_expired',
+                metadata: {
+                    last_updated_at: e.updatedAt,
+                    ttl_ms: TTL_MS,
+                },
+            });
+            cleanupJob(jobId);
+            return null;
+        }
+        const hist = progressHistory.get(jobId) || [];
+        return { ...e, history: hist };
+    }
+
+    let row;
+    try {
+        row = await jobProgressRepo.getById(jobId);
+    } catch (err) {
+        if (!persistWarned) {
+            persistWarned = true;
+            console.warn('[JOB_PROGRESS] Чтение прогресса из БД недоступно:', err.message);
+        }
         return null;
     }
-    const hist = progressHistory.get(jobId) || [];
-    return { ...e, history: hist };
+    if (!row) return null;
+    const age = Date.now() - new Date(row.updated_at).getTime();
+    if (age > TTL_MS) {
+        void jobProgressRepo.remove(jobId).catch(() => {});
+        return null;
+    }
+    const cur = row.payload && row.payload.current;
+    const hist = Array.isArray(row.payload?.history) ? row.payload.history : [];
+    if (!cur || typeof cur !== 'object') return null;
+    return { ...cur, history: hist };
 }
 
 function clearJob(jobId) {
@@ -225,11 +304,13 @@ function logJobProgress(jobId, payload) {
     setJob(jobId, row);
     appendHistory(jobId, row);
     console.log(`[PROGRESS] ${JSON.stringify(row)}`);
+    schedulePersist(jobId);
 }
 
 module.exports = {
     logJobProgress,
     getJob,
+    flushPersist,
     clearJob,
     refineMainBatchPlan,
     estimateGenerationTailUnits,

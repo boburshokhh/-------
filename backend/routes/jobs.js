@@ -9,12 +9,12 @@ const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
  * GET /api/jobs/:jobId
  * Текущий прогресс загрузки/генерации (опрос с фронта во время POST /upload).
  */
-router.get('/:jobId', (req, res) => {
+router.get('/:jobId', async (req, res) => {
     const jobId = String(req.params.jobId || '');
     if (!JOB_ID_RE.test(jobId)) {
         return res.status(400).json({ error: 'Некорректный идентификатор задачи' });
     }
-    const state = getJob(jobId);
+    const state = await getJob(jobId);
     if (!state) {
         logStructured({
             level: 'warn',
