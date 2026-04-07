@@ -350,6 +350,40 @@ ${digest}
     throwAfterGeminiRetriesFailed('buildThemesAndBlueprint', lastError);
 }
 
+/**
+ * План вопросов (intents) из тем без вызова LLM — для офлайн-ветки / квота исчерпана.
+ * @param {object[]} richThemes
+ * @param {number} totalIntents — целевое число intents
+ * @param {number} [_totalIntentsDup] — дубликат аргумента для совместимости с вызовом в pipeline
+ * @param {string} [_model] — не используется (модель уже не вызывается)
+ * @param {object} [_options]
+ */
+async function buildQuestionBlueprint(richThemes, totalIntents, _totalIntentsDup, _model, _options) {
+    const themes = Array.isArray(richThemes) ? richThemes : [];
+    const n = Math.max(1, Math.floor(Number(totalIntents) || 10));
+    const normalized = themes.map((t) => (
+        typeof t === 'string'
+            ? {
+                topic: t,
+                section: 'Документ',
+                importance: 2,
+                suggestedCount: 3,
+                difficultyCandidates: ['understand'],
+            }
+            : {
+                ...t,
+                section: t.section || 'Документ',
+                importance: t.importance ?? 2,
+                suggestedCount: t.suggestedCount ?? 3,
+                difficultyCandidates: Array.isArray(t.difficultyCandidates) && t.difficultyCandidates.length
+                    ? t.difficultyCandidates
+                    : ['understand'],
+            }
+    ));
+    const perTheme = computeIntentsPerTheme(normalized, n);
+    return buildBlueprintFallbackLocal(normalized, perTheme);
+}
+
 module.exports = {
     estimateThemeCount,
     buildLocalThemesFromSections,
