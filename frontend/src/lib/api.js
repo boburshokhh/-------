@@ -199,6 +199,14 @@ export const API = {
     return request(`/tests/${encodeURIComponent(id)}/export`);
   },
 
+  moveTestPosition(id, direction) {
+    return request(`/tests/${encodeURIComponent(id)}/position`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction }),
+    });
+  },
+
   deleteTest(id) {
     return request(`/tests/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },

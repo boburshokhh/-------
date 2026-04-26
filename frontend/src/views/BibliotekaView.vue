@@ -22,6 +22,15 @@
               class="pl-10 pr-4 py-2.5 w-full sm:w-64 bg-[#F0F4F7] border-b-2 border-transparent focus:border-[#3755C3] outline-none transition-all rounded-t-xl font-medium text-sm text-[#2A3439]"
             />
           </div>
+          <select
+            v-model="sortMode"
+            class="px-3 py-2.5 bg-[#F0F4F7] border-b-2 border-transparent focus:border-[#3755C3] outline-none transition-all rounded-t-xl font-medium text-sm text-[#2A3439]"
+          >
+            <option value="manual">Сортировка: ручной порядок</option>
+            <option value="newest">Сортировка: сначала новые</option>
+            <option value="oldest">Сортировка: сначала старые</option>
+            <option value="title">Сортировка: по названию</option>
+          </select>
           <!-- Кнопка создать -->
           <button
             class="flex items-center justify-center gap-2 bg-gradient-to-br from-[#3755C3] to-[#2848B7] text-[#F8F7FF] px-6 py-2.5 rounded-xl font-bold text-sm shadow-sm hover:opacity-90 transition-all active:scale-95"
@@ -48,8 +57,12 @@
           v-for="test in filteredTests"
           :key="test.id"
           :item="test"
+          :can-move-up="canMoveUp(test.id)"
+          :can-move-down="canMoveDown(test.id)"
           @open-test="openTest"
           @open-results="openResults"
+          @move-up="moveUp"
+          @move-down="moveDown"
           @download-test="downloadTest"
           @delete-test="deleteTest"
         />
@@ -83,14 +96,34 @@ import { mapTestListItem } from '@/lib/mappers'
 import { useAppStore } from '@/stores/appStore'
 
 const search = ref('')
+const sortMode = ref('manual')
+const reorderSaving = ref(false)
 const router = useRouter()
 const store = useAppStore()
 
-const filteredTests = computed(() =>
-  store.state.tests.filter(t =>
-    t.title.toLowerCase().includes(search.value.toLowerCase())
-  )
-)
+const sortedTests = computed(() => {
+  const list = [...store.state.tests]
+  if (sortMode.value === 'newest') {
+    return list.sort((a, b) => Number(new Date(b.createdAt || 0)) - Number(new Date(a.createdAt || 0)))
+  }
+  if (sortMode.value === 'oldest') {
+    return list.sort((a, b) => Number(new Date(a.createdAt || 0)) - Number(new Date(b.createdAt || 0)))
+  }
+  if (sortMode.value === 'title') {
+    return list.sort((a, b) => String(a.title).localeCompare(String(b.title), 'ru'))
+  }
+  return list.sort((a, b) => {
+    const sa = Number(a.sortOrder || 0)
+    const sb = Number(b.sortOrder || 0)
+    if (sa !== sb) return sa - sb
+    return Number(a.id) - Number(b.id)
+  })
+})
+
+const filteredTests = computed(() => {
+  const q = search.value.toLowerCase()
+  return sortedTests.value.filter((t) => t.title.toLowerCase().includes(q))
+})
 
 const statsData = computed(() => {
   const tests = store.state.tests
@@ -136,6 +169,66 @@ async function deleteTest(item) {
   } catch (error) {
     store.actions.setTestsError(error?.message || 'Не удалось удалить тест')
   }
+}
+
+function canReorderNow() {
+  return sortMode.value === 'manual' && !search.value.trim()
+}
+
+function canMoveUp(id) {
+  if (!canReorderNow()) return false
+  const idx = sortedTests.value.findIndex((t) => t.id === id)
+  return idx > 0 && !reorderSaving.value
+}
+
+function canMoveDown(id) {
+  if (!canReorderNow()) return false
+  const idx = sortedTests.value.findIndex((t) => t.id === id)
+  return idx >= 0 && idx < sortedTests.value.length - 1 && !reorderSaving.value
+}
+
+function swapInStore(targetId, direction) {
+  const all = [...store.state.tests].sort((a, b) => {
+    const sa = Number(a.sortOrder || 0)
+    const sb = Number(b.sortOrder || 0)
+    if (sa !== sb) return sa - sb
+    return Number(a.id) - Number(b.id)
+  })
+  const idx = all.findIndex((x) => x.id === targetId)
+  if (idx < 0) return
+  const nextIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (nextIdx < 0 || nextIdx >= all.length) return
+  const current = all[idx]
+  const neighbor = all[nextIdx]
+  const tmp = current.sortOrder
+  current.sortOrder = neighbor.sortOrder
+  neighbor.sortOrder = tmp
+  store.actions.setTests([...all])
+}
+
+async function move(direction, item) {
+  if (!canReorderNow()) {
+    store.actions.setTestsError('Для изменения позиции выберите "ручной порядок" и очистите поиск')
+    return
+  }
+  reorderSaving.value = true
+  swapInStore(item.id, direction)
+  try {
+    await API.moveTestPosition(item.id, direction)
+  } catch (error) {
+    await loadTests()
+    store.actions.setTestsError(error?.message || 'Не удалось изменить порядок тестов')
+  } finally {
+    reorderSaving.value = false
+  }
+}
+
+async function moveUp(item) {
+  await move('up', item)
+}
+
+async function moveDown(item) {
+  await move('down', item)
 }
 
 async function downloadTest(item) {

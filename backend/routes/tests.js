@@ -56,6 +56,24 @@ router.get('/:id/export', async (req, res, next) => {
     }
 });
 
+router.patch('/:id/position', async (req, res, next) => {
+    try {
+        const direction = req.body?.direction;
+        if (direction !== 'up' && direction !== 'down') {
+            return res.status(400).json({ error: 'direction должен быть "up" или "down"' });
+        }
+
+        const result = await testRepo.moveTestPosition(req.params.id, direction);
+        if (!result.found) {
+            return res.status(404).json({ error: 'Тест не найден' });
+        }
+
+        res.json({ success: true, moved: !!result.moved });
+    } catch (e) {
+        next(e);
+    }
+});
+
 router.delete('/:id', async (req, res, next) => {
     try {
         const deleted = await testRepo.deleteTest(req.params.id);
