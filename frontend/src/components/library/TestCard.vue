@@ -72,22 +72,6 @@
         </button>
       </template>
       <button
-        class="p-2 text-[#566166] hover:text-[#3755C3] transition-colors disabled:opacity-40 disabled:hover:text-[#566166]"
-        :disabled="!canMoveUp"
-        aria-label="Поднять выше"
-        @click="$emit('move-up', item)"
-      >
-        <span class="material-symbols-outlined">keyboard_arrow_up</span>
-      </button>
-      <button
-        class="p-2 text-[#566166] hover:text-[#3755C3] transition-colors disabled:opacity-40 disabled:hover:text-[#566166]"
-        :disabled="!canMoveDown"
-        aria-label="Опустить ниже"
-        @click="$emit('move-down', item)"
-      >
-        <span class="material-symbols-outlined">keyboard_arrow_down</span>
-      </button>
-      <button
         class="p-2 text-[#566166] hover:text-[#3755C3] transition-colors"
         aria-label="Скачать JSON"
         @click="$emit('download-test', item)"
@@ -95,6 +79,7 @@
         <span class="material-symbols-outlined">file_download</span>
       </button>
       <button
+        v-if="canDelete"
         class="p-2 text-[#566166] hover:text-[#9F403D] transition-colors"
         aria-label="Удалить"
         @click="$emit('delete-test', item)"
@@ -110,10 +95,9 @@ import { computed } from 'vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
-  canMoveUp: { type: Boolean, default: false },
-  canMoveDown: { type: Boolean, default: false },
+  canDelete: { type: Boolean, default: false },
 })
-defineEmits(['open-test', 'open-results', 'move-up', 'move-down', 'download-test', 'delete-test'])
+defineEmits(['open-test', 'open-results', 'download-test', 'delete-test'])
 
 const badgeClass = computed(() => ({
   completed: 'bg-[#D3E4FE] text-[#435368]',

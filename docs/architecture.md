@@ -142,7 +142,7 @@ PDF-файлы хранятся в object storage (MinIO) или на локал
 *   **`chunks`** (бывш. `document_chunks`): `document_id` FK, `chunk_index`, `text`, `token_count`, `content_hash` (SHA-256, кэш), `page`, `section`, `heading`.
 *   **`chunk_embeddings`**: `chunk_id` FK, `embedding_model`, `embedding` (JSONB float[]), `dims`. UNIQUE(`chunk_id`, `embedding_model`).
 *   **`chunk_summaries`**: `chunk_id` FK, `summary_text` (JSONB string[], основные факты — LLM или extractive), `extractive_facts` (JSONB string[], эвристические опоры из текста, дублируются/дополняют primary), `summary_source`, `summary_status`. UNIQUE(`chunk_id`).
-*   **`tests`**: `document_id` FK, `title`, `questions_json` (JSONB), `total_questions`, `generation_metrics` (JSONB), `generation_run_id` FK, `sort_order` (ручной порядок в библиотеке). Экспорт теста в JSON читает этот же `questions_json`, поэтому отдельная таблица для скачивания не требуется.
+*   **`tests`**: `document_id` FK, `title`, `questions_json` (JSONB), `total_questions`, `generation_metrics` (JSONB), `generation_run_id` FK. Экспорт теста в JSON читает этот же `questions_json`, поэтому отдельная таблица или миграция для скачивания не требуется.
 *   **`results`**: `test_id` FK, `user_name`, `answers_json` (JSONB), `score`, `max_score`, `percentage`.
 *   **`app_settings`**: key-value настройки (API ключ и т.д.).
 *   **`gemini_usage`**: дневной учёт запросов к LLM.
