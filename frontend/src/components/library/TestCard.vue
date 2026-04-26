@@ -72,6 +72,13 @@
         </button>
       </template>
       <button
+        class="p-2 text-[#566166] hover:text-[#3755C3] transition-colors"
+        aria-label="Скачать JSON"
+        @click="$emit('download-test', item)"
+      >
+        <span class="material-symbols-outlined">file_download</span>
+      </button>
+      <button
         class="p-2 text-[#566166] hover:text-[#9F403D] transition-colors"
         aria-label="Удалить"
         @click="$emit('delete-test', item)"
@@ -88,7 +95,7 @@ import { computed } from 'vue'
 const props = defineProps({
   item: { type: Object, required: true },
 })
-defineEmits(['open-test', 'open-results', 'delete-test'])
+defineEmits(['open-test', 'open-results', 'download-test', 'delete-test'])
 
 const badgeClass = computed(() => ({
   completed: 'bg-[#D3E4FE] text-[#435368]',

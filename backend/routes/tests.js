@@ -1,5 +1,6 @@
 const express = require('express');
 const testRepo = require('../db/repositories/testRepo');
+const { buildTestExportPayload } = require('../services/testExport');
 
 const router = express.Router();
 
@@ -37,6 +38,19 @@ router.get('/:id', async (req, res, next) => {
             generationMetrics,
             createdAt: test.created_at,
         });
+    } catch (e) {
+        next(e);
+    }
+});
+
+router.get('/:id/export', async (req, res, next) => {
+    try {
+        const test = await testRepo.getTestById(req.params.id);
+        if (!test) {
+            return res.status(404).json({ error: 'Тест не найден' });
+        }
+
+        res.json(buildTestExportPayload(test));
     } catch (e) {
         next(e);
     }

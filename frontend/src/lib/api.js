@@ -195,6 +195,10 @@ export const API = {
     return request(`/tests/${encodeURIComponent(id)}`);
   },
 
+  exportTest(id) {
+    return request(`/tests/${encodeURIComponent(id)}/export`);
+  },
+
   deleteTest(id) {
     return request(`/tests/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },

@@ -7,6 +7,14 @@
           {{ quizTitle }}
         </h1>
         <p class="text-[#566166] text-sm">{{ quizTopic }}</p>
+        <button
+          class="mt-4 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#E1E9EE] text-[#435368] text-sm font-bold hover:bg-[#D9E4EA] transition-colors disabled:opacity-60"
+          :disabled="loading || !currentTestId"
+          @click="downloadActiveTest"
+        >
+          <span class="material-symbols-outlined text-base">file_download</span>
+          Скачать JSON
+        </button>
       </div>
       <div v-if="showDiagnostics" class="mb-8 bg-[#FFFFFF] border border-[#A9B4B9]/20 rounded-xl p-4">
         <h3 class="font-headline font-bold text-[#2A3439] mb-2">Диагностика генерации</h3>
@@ -102,6 +110,7 @@ import QuestionCard from '@/components/quiz/QuestionCard.vue'
 import AnswerOption from '@/components/quiz/AnswerOption.vue'
 import AIStudyPrompt from '@/components/quiz/AIStudyPrompt.vue'
 import { API } from '@/lib/api'
+import { buildTestExportFilename, downloadJson } from '@/lib/downloadJson'
 import { mapTestDetail, mapSubmitAnswersPayload, mapResultSummary } from '@/lib/mappers'
 import { useAppStore } from '@/stores/appStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -121,6 +130,7 @@ const participantDisplayName = computed(() => {
 
 const currentIndex = ref(0)
 const loading = ref(false)
+const currentTestId = ref(null)
 const defaultHint = 'Выберите вариант ответа, который лучше всего соответствует содержанию документа.'
 
 const quizTitle = computed(() => store.state.activeTest?.title || 'Тест по документу')
@@ -164,6 +174,7 @@ async function loadTest() {
     router.replace('/biblioteka')
     return
   }
+  currentTestId.value = testId
 
   loading.value = true
   store.actions.setActiveTestLoading(true)
@@ -177,6 +188,16 @@ async function loadTest() {
   } finally {
     loading.value = false
     store.actions.setActiveTestLoading(false)
+  }
+}
+
+async function downloadActiveTest() {
+  if (!currentTestId.value) return
+  try {
+    const payload = await API.exportTest(currentTestId.value)
+    downloadJson(payload, buildTestExportFilename(payload, currentTestId.value))
+  } catch (error) {
+    store.actions.setActiveTestError(error?.message || 'Не удалось скачать тест')
   }
 }
 

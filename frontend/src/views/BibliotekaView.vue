@@ -50,6 +50,7 @@
           :item="test"
           @open-test="openTest"
           @open-results="openResults"
+          @download-test="downloadTest"
           @delete-test="deleteTest"
         />
 
@@ -77,6 +78,7 @@ import AcademicLayout from '@/layouts/AcademicLayout.vue'
 import StatCard from '@/components/library/StatCard.vue'
 import TestCard from '@/components/library/TestCard.vue'
 import { API } from '@/lib/api'
+import { buildTestExportFilename, downloadJson } from '@/lib/downloadJson'
 import { mapTestListItem } from '@/lib/mappers'
 import { useAppStore } from '@/stores/appStore'
 
@@ -133,6 +135,15 @@ async function deleteTest(item) {
     store.actions.removeTest(item.id)
   } catch (error) {
     store.actions.setTestsError(error?.message || 'Не удалось удалить тест')
+  }
+}
+
+async function downloadTest(item) {
+  try {
+    const payload = await API.exportTest(item.id)
+    downloadJson(payload, buildTestExportFilename(payload, item.id))
+  } catch (error) {
+    store.actions.setTestsError(error?.message || 'Не удалось скачать тест')
   }
 }
 
