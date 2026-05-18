@@ -72,7 +72,10 @@ function isPreviewModelId(modelId) {
  * @param {string} modelId api_model_id
  * @param {string} stage embedding | cheap_generation | standard_generation | premium_reasoning
  */
-async function canUseModelForStage(modelId, stage) {
+async function canUseModelForStage(modelId, stage, opts = {}) {
+    if (opts.bypassLimits) {
+        return { allowed: true, reason: null };
+    }
     const g = guardCfg();
     if (!budgetGuardsActive()) {
         return { allowed: true, reason: null };
@@ -260,9 +263,10 @@ function createBudgetError(message, details) {
  * Мягкая проверка бюджета (после assertWithinFreeTierQuota).
  */
 async function assertBudgetAllows(modelId, opts = {}) {
+    if (opts.bypassLimits) return;
     if (!budgetGuardsActive()) return;
     const stage = opts.stage || inferBudgetPhaseFromModel(modelId, opts);
-    const { allowed, reason, suggestedModel } = await canUseModelForStage(modelId, stage);
+    const { allowed, reason, suggestedModel } = await canUseModelForStage(modelId, stage, opts);
     if (!allowed) {
         throw createBudgetError(
             reason === 'premium_usage_over_threshold'

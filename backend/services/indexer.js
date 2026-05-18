@@ -7,6 +7,7 @@ const { detectFactProfile, extractiveSummary } = require('./nlp/extractiveFacts'
 const { extractJSON } = require('./validator');
 const runtimeConfig = require('./runtimeConfig');
 const quotaGuard = require('./quotaGuard');
+const { shouldBypassAppLimits, isMaxQualityMode, MAX_QUALITY_EMBEDDING_CHAIN } = require('../config/routingModes');
 const { parseGeminiApiError, sleepForGeminiRetry, withTimeout } = require('./geminiError');
 const jobProgressSvc = require('./jobProgress');
 const { WEIGHT } = jobProgressSvc;
@@ -31,17 +32,19 @@ function isEmbeddingModel(modelId) {
     return id.includes('embedding') || id.includes('text-embedding');
 }
 
-function resolveEmbeddingModel() {
+function resolveEmbeddingModel(embedOverride = null) {
+    const override = String(embedOverride || '').trim();
+    if (override && isEmbeddingModel(override)) return override;
     const fromConfig = String(config.EMBEDDING_MODEL || '').trim();
     return isEmbeddingModel(fromConfig) ? fromConfig : 'gemini-embedding-001';
 }
 
-async function fetchEmbeddingWithRetry(text, retries = 3) {
+async function fetchEmbeddingWithRetry(text, retries = 3, quotaOpts = {}) {
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            const embedModel = resolveEmbeddingModel();
-            await quotaGuard.assertWithinFreeTierQuota(embedModel);
+            const embedModel = resolveEmbeddingModel(quotaOpts.embedModelOverride);
+            await quotaGuard.assertWithinFreeTierQuota(embedModel, quotaOpts);
             const ai = await getAiClient();
             const response = await ai.models.embedContent({
                 model: embedModel,
@@ -107,9 +110,9 @@ function buildBatchFactExtractionPrompt(chunks) {
 /**
  * Обрабатывает пачку чанков одним LLM-вызовом. Возвращает массив результатов.
  */
-async function fetchBatchSummaryLLM(chunks, modelId) {
+async function fetchBatchSummaryLLM(chunks, modelId, quotaOpts = {}) {
     try {
-        await quotaGuard.waitUntilQuotaAllows(modelId, { maxWaitMs: 0 });
+        await quotaGuard.waitUntilQuotaAllows(modelId, { maxWaitMs: 0, ...quotaOpts });
     } catch (e) {
         if (e.type === 'QUOTA_EXCEEDED' && e.details?.limit === 'rpd') {
             console.warn(`[INDEXER] Batch Summary LLM пропущен (дневной лимит ${modelId}): ${e.message}`);
@@ -124,7 +127,7 @@ async function fetchBatchSummaryLLM(chunks, modelId) {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            await quotaGuard.waitUntilQuotaAllows(modelId);
+            await quotaGuard.waitUntilQuotaAllows(modelId, quotaOpts);
             const ai = await getAiClient();
             const genPromise = ai.models.generateContent({
                 model: modelId,
@@ -132,7 +135,7 @@ async function fetchBatchSummaryLLM(chunks, modelId) {
                 config: { temperature: 0.1, responseMimeType: 'application/json' },
             });
             const response = await withTimeout(genPromise, reqTimeout, '[INDEXER] Batch Summary generateContent');
-            await quotaGuard.recordGeminiCall(modelId);
+            await quotaGuard.recordGeminiCall(modelId, quotaOpts);
             const raw = response.text;
             if (!raw) throw new Error('Пустой ответ при генерации batch summary');
             let parsed = extractJSON(raw);
@@ -161,7 +164,7 @@ async function fetchBatchSummaryLLM(chunks, modelId) {
 /**
  * Обрабатывает батч чанков, возвращая массив результатов summaries.
  */
-async function processSummaryBatch(chunksMap) {
+async function processSummaryBatch(chunksMap, quotaOpts = {}) {
     const chunks = Object.values(chunksMap);
     const mode = (config.SUMMARY_MODE || 'extractive').toLowerCase();
     
@@ -221,7 +224,7 @@ async function processSummaryBatch(chunksMap) {
     };
 
     try {
-        const { parsedResults, quotaHit } = await fetchBatchSummaryLLM(chunks, modelId);
+        const { parsedResults, quotaHit } = await fetchBatchSummaryLLM(chunks, modelId, quotaOpts);
         if (quotaHit) return fallbackToExtractive(`${modelId} daily RPD exhausted`, 'quota_skip');
         if (!parsedResults || parsedResults.length === 0) return fallbackToExtractive(`${modelId} response empty array`, 'error');
 
@@ -259,13 +262,13 @@ async function processSummaryBatch(chunksMap) {
 }
 
 
-async function processBatch(batch) {
+async function processBatch(batch, embedQuotaOpts = {}) {
     const results = [];
     for (let i = 0; i < batch.length; i += EMBED_CONCURRENCY) {
         const slice = batch.slice(i, i + EMBED_CONCURRENCY);
         const settled = await Promise.allSettled(
             slice.map(async (item) => {
-                const embedding = await fetchEmbeddingWithRetry(item.text);
+                const embedding = await fetchEmbeddingWithRetry(item.text, 3, embedQuotaOpts);
                 return { ...item, embedding };
             })
         );
@@ -286,6 +289,10 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     const baseWorkDone = Math.max(0, Math.floor(Number(opts.baseWorkDone) || 0));
     const startTime = Date.now();
     const rawChunks = chunkText(fullText);
+    const bypassLimits = opts.bypassLimits === true || shouldBypassAppLimits(opts.routingMode);
+    const quotaOpts = bypassLimits ? { bypassLimits: true } : {};
+    const embedOverride = opts.embedModelOverride
+        || (isMaxQualityMode(opts.routingMode) ? MAX_QUALITY_EMBEDDING_CHAIN[0] : null);
 
     if (rawChunks.length === 0) {
         throw new Error('Нет чанков для индексации');
@@ -294,7 +301,8 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     console.log(`[INDEXER] Документ #${documentId}: ${rawChunks.length} чанков`);
 
     const { genUnits, estMainBatches } = jobProgressSvc.estimateGenerationTailUnits(config);
-    const embeddingModel = resolveEmbeddingModel();
+    const embeddingModel = resolveEmbeddingModel(embedOverride);
+    const embedQuotaOpts = { ...quotaOpts, embedModelOverride: embedOverride };
 
     const existingRows = await chunkRepo.getChunkHashesByDocumentId(documentId);
     const existingHashes = new Map();
@@ -365,7 +373,7 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     const chunksWithEmbeddings = [];
     for (let bIdx = 0; bIdx < batches.length; bIdx++) {
         console.log(`[INDEXER] Эмбеддинги батч ${bIdx + 1}/${batches.length}...`);
-        const processed = await processBatch(batches[bIdx]);
+        const processed = await processBatch(batches[bIdx], embedQuotaOpts);
         chunksWithEmbeddings.push(...processed);
         onProgress?.({
             phase: 'index',
@@ -421,7 +429,7 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
         } else {
             const chunksMap = {};
             for (const c of batchChunks) chunksMap[c.chunk_index] = c;
-            batchResults = await processSummaryBatch(chunksMap);
+            batchResults = await processSummaryBatch(chunksMap, quotaOpts);
             if (batchResults.some(r => r.status === 'quota_skip')) quotaExhaustedGlobal = true;
         }
 

@@ -200,6 +200,7 @@ const stageRows = computed(() => {
 const constraintItems = computed(() => {
   const s = props.snapshot;
   if (!s) return [];
+  if (s.requested_mode === 'max_quality' || s.effective_mode === 'max_quality') return [];
   const out = [];
   const stagePreviewEntries = s.stage_preview && typeof s.stage_preview === 'object'
     ? Object.entries(s.stage_preview).filter(([k]) => k !== '_error')

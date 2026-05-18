@@ -4,7 +4,7 @@ const aiModelsRepo = require('../db/repositories/aiModelsRepo');
 const aiModelHealthRepo = require('../db/repositories/aiModelHealthRepo');
 const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
 const { ALL_STAGE_KEYS, STAGE_CATALOG, AGENT_ROLE_TO_STAGE } = require('../config/stageTaxonomy');
-const { MAX_QUALITY_MODE } = require('../config/routingModes');
+const { MAX_QUALITY_MODE, isMaxQualityMode } = require('../config/routingModes');
 
 const VALID_STRENGTH = new Set(['soft', 'hard']);
 const VALID_STATUS = new Set(['active', 'draft', 'archived', 'disabled']);
@@ -118,6 +118,7 @@ async function buildEffectivePreview({ profile, assignments, requestedContext = 
         profile || {},
         createSystemProfileSnapshot(profile?.parent_mode || 'quality'),
     );
+    const bypassGuards = isMaxQualityMode(profile?.code);
     const rows = [];
     const warnings = [];
 
@@ -137,15 +138,15 @@ async function buildEffectivePreview({ profile, assignments, requestedContext = 
             notes: raw.notes || null,
         };
 
-        const localAllowPremium = assignment.allow_premium == null
+        const localAllowPremium = bypassGuards ? true : (assignment.allow_premium == null
             ? toBool(merged.allow_premium, false)
-            : toBool(assignment.allow_premium, false);
-        const localAllowPreview = assignment.allow_preview == null
+            : toBool(assignment.allow_premium, false));
+        const localAllowPreview = bypassGuards ? true : (assignment.allow_preview == null
             ? toBool(merged.allow_preview, false)
-            : toBool(assignment.allow_preview, false);
-        const localStableOnly = assignment.stable_only == null
+            : toBool(assignment.allow_preview, false));
+        const localStableOnly = bypassGuards ? false : (assignment.stable_only == null
             ? toBool(merged.stable_only, true)
-            : toBool(assignment.stable_only, true);
+            : toBool(assignment.stable_only, true));
 
         const blockedBy = [];
         const rejected = [];
@@ -173,7 +174,7 @@ async function buildEffectivePreview({ profile, assignments, requestedContext = 
                 continue;
             }
             const h = healthMap.get(Number(m.id));
-            if (h && (!h.is_healthy || h.is_suppressed)) {
+            if (!bypassGuards && h && (!h.is_healthy || h.is_suppressed)) {
                 rejected.push({ model_id: m.id, api_model_id: m.api_model_id, reason: 'model_unhealthy' });
                 blockedBy.push('health');
                 continue;
@@ -195,7 +196,7 @@ async function buildEffectivePreview({ profile, assignments, requestedContext = 
             }
         }
 
-        if (!effectivePrimary && merged.emergency_fallback) {
+        if (!effectivePrimary && merged.emergency_fallback && !bypassGuards) {
             const emergencyModel = Array.from(modelMap.values())
                 .find((m) => m.is_enabled && !isPreviewModel(m) && String(m.model_role) === 'llm');
             if (emergencyModel) {

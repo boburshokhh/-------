@@ -27,15 +27,16 @@ async function getAiClient() {
     return new GoogleGenAI({ apiKey: await runtimeConfig.getGeminiApiKey() });
 }
 
-async function getQueryEmbedding(query, retries = 3, embedModelOverride = null) {
+async function getQueryEmbedding(query, retries = 3, embedModelOverride = null, quotaOpts = null) {
     const embedModel = resolveEmbeddingModel(embedModelOverride);
     if (embedModelOverride && String(embedModelOverride).trim() && embedModel !== String(embedModelOverride).trim()) {
         console.warn(`[RAG] Invalid embedding model "${embedModelOverride}", fallback to "${embedModel}"`);
     }
+    const qOpts = quotaOpts && typeof quotaOpts === 'object' ? quotaOpts : {};
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            await quotaGuard.assertWithinFreeTierQuota(embedModel);
+            await quotaGuard.assertWithinFreeTierQuota(embedModel, qOpts);
             const ai = await getAiClient();
             const response = await ai.models.embedContent({
                 model: embedModel,
@@ -59,7 +60,7 @@ async function getQueryEmbedding(query, retries = 3, embedModelOverride = null) 
     throw lastError;
 }
 
-async function getBatchEmbeddings(texts, retries = 3, embedModelOverride = null) {
+async function getBatchEmbeddings(texts, retries = 3, embedModelOverride = null, quotaOpts = null) {
     if (!texts || texts.length === 0) return [];
     const embeddings = [];
 
@@ -67,7 +68,7 @@ async function getBatchEmbeddings(texts, retries = 3, embedModelOverride = null)
     const chunkSize = 5;
     for (let i = 0; i < texts.length; i += chunkSize) {
         const batch = texts.slice(i, i + chunkSize);
-        const promises = batch.map(text => getQueryEmbedding(text, retries, embedModelOverride));
+        const promises = batch.map(text => getQueryEmbedding(text, retries, embedModelOverride, quotaOpts));
         const batchResults = await Promise.all(promises);
         embeddings.push(...batchResults);
     }
@@ -133,9 +134,11 @@ async function hybridRetrieve(query, indexedChunks, k, opts = {}) {
         lambda = config.MMR_LAMBDA || 0.65,
         threshold = config.RAG_THRESHOLD || 0.0,
         embedModel = null,
+        bypassLimits = false,
     } = opts;
 
-    const queryVec = await getQueryEmbedding(query, 3, embedModel);
+    const quotaOpts = bypassLimits ? { bypassLimits: true } : {};
+    const queryVec = await getQueryEmbedding(query, 3, embedModel, quotaOpts);
     const scored = indexedChunks.map(c => {
         const vecSim = Array.isArray(c.embedding) ? cosineSimilarity(queryVec, c.embedding) : 0;
         const lexSim = lexicalScore(query, c.text);

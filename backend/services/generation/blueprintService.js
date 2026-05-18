@@ -262,14 +262,17 @@ function buildBlueprintFallbackLocal(richThemes, perTheme) {
 async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, targetCount = null, options = null) {
     const opts = options && typeof options === 'object' ? options : {};
     const onRetry = typeof opts.onRetry === 'function' ? opts.onRetry : null;
+    const quotaOpts = opts.bypassLimits ? { bypassLimits: true } : {};
     const targetFastModel = resolveBlueprintModelTarget(model);
-    const llmModel = await quotaGuard.getAvailableModel(targetFastModel);
+    const llmModel = opts.bypassLimits
+        ? targetFastModel
+        : (await quotaGuard.getAvailableModel(targetFastModel, quotaOpts) || targetFastModel);
 
     const structuralEstimate = estimateThemeCount(indexedChunks, fullText);
     const targetThemes = targetCount ? Math.max(structuralEstimate, Math.min(10, Math.ceil(targetCount / 3))) : structuralEstimate;
     const totalQuestions = targetCount || 10;
 
-    if (await quotaGuard.isRpdExhaustedForModel(llmModel)) {
+    if (await quotaGuard.isRpdExhaustedForModel(llmModel, quotaOpts)) {
         console.warn('[BLUEPRINT] buildThemesAndBlueprint: RPD exhausted — local fallback');
         const themes = buildLocalThemesFromSections(indexedChunks);
         const richThemes = themes.map(t => typeof t === 'string' ? { topic: t, section: 'Документ', importance: 2, suggestedCount: 3 } : t);
@@ -292,7 +295,7 @@ async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, ta
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-            await quotaGuard.assertWithinFreeTierQuota(llmModel);
+            await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
             const ai = await getAiClient();
             const genPromise = ai.models.generateContent({
                 model: llmModel,

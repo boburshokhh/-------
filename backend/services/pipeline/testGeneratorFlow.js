@@ -18,7 +18,7 @@
 
 const config       = require('../../config');
 const { AGENT_ROLES, AGENT_RESOLUTION_ORDER } = require('../../config/agentRoles');
-const { BUILT_IN_ROUTING_MODES, isMaxQualityMode } = require('../../config/routingModes');
+const { BUILT_IN_ROUTING_MODES, isMaxQualityMode, shouldBypassAppLimits } = require('../../config/routingModes');
 const { STAGE_KEYS } = require('../../config/stageTaxonomy');
 const { chunkText } = require('../chunker');
 const { calculateQuestionBudget } = require('../budgetCalculator');
@@ -395,6 +395,7 @@ async function runOfflinePipeline({
 
 async function buildBlueprint({
     indexedChunks, fullText, model, count, pipelineContext, progress, traceId, documentId,
+    bypassLimits = false,
 }) {
     logStructured({
         level: 'info', traceId, documentId, phase: 'generate', event: 'generate_phase_begin',
@@ -404,6 +405,7 @@ async function buildBlueprint({
     let blueprint;
     try {
         blueprint = await rag.buildThemesAndBlueprint(indexedChunks, fullText, model, count, {
+            bypassLimits,
             onRetry: ({ attempt, maxAttempts, parsed }) => {
                 let detail = `Повтор запроса к модели (${attempt}/${maxAttempts})…`;
                 if (parsed.isTransientUnavailable) detail = `Модель перегружена, ждём… (${attempt}/${maxAttempts})`;
@@ -456,8 +458,9 @@ async function runMainBatchLoop({
     blueprintWithDifficulty, indexedChunks, coverageMap, modelGenerate, modelGround, embedModel,
     detectedLang,
     enableGrounding, pipelineContext, batchSize, topK, traceId, documentId, progress,
-    totalBatches,
+    totalBatches, bypassLimits = false,
 }) {
+    const routeOpts = bypassLimits ? { bypassLimits: true } : null;
     const allQuestions     = [];
     const evidenceScores   = [];
     let statsValidated     = 0;
@@ -477,7 +480,7 @@ async function runMainBatchLoop({
         const retrievalResults = await Promise.all(batch.map(async (intent) => {
             const relevantChunks = await rag.hybridRetrieve(
                 `${intent.theme}: ${intent.intent}`, indexedChunks, topK,
-                { embedModel: embedModel || null },
+                { embedModel: embedModel || null, bypassLimits },
             );
             const packets      = rag.buildEvidencePackets(relevantChunks, intent.intent);
             const evidenceText = rag.formatEvidenceForPrompt(packets);
@@ -520,7 +523,7 @@ async function runMainBatchLoop({
         }
 
         const { results: batchResults, stats: batchStats } = await generateBatchQuestions(
-            filteredBatch, evidenceList, chunkIdsList, null, modelGenerate, detectedLang
+            filteredBatch, evidenceList, chunkIdsList, null, modelGenerate, detectedLang, routeOpts,
         );
         statsValidated        += batchResults.length;
         statsSkippedLLM       += batchStats.llmSkipped;
@@ -530,7 +533,7 @@ async function runMainBatchLoop({
         if (enableGrounding && pipelineContext.executionMode === 'normal') {
             const bQuestions = batchResults.map(r => r.question);
             const bEvidences = batchResults.map(r => evidenceList[r.intentIdx]);
-            groundedMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround);
+            groundedMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround, routeOpts);
         }
 
         for (let i = 0; i < batchResults.length; i++) {
@@ -563,8 +566,9 @@ async function runBackfillLoop({
     initialDedup, indexedChunks, coverageMap, modelGenerate, modelGround, embedModel,
     detectedLang,
     enableGrounding, pipelineContext, batchSize, targetMin,
-    maxBackfillRounds, traceId, documentId, progress,
+    maxBackfillRounds, traceId, documentId, progress, bypassLimits = false,
 }) {
+    const routeOpts = bypassLimits ? { bypassLimits: true } : null;
     let workingQuestions      = [...initialDedup];
     let backfillRoundsUsed    = 0;
     let backfillQuestionsAdded = 0;
@@ -615,7 +619,7 @@ async function runBackfillLoop({
             if (bfFiltered.length === 0) continue;
 
             const { results: batchResults, stats: bfStats } = await generateBatchQuestions(
-                bfFiltered, bfEvidenceList, bfChunkIdsList, null, modelGenerate, detectedLang
+                bfFiltered, bfEvidenceList, bfChunkIdsList, null, modelGenerate, detectedLang, routeOpts,
             );
             statsSkippedLLM       += bfStats.llmSkipped;
             statsValidationFailed += bfStats.validationFailed;
@@ -624,7 +628,7 @@ async function runBackfillLoop({
             if (enableGrounding && pipelineContext.executionMode === 'normal') {
                 const bQuestions = batchResults.map(r => r.question);
                 const bEvidences = batchResults.map(r => bfEvidenceList[r.intentIdx]);
-                bfMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround);
+                bfMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround, routeOpts);
             }
 
             for (let i = 0; i < batchResults.length; i++) {
@@ -640,7 +644,7 @@ async function runBackfillLoop({
 
         if (newRawQuestions.length === 0) { console.warn(`[PIPELINE] Backfill round ${round}: нет новых вопросов`); break; }
 
-        const embedBatch = (texts) => rag.getBatchEmbeddings(texts, 3, embedModel || null);
+        const embedBatch = (texts) => rag.getBatchEmbeddings(texts, 3, embedModel || null, bypassLimits ? { bypassLimits: true } : null);
         const dedupedNew = newRawQuestions.length > 1
             ? await semanticDedup(newRawQuestions, embedBatch, config.DEDUP_THRESHOLD || 0.85)
             : newRawQuestions;
@@ -708,6 +712,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     }
 
     const routingMode = opts.routingMode || 'auto';
+    const bypassLimits = shouldBypassAppLimits(routingMode);
     let routingModeEffective = routingMode;
     try {
         routingModeEffective = await modelRouter.resolveEffectiveMode(routingMode);
@@ -823,7 +828,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         c.summary_status === 'quota_skip'
         || c.summary_status === 'error'
         || (c.summary_status === 'empty' && countMergedFactBullets(c, 99) === 0));
-    if (hasIndexerIssues) {
+    if (hasIndexerIssues && !bypassLimits) {
         pipelineContext.executionMode = 'degraded';
         pipelineContext.degradedReasons.push('indexer_fallback');
         pipelineContext.degradedStages.push('indexer');
@@ -906,6 +911,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     // ── 7. Blueprint ─────────────────────────────────────────────────────────
     const blueprint = await buildBlueprint({
         indexedChunks, fullText, model: modelBlueprint, count, pipelineContext, progress, traceId, documentId,
+        bypassLimits,
     });
 
     if (runId) {
@@ -929,6 +935,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         modelGenerate: modelGenerator, modelGround: modelQuality, embedModel,
         detectedLang,
         enableGrounding, pipelineContext, batchSize, topK, traceId, documentId, progress, totalBatches,
+        bypassLimits,
     });
     const {
         allQuestions, evidenceScores,
@@ -958,7 +965,8 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     const preDedupCount  = allQuestions.length;
     const groundedPreDedup = allQuestions.length;
     console.log('[PIPELINE] Семантическая дедупликация...');
-    const embedBatchMain = (texts) => rag.getBatchEmbeddings(texts, 3, embedModel || null);
+    const embedQuotaOpts = bypassLimits ? { bypassLimits: true } : null;
+    const embedBatchMain = (texts) => rag.getBatchEmbeddings(texts, 3, embedModel || null, embedQuotaOpts);
     const initialDedup = await semanticDedup(allQuestions, embedBatchMain, config.DEDUP_THRESHOLD || 0.88);
     console.log(`[PIPELINE] После dedup: ${initialDedup.length} (было ${allQuestions.length})`);
     const dedupDropped = preDedupCount - initialDedup.length;
@@ -978,7 +986,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         detectedLang,
         enableGrounding, pipelineContext, batchSize, targetMin,
         maxBackfillRounds: config.BACKFILL_MAX_ROUNDS || 3,
-        traceId, documentId, progress,
+        traceId, documentId, progress, bypassLimits,
     });
 
     // ── 12. Finalize ─────────────────────────────────────────────────────────

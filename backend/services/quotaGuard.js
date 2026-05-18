@@ -43,6 +43,7 @@ function sleep(ms) {
 
 async function assertWithinFreeTierQuota(modelId, opts = {}) {
     if (!modelId) return;
+    if (opts.bypassLimits) return;
     if (!isLocalQuotaEnforced()) return;
 
     const limits = getLimitsForModel(modelId);
@@ -82,8 +83,9 @@ async function assertWithinFreeTierQuota(modelId, opts = {}) {
 /**
  * Локальный учёт: исчерпан ли дневной лимит generateContent для модели (без новых вызовов API).
  */
-async function isRpdExhaustedForModel(modelId) {
+async function isRpdExhaustedForModel(modelId, opts = {}) {
     if (!modelId) return false;
+    if (opts.bypassLimits) return false;
     if (!isLocalQuotaEnforced()) return false;
     const limits = getLimitsForModel(modelId);
     if (!limits) return false;
@@ -94,6 +96,7 @@ async function isRpdExhaustedForModel(modelId) {
 }
 
 async function waitUntilQuotaAllows(modelId, options = {}) {
+    if (options.bypassLimits) return;
     if (!isLocalQuotaEnforced()) return;
     const maxWaitMs = options.maxWaitMs ?? (config.QUOTA_RPM_WAIT_MAX_MS || 60000);
     const pollMs = options.pollMs ?? 500;
@@ -261,11 +264,12 @@ async function getUsageSummaryPublic() {
     };
 }
 
-async function getAvailableModel(preferredModelId) {
+async function getAvailableModel(preferredModelId, opts = {}) {
     if (!preferredModelId) return null;
+    if (opts.bypassLimits) return preferredModelId;
 
         // Check primary model
-        if (!(await isRpdExhaustedForModel(preferredModelId))) {
+        if (!(await isRpdExhaustedForModel(preferredModelId, opts))) {
             return preferredModelId;
         }
 
@@ -277,7 +281,7 @@ async function getAvailableModel(preferredModelId) {
             : [];
 
         for (const fallbackModel of chain) {
-            if (!(await isRpdExhaustedForModel(fallbackModel))) {
+            if (!(await isRpdExhaustedForModel(fallbackModel, opts))) {
                 console.warn(`[QUOTA] Fallback успешен: переключение на ${fallbackModel}`);
                 return fallbackModel;
             }

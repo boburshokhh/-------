@@ -16,7 +16,7 @@ const jobProgress = require('../services/jobProgress');
 const { normalizeDisplayFilename, resolveStorageExtension } = require('../utils/filename');
 const { logStructured } = require('../utils/observability');
 const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
-const { BUILT_IN_ROUTING_MODES } = require('../config/routingModes');
+const { BUILT_IN_ROUTING_MODES, shouldBypassAppLimits } = require('../config/routingModes');
 
 const router = express.Router();
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
@@ -223,18 +223,6 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
             detail: `Документ #${documentId}, ${countTokens(text)} токенов`,
         });
 
-        console.log(`[UPLOAD] Индексация документа #${documentId}...`);
-        const indexedChunks = await indexDocument(documentId, text, report, { baseWorkDone: baseWorkAfterDb });
-        console.log(`[UPLOAD] Индекс готов: ${indexedChunks.length} чанков`);
-        logStructured({
-            level: 'info',
-            traceId: jobId,
-            documentId: Number(documentId),
-            phase: 'index',
-            event: 'indexing_complete',
-            metrics: { chunk_count: indexedChunks.length, text_length: text.length },
-        });
-
         const modelId = req.body.model && typeof req.body.model === 'string' ? req.body.model.trim() : null;
         const allowedIds = (config.LLM_MODELS || []).map((m) => m.id);
         const hasValidPick = !!(modelId && allowedIds.includes(modelId));
@@ -267,6 +255,22 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
                 }
             }
         }
+
+        console.log(`[UPLOAD] Индексация документа #${documentId} (routingMode=${routingMode})...`);
+        const indexedChunks = await indexDocument(documentId, text, report, {
+            baseWorkDone: baseWorkAfterDb,
+            routingMode,
+            bypassLimits: shouldBypassAppLimits(routingMode),
+        });
+        console.log(`[UPLOAD] Индекс готов: ${indexedChunks.length} чанков`);
+        logStructured({
+            level: 'info',
+            traceId: jobId,
+            documentId: Number(documentId),
+            phase: 'index',
+            event: 'indexing_complete',
+            metrics: { chunk_count: indexedChunks.length, text_length: text.length },
+        });
 
         console.log(`[UPLOAD] Генерация теста с моделью: ${model} (routingMode=${routingMode})`);
         logStructured({

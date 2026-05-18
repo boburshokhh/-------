@@ -291,7 +291,7 @@ async function selectModel(stageRequest) {
             }
         }
         const health = healthMap.get(Number(c.id));
-        if (health && (health.is_suppressed || (!health.is_healthy && health.error_rate > 0.3))) {
+        if (!maxQuality && health && (health.is_suppressed || (!health.is_healthy && health.error_rate > 0.3))) {
             rejections.push({ id: c.api_model_id, reason: 'health_suppressed' });
             return false;
         }

@@ -94,9 +94,11 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
         }
     }
 
+    const quotaOpts = routeOpts?.bypassLimits ? { bypassLimits: true } : {};
+
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            await quotaGuard.assertWithinFreeTierQuota(llmModel);
+            await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
             const userPrompt = buildBatchPrompt(intents, evidenceList);
             const ai = await getAiClient();
             const response = await ai.models.generateContent({
@@ -181,7 +183,8 @@ async function checkGroundingBatched(questions, evidences, model = null, routeOp
         }).join('\n---\n');
 
         const prompt = `Проверь фактологическую точность нескольких вопросов на основе их текстов (Evidence).\nДля каждого вопроса верни 'true', если ответ полностью подтверждается текстом, иначе 'false'.\n\n${payload}\n\nВерни ТОЛЬКО JSON-массив булевых значений (размером ровно ${questions.length}): [true, false, true, ...]`;
-        await quotaGuard.assertWithinFreeTierQuota(llmModel);
+        const quotaOpts = routeOpts?.bypassLimits ? { bypassLimits: true } : {};
+        await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
         const ai = await getAiClient();
         const response = await ai.models.generateContent({
             model: llmModel,

@@ -32,6 +32,11 @@ function isMaxQualityMode(mode) {
     return String(mode || '').toLowerCase().trim() === MAX_QUALITY_MODE;
 }
 
+/** Встроенные квоты, budget-guard, RPD-fallback и деградация пайплайна не применяются. */
+function shouldBypassAppLimits(mode) {
+    return isMaxQualityMode(mode);
+}
+
 module.exports = {
     MAX_QUALITY_MODE,
     BUILT_IN_ROUTING_MODES,
@@ -39,4 +44,5 @@ module.exports = {
     MAX_QUALITY_LLM_CHAIN,
     MAX_QUALITY_EMBEDDING_CHAIN,
     isMaxQualityMode,
+    shouldBypassAppLimits,
 };
