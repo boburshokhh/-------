@@ -28,6 +28,15 @@ const MAX_QUALITY_EMBEDDING_CHAIN = Object.freeze([
     'gemini-embedding-001',
 ]);
 
+/** Для grounding: сначала стабильные модели (меньше 503), затем premium. */
+const MAX_QUALITY_GROUNDING_CHAIN = Object.freeze([
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-pro-latest',
+    'gemini-3-pro-preview',
+    'gemini-3.1-pro-preview',
+]);
+
 function isMaxQualityMode(mode) {
     return String(mode || '').toLowerCase().trim() === MAX_QUALITY_MODE;
 }
@@ -43,6 +52,7 @@ module.exports = {
     SYSTEM_ROUTING_MODES,
     MAX_QUALITY_LLM_CHAIN,
     MAX_QUALITY_EMBEDDING_CHAIN,
+    MAX_QUALITY_GROUNDING_CHAIN,
     isMaxQualityMode,
     shouldBypassAppLimits,
 };

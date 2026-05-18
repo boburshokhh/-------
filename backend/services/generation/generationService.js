@@ -7,6 +7,10 @@ const { validateQuestions, extractJSON } = require('../validator');
 const { getBatchSystemPrompt, GROUNDING_SYSTEM } = require('../llm/prompts');
 const { resolveChunkEvidence } = require('../rag/evidenceBuilder');
 const routingService = require('./routingService');
+const {
+    MAX_QUALITY_GROUNDING_CHAIN,
+    MAX_QUALITY_LLM_CHAIN,
+} = require('../../config/routingModes');
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -159,6 +163,61 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
     return { results: [], stats: { llmSkipped: 0, validationFailed: 0 } };
 }
 
+function formatGeminiErr(err) {
+    if (!err) return 'unknown';
+    if (typeof err.message === 'string' && err.message.trim()) return err.message;
+    try {
+        return JSON.stringify(err.error || err);
+    } catch {
+        return String(err);
+    }
+}
+
+function buildGroundingModelChain(primary, routeOpts) {
+    const seen = new Set();
+    const chain = [];
+    const add = (id) => {
+        const m = String(id || '').trim();
+        if (m && !seen.has(m)) {
+            seen.add(m);
+            chain.push(m);
+        }
+    };
+
+    if (routeOpts?.bypassLimits) {
+        for (const m of MAX_QUALITY_GROUNDING_CHAIN) add(m);
+        add(primary);
+        for (const m of MAX_QUALITY_LLM_CHAIN) add(m);
+    } else {
+        add(primary);
+        const fb = config.LLM_FALLBACK_CHAIN?.[primary] || [];
+        for (const m of fb) add(m);
+        add('gemini-2.5-flash');
+    }
+
+    return chain.length ? chain : [primary || config.LLM_MODEL];
+}
+
+async function callGroundingOnce(questions, prompt, llmModel, quotaOpts) {
+    await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
+    const ai = await getAiClient();
+    const response = await ai.models.generateContent({
+        model: llmModel,
+        contents: prompt,
+        config: {
+            systemInstruction: GROUNDING_SYSTEM || 'Ты оцениваешь корректность вопросов по тексту. Отвечай только строгим JSON массивом.',
+            temperature: 0.0,
+            responseMimeType: 'application/json',
+        },
+    });
+    await quotaGuard.recordGeminiCall(llmModel, quotaOpts);
+    const parsed = extractJSON(response.text);
+    if (!Array.isArray(parsed) || parsed.length !== questions.length) {
+        return null;
+    }
+    return parsed.map(v => v !== false);
+}
+
 async function checkGroundingBatched(questions, evidences, model = null, routeOpts = null) {
     if (questions.length === 0) return [];
     let llmModel = model || config.LLM_MODEL;
@@ -166,45 +225,68 @@ async function checkGroundingBatched(questions, evidences, model = null, routeOp
     if (routeOpts && routeOpts.profile) {
         try {
             const route = await routingService.resolveRoute(routeOpts.profile, 'grounding_validation');
-            if (route.skipStage) return new Array(questions.length).fill(true); // if skipped, assume grounded? or false?
+            if (route.skipStage) return new Array(questions.length).fill(true);
             llmModel = route.resolved_model;
         } catch (e) {
             console.error(`[GENERATOR] Grounding router error: ${e.message}`);
-            return new Array(questions.length).fill(true); // fallback to true to not block pipeline on fail fast
-        }
-    }
-
-    try {
-        const payload = questions.map((q, i) => {
-            const correctOption = Array.isArray(q.options) && q.correctIndex != null
-                ? q.options[q.correctIndex]
-                : JSON.stringify(q.correctIndex);
-            return `Вопрос ${i + 1}:\nQ: ${q.question}\nA: ${correctOption}\nExpl: ${q.explanation || ''}\nEvidence: ${evidences[i] || 'Нет текста'}\n`;
-        }).join('\n---\n');
-
-        const prompt = `Проверь фактологическую точность нескольких вопросов на основе их текстов (Evidence).\nДля каждого вопроса верни 'true', если ответ полностью подтверждается текстом, иначе 'false'.\n\n${payload}\n\nВерни ТОЛЬКО JSON-массив булевых значений (размером ровно ${questions.length}): [true, false, true, ...]`;
-        const quotaOpts = routeOpts?.bypassLimits ? { bypassLimits: true } : {};
-        await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
-        const ai = await getAiClient();
-        const response = await ai.models.generateContent({
-            model: llmModel,
-            contents: prompt,
-            config: {
-                systemInstruction: GROUNDING_SYSTEM || 'Ты оцениваешь корректность вопросов по тексту. Отвечай только строгим JSON массивом.',
-                temperature: 0.0,
-                responseMimeType: 'application/json',
-            },
-        });
-        await quotaGuard.recordGeminiCall(llmModel);
-        let parsed = extractJSON(response.text);
-        if (!Array.isArray(parsed) || parsed.length !== questions.length) {
             return new Array(questions.length).fill(true);
         }
-        return parsed.map(v => v !== false);
-    } catch (e) {
-        console.warn(`[GENERATOR] batch grounding error: ${e.message}`);
-        return new Array(questions.length).fill(true);
     }
+
+    const payload = questions.map((q, i) => {
+        const correctOption = Array.isArray(q.options) && q.correctIndex != null
+            ? q.options[q.correctIndex]
+            : JSON.stringify(q.correctIndex);
+        return `Вопрос ${i + 1}:\nQ: ${q.question}\nA: ${correctOption}\nExpl: ${q.explanation || ''}\nEvidence: ${evidences[i] || 'Нет текста'}\n`;
+    }).join('\n---\n');
+
+    const prompt = `Проверь фактологическую точность нескольких вопросов на основе их текстов (Evidence).\nДля каждого вопроса верни 'true', если ответ полностью подтверждается текстом, иначе 'false'.\n\n${payload}\n\nВерни ТОЛЬКО JSON-массив булевых значений (размером ровно ${questions.length}): [true, false, true, ...]`;
+    const quotaOpts = routeOpts?.bypassLimits ? { bypassLimits: true } : {};
+    const modelChain = buildGroundingModelChain(llmModel, routeOpts);
+    const maxAttempts = config.LLM_MAX_RETRIES || 3;
+    let lastError;
+
+    for (const candidateModel of modelChain) {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const mask = await callGroundingOnce(questions, prompt, candidateModel, quotaOpts);
+                if (mask) {
+                    if (candidateModel !== llmModel) {
+                        console.warn(
+                            `[GENERATOR] Grounding: ${llmModel} недоступна, использована ${candidateModel}`,
+                        );
+                    }
+                    return mask;
+                }
+                lastError = new Error('Некорректный JSON grounding-ответ');
+            } catch (e) {
+                lastError = e;
+                if (e.type === 'QUOTA_EXCEEDED') break;
+                const parsed = parseGeminiApiError(e);
+                if (parsed.isResourceExhausted) {
+                    await quotaGuard.syncFromGoogle429(candidateModel, e);
+                }
+                const retryable = parsed.isTransientUnavailable
+                    || (parsed.isResourceExhausted && !parsed.isDailyFreeTierQuota);
+                if (retryable && attempt < maxAttempts) {
+                    console.warn(
+                        `[GENERATOR] Grounding ${candidateModel} попытка ${attempt}/${maxAttempts}: ${formatGeminiErr(e)}`,
+                    );
+                    await sleepForGeminiRetry(parsed, attempt, maxAttempts, sleep);
+                    continue;
+                }
+                console.warn(
+                    `[GENERATOR] Grounding ${candidateModel} не удалась: ${formatGeminiErr(e)}`,
+                );
+                break;
+            }
+        }
+    }
+
+    console.warn(
+        `[GENERATOR] batch grounding: все модели исчерпаны (${modelChain.join(' → ')}): ${formatGeminiErr(lastError)}. Вопросы приняты без проверки.`,
+    );
+    return new Array(questions.length).fill(true);
 }
 
 function createBackfillIntents(poolChunks, count, typeOffset = 0) {
