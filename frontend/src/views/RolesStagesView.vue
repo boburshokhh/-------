@@ -25,6 +25,7 @@
             <option value="economy">Economy</option>
             <option value="balanced">Balanced</option>
             <option value="quality">Quality</option>
+            <option value="max_quality">Max Quality</option>
             <option value="manual">Manual</option>
           </select>
           <button

@@ -21,6 +21,13 @@ const {
     STAGE_KEYS, ALL_STAGE_KEYS, STAGE_CATALOG, COST_TIERS,
     classifyDocumentSize, usageBucketFromStageKey, stageKeyFromAgentRole,
 } = require('../config/stageTaxonomy');
+const {
+    MAX_QUALITY_MODE,
+    SYSTEM_ROUTING_MODES,
+    MAX_QUALITY_LLM_CHAIN,
+    MAX_QUALITY_EMBEDDING_CHAIN,
+    isMaxQualityMode,
+} = require('../config/routingModes');
 
 const aiModelsRepo = require('../db/repositories/aiModelsRepo');
 const aiRoutingDecisionsRepo = require('../db/repositories/aiRoutingDecisionsRepo');
@@ -219,7 +226,7 @@ async function selectModel(stageRequest) {
     ]);
 
     const effectiveMode = resolveMode(stageRequest.requestedMode, policies);
-    const isEmergency = policies.emergency_downgrade;
+    const isEmergency = isMaxQualityMode(effectiveMode) ? false : policies.emergency_downgrade;
 
     // 2. Check manual override (highest precedence)
     const override = findMatchingOverride(overrides, { stageKey, agentRole, documentId, runId });
@@ -245,14 +252,16 @@ async function selectModel(stageRequest) {
     const ruleActions = matchedRule?.actions || {};
 
     // 4. Build effective policy
-    const allowPreview = !policies.stable_only
+    const maxQuality = isMaxQualityMode(effectiveMode);
+
+    const allowPreview = maxQuality || (!policies.stable_only
         && !isEmergency
         && (matchedRule?.allow_preview || false)
-        && !adminOv.forceStableOnly;
+        && !adminOv.forceStableOnly);
     const allowPremium = !isEmergency
-        && stageMeta.premium_eligible
-        && (ruleActions.allow_premium !== false)
-        && !adminOv.disablePremium
+        && (stageMeta.premium_eligible || maxQuality)
+        && (maxQuality || ruleActions.allow_premium !== false)
+        && (maxQuality || !adminOv.disablePremium)
         && shouldAllowPremium(effectiveMode, stageKey, complexity, docMeta, policies);
 
     // 5. Build candidate list
@@ -411,7 +420,7 @@ async function selectModel(stageRequest) {
 
 function resolveMode(requestedMode, policies) {
     const normalized = String(requestedMode || '').toLowerCase().trim();
-    const valid = ['economy', 'balanced', 'quality', 'manual'];
+    const valid = SYSTEM_ROUTING_MODES;
     if (valid.includes(normalized)) return normalized;
     const global = String(policies.routing_mode || '').toLowerCase().trim();
     if (valid.includes(global)) return global;
@@ -450,6 +459,7 @@ function matchRuleConditions(rule, { routingMode, complexity, docMeta, execution
 }
 
 function shouldAllowPremium(mode, stageKey, complexity, docMeta, policies) {
+    if (isMaxQualityMode(mode)) return true;
     if (!policies.premium_guard_enabled) return true;
     const heavyStages = [
         STAGE_KEYS.blueprint_generation,
@@ -492,6 +502,14 @@ function buildCandidatePool(catalog, stageMeta, { forcedModelId, ruleActions, ef
     const taskType = stageMeta.task_type;
     const isEmbedding = taskType === 'embedding';
 
+    if (isMaxQualityMode(effectiveMode)) {
+        const preferred = isEmbedding ? MAX_QUALITY_EMBEDDING_CHAIN : MAX_QUALITY_LLM_CHAIN;
+        for (const apiId of preferred) {
+            const row = catalog.find(m => m.api_model_id === apiId);
+            if (row && !pool.find(p => p.id === row.id)) pool.push(row);
+        }
+    }
+
     for (const m of catalog) {
         if (pool.find(p => p.id === m.id)) continue;
         if (isEmbedding && m.model_role !== 'embedding') continue;
@@ -510,7 +528,11 @@ function scoreCandidates(candidates, opts) {
         let score = 0;
 
         const tier = costTierOf(c.api_model_id);
-        if (tier === 'economy') score += 30;
+        if (effectiveMode === MAX_QUALITY_MODE) {
+            if (tier === 'premium') score += 50;
+            else if (tier === 'standard') score += 25;
+            else score += 5;
+        } else if (tier === 'economy') score += 30;
         else if (tier === 'standard') score += 20;
         else score += 5;
 
@@ -520,7 +542,16 @@ function scoreCandidates(candidates, opts) {
 
         if (isEmergency && tier === 'economy') score += 20;
 
-        if (effectiveMode === 'economy') {
+        if (effectiveMode === MAX_QUALITY_MODE) {
+            const preferred = stageKey === STAGE_KEYS.embedding
+                ? MAX_QUALITY_EMBEDDING_CHAIN
+                : MAX_QUALITY_LLM_CHAIN;
+            const idx = preferred.indexOf(c.api_model_id);
+            if (idx >= 0) score += 100 - idx * 10;
+            if (c.is_preview || isPreviewId(c.api_model_id)) score += 12;
+            if (String(c.api_model_id || '').includes('3.1')) score += 8;
+            if (String(c.api_model_id || '').includes('3-pro')) score += 6;
+        } else if (effectiveMode === 'economy') {
             if (tier === 'economy') score += 15;
         } else if (effectiveMode === 'quality') {
             if (tier === 'standard') score += 10;

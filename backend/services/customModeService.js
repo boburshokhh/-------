@@ -4,6 +4,7 @@ const aiModelsRepo = require('../db/repositories/aiModelsRepo');
 const aiModelHealthRepo = require('../db/repositories/aiModelHealthRepo');
 const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
 const { ALL_STAGE_KEYS, STAGE_CATALOG, AGENT_ROLE_TO_STAGE } = require('../config/stageTaxonomy');
+const { MAX_QUALITY_MODE } = require('../config/routingModes');
 
 const VALID_STRENGTH = new Set(['soft', 'hard']);
 const VALID_STATUS = new Set(['active', 'draft', 'archived', 'disabled']);
@@ -74,9 +75,9 @@ function createSystemProfileSnapshot(code) {
         parent_mode: code,
         status: 'active',
         default_routing_behavior: 'stage_based',
-        allow_premium: code === 'quality' || code === 'balanced' || code === 'auto' || code === 'manual',
-        allow_preview: code === 'manual',
-        stable_only: code !== 'manual',
+        allow_premium: code === 'quality' || code === 'balanced' || code === 'auto' || code === 'manual' || code === MAX_QUALITY_MODE,
+        allow_preview: code === 'manual' || code === MAX_QUALITY_MODE,
+        stable_only: code !== 'manual' && code !== MAX_QUALITY_MODE,
         emergency_fallback: true,
     };
 }

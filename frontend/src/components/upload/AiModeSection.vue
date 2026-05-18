@@ -17,6 +17,7 @@
     </div>
     <p class="mt-1 text-xs text-[#566166]">
       Авто — политика сервера. Остальное — явный баланс стоимости и качества.
+      «Макс» использует самые сильные доступные модели.
     </p>
 
     <!-- Сегменты: переносятся на узком экране -->
@@ -151,7 +152,7 @@
 import { computed } from 'vue';
 import { useAppStore } from '@/stores/appStore';
 
-const PRESET_CODES = ['auto', 'economy', 'balanced', 'quality', 'manual'];
+const PRESET_CODES = ['auto', 'economy', 'balanced', 'quality', 'max_quality', 'manual'];
 
 defineProps({
   isBusy: { type: Boolean, default: false },
@@ -166,6 +167,7 @@ const presetItems = [
   { mode: 'economy', label: 'Эконом' },
   { mode: 'balanced', label: 'Баланс' },
   { mode: 'quality', label: 'Качество' },
+  { mode: 'max_quality', label: 'Макс' },
   { mode: 'manual', label: 'Вручную' },
 ];
 

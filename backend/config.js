@@ -79,11 +79,19 @@ module.exports = {
     { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (15 RPM, 1M TPM, 1500 RPD)' },
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (7 RPM, 250K TPM, 20 RPD)' },
     { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (10 RPM, 250K TPM, 20 RPD)' },
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (2 RPM, 32K TPM, 25 RPD)' },
+    { id: 'gemini-pro-latest', label: 'Gemini Pro Latest (2 RPM, 32K TPM, 50 RPD)' },
+    { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview (2 RPM, 32K TPM, 10 RPD)' },
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview (2 RPM, 32K TPM, 10 RPD)' },
   ],
   LLM_FALLBACK_CHAIN: {
     'gemini-1.5-flash': ['gemini-2.5-flash-lite', 'gemini-2.5-flash'],
     'gemini-2.5-flash-lite': ['gemini-1.5-flash', 'gemini-2.5-flash'],
     'gemini-2.5-flash': ['gemini-1.5-flash', 'gemini-2.5-flash-lite'],
+    'gemini-3.1-pro-preview': ['gemini-3-pro-preview', 'gemini-pro-latest', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    'gemini-3-pro-preview': ['gemini-pro-latest', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    'gemini-pro-latest': ['gemini-2.5-pro', 'gemini-2.5-flash'],
+    'gemini-2.5-pro': ['gemini-pro-latest', 'gemini-2.5-flash'],
   },
   /**
    * Локальные лимиты по модели (free tier). Используются для учёта и блокировки до лимита Google.
@@ -98,6 +106,8 @@ module.exports = {
     'gemini-2.5-pro': { rpm: 2, tpm: 32000, rpd: 25 },
     'gemini-pro-latest': { rpm: 2, tpm: 32000, rpd: 50 },
     'gemini-3-flash-preview': { rpm: 10, tpm: 250000, rpd: 25 },
+    'gemini-embedding-2': { rpm: 100, tpm: 100000, rpd: 1500 },
+    'gemini-embedding-2-preview': { rpm: 100, tpm: 100000, rpd: 1500 },
     'gemini-3.1-pro-preview': { rpm: 2, tpm: 32000, rpd: 10 },
     'gemini-3-pro-preview': { rpm: 2, tpm: 32000, rpd: 10 },
     'gemini-embedding-001': { rpm: 100, tpm: 100000, rpd: 1500 },

@@ -150,6 +150,7 @@ const modes = [
   { id: 'economy', title: 'Экономия', label: 'Меньше затрат' },
   { id: 'balanced', title: 'Баланс', label: 'Оптимальный' },
   { id: 'quality', title: 'Качество', label: 'Макс. результат' },
+  { id: 'max_quality', title: 'Максимум', label: 'Без экономии' },
   { id: 'manual', title: 'Ручной', label: 'Без логики ИИ' }
 ]
 

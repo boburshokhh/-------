@@ -153,7 +153,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { API } from '@/lib/api'
 import AdminShell from '@/components/admin/AdminShell.vue'
 
-const modes = ['auto', 'economy', 'balanced', 'quality', 'manual']
+const modes = ['auto', 'economy', 'balanced', 'quality', 'max_quality', 'manual']
 const error = ref('')
 const success = ref('')
 const savingPolicies = ref(false)

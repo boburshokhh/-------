@@ -17,10 +17,11 @@ const aiUsageAnalyticsService = require('../services/aiUsageAnalyticsService');
 const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
 const customModeService = require('../services/customModeService');
 const pgPool = require('../db/pgPool');
+const { BUILT_IN_ROUTING_MODES } = require('../config/routingModes');
 
 const router = express.Router();
 
-const ROUTING_MODES = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
+const ROUTING_MODES = new Set(BUILT_IN_ROUTING_MODES);
 const OVERRIDE_SCOPES = new Set(['global', 'agent', 'phase', 'document']);
 
 function parsePositiveInt(raw, fieldName) {

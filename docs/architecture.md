@@ -171,6 +171,8 @@ PDF-файлы хранятся в object storage (MinIO) или на локал
 
 Важно по pipeline: стадии blueprint (`theme_extraction` и `blueprint_generation`) используют модель, переданную роутером/кастомным режимом, и только при отсутствии входной модели откатываются к `LLM_FAST_MODEL/LLM_MODEL`.
 
+Системный режим **`max_quality`** проходит как отдельный built-in routing mode. Он приоритизирует `gemini-3.1-pro-preview` для blueprint/question/grounding/backfill и `gemini-embedding-2` для embedding; fallback идёт через `gemini-3-pro-preview`, `gemini-pro-latest`, `gemini-2.5-pro`, затем Flash. Внутренние premium/preview/emergency downgrade guard'ы не понижают этот режим, но физические ограничения текущего `GEMINI_API_KEY` остаются на стороне Google API.
+
 ## Архитектурные риски и текущие проблемы (решаются в рамках рефакторинга)
 
 1.  **Рассинхрон LLM-провайдеров**: До рефакторинга конфигурация (`.env` и `config.js`) была настроена на `GEMINI_API_KEY`, тогда как `generator.js` использовал `openai` SDK. Это вызывало неработоспособность основного флоу. В рамках текущего плана система переводится на `@google/genai` как на единственный источник правды.

@@ -49,7 +49,7 @@ export const METRICS_LEGEND =
 
 /**
  * Карточки режимов: метрики 1–3 (★), premium copy, усиленные этапы (чипы).
- * mode: economy | balanced | quality | manual
+ * mode: economy | balanced | quality | max_quality | manual
  */
 export const MODE_CARD_COPY = {
   economy: {
@@ -75,6 +75,14 @@ export const MODE_CARD_COPY = {
     premiumShort: 'Premium возможен на тяжёлых этапах при достаточной сложности',
     metrics: { quality: 3, cost: 1, speed: 1 },
     stageChips: HEAVY_STAGE_LABELS_SHORT.slice(0, 3),
+  },
+  max_quality: {
+    title: 'Максимум',
+    tag: 'Без экономии',
+    subtitle: 'Самые сильные доступные модели на ключевых этапах',
+    premiumShort: 'Premium и preview разрешены, если модель доступна',
+    metrics: { quality: 3, cost: 1, speed: 1 },
+    stageChips: ['Gemini 3.1 Pro', 'Blueprint + генерация', 'Grounding + backfill'],
   },
   manual: {
     title: 'Ручная настройка',

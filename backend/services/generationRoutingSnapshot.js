@@ -13,8 +13,9 @@ const customModeProfilesRepo = require('../db/repositories/customModeProfilesRep
 const customModeService = require('./customModeService');
 const operationalGuardrails = require('./operationalGuardrails');
 const { STAGE_KEYS } = require('../config/stageTaxonomy');
+const { BUILT_IN_ROUTING_MODES, isMaxQualityMode } = require('../config/routingModes');
 
-const VALID_MODES = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
+const VALID_MODES = new Set(BUILT_IN_ROUTING_MODES);
 const CUSTOM_MODE_CODE_RE = /^[a-z0-9][a-z0-9_-]{1,63}$/i;
 
 function normalizeMode(raw) {
@@ -82,6 +83,8 @@ async function getPublicGenerationRoutingSnapshot({ requestedMode = 'auto' } = {
                 'Режим «auto»: в конфиге указан «auto» — эффективный режим выбирается эвристиками и лимитами (см. effective_mode).',
             );
         }
+    } else if (isMaxQualityMode(mode)) {
+        explanations.push('Выбран режим «max_quality»: приоритет у максимального качества, premium и preview разрешены при доступности модели.');
     } else if (mode !== 'manual') {
         explanations.push(`Выбран режим «${mode}»: приоритет у стоимости/качества в зависимости от режима.`);
     } else {
@@ -98,23 +101,23 @@ async function getPublicGenerationRoutingSnapshot({ requestedMode = 'auto' } = {
         explanations.push('Включено «только стабильные модели»: preview-модели не используются.');
     }
 
-    if (globalPolicies?.premium_guard_enabled && premiumBudget.warning) {
+    if (!isMaxQualityMode(mode) && globalPolicies?.premium_guard_enabled && premiumBudget.warning) {
         explanations.push(
             `Расход premium приближается к мягкому лимиту (~${premiumBudget.premiumPercent ?? '?'}% сегодня).`,
         );
     }
-    if (globalPolicies?.premium_guard_enabled && premiumBudget.allowed === false) {
+    if (!isMaxQualityMode(mode) && globalPolicies?.premium_guard_enabled && premiumBudget.allowed === false) {
         explanations.push('Premium сейчас ограничен политикой дневного бюджета.');
     }
 
     const flags = quotaSnap.flags || {};
-    if (flags.premiumBudgetTight) {
+    if (!isMaxQualityMode(mode) && flags.premiumBudgetTight) {
         explanations.push('Система снизила использование premium из‑за лимитов бюджета (premium_budget_tight).');
     }
-    if (flags.flashBudgetTightForCheap) {
+    if (!isMaxQualityMode(mode) && flags.flashBudgetTightForCheap) {
         explanations.push('Flash-class под нагрузкой по бюджету — дешёвые стадии могут перейти на другую модель.');
     }
-    if (flags.previewRoutingBlocked) {
+    if (!isMaxQualityMode(mode) && flags.previewRoutingBlocked) {
         explanations.push('Preview-модели временно отключены из‑за высокой ошибки (preview_routing_blocked).');
     }
 

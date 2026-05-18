@@ -5,7 +5,7 @@
     </p>
 
     <div
-      class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4"
+      class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5"
       role="radiogroup"
       aria-labelledby="ai-mode-heading"
       :aria-disabled="disabled || useServerPolicy"
@@ -96,7 +96,7 @@ function isCardSelected(mode) {
   return !props.useServerPolicy && props.selectedMode === mode;
 }
 
-const modes = ['economy', 'balanced', 'quality', 'manual'];
+const modes = ['economy', 'balanced', 'quality', 'max_quality', 'manual'];
 const copy = MODE_CARD_COPY;
 const metricsLegend = METRICS_LEGEND;
 

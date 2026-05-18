@@ -16,6 +16,7 @@ const jobProgress = require('../services/jobProgress');
 const { normalizeDisplayFilename, resolveStorageExtension } = require('../utils/filename');
 const { logStructured } = require('../utils/observability');
 const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
+const { BUILT_IN_ROUTING_MODES } = require('../config/routingModes');
 
 const router = express.Router();
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
@@ -245,7 +246,7 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         const routingModeRaw = req.body.routingMode && typeof req.body.routingMode === 'string'
             ? req.body.routingMode.trim().toLowerCase()
             : '';
-        const builtInModes = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
+        const builtInModes = new Set(BUILT_IN_ROUTING_MODES);
         let routingMode = hasValidPick ? 'manual' : 'auto';
         if (routingModeRaw) {
             if (builtInModes.has(routingModeRaw)) {

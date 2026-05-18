@@ -88,7 +88,7 @@
 
 Загружает файл (PDF или DOCX), извлекает текст, разбивает его на чанки и использует LLM для генерации теста.
 - **Headers**: `Content-Type: multipart/form-data`; опционально **`X-Job-Id`** — UUID задачи для опроса прогресса (**GET** `/api/jobs/:jobId`) во время длительной обработки.
-- **Body**: поле `file` (файл документа); опционально `model` — идентификатор модели из конфигурации.
+- **Body**: поле `file` (файл документа); опционально `model` — идентификатор модели из конфигурации; опционально `routingMode` — `auto`, `economy`, `balanced`, `quality`, `max_quality`, `manual` или код custom profile.
 - **Ограничения**: макс. размер 10 МБ, макс. 30 страниц (для PDF).
 - **Ответ (201 Created)**:
   ```json
@@ -488,6 +488,8 @@ Body:
 `configured_primary`, `effective_primary`, `blocked_by[]`, `rejected_candidates[]`, `premium_blocked`, `preview_blocked`, `was_fallback`, `fallback_reason`.
 
 `test-run` создаёт запуск в `generation_runs` с привязкой к mode profile (`mode_profile_id`, `mode_profile_version`, `requested_mode_code`) и сохраняет dry-run snapshot в события run.
+
+Системный режим `max_quality` выбирает самые сильные доступные модели (`gemini-3.1-pro-preview` → `gemini-3-pro-preview` → `gemini-pro-latest` → `gemini-2.5-pro`) для LLM-стадий и `gemini-embedding-2` для embedding. Для него premium/preview guard'ы приложения не понижают модель, но реальные лимиты Gemini API всё равно могут вернуть 429.
 
 Обычная генерация через `POST /api/upload` также сохраняет в `generation_runs`:
 - `requested_mode_code` — исходный режим из запроса (`routingMode`);

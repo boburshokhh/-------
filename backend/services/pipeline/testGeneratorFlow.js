@@ -18,6 +18,7 @@
 
 const config       = require('../../config');
 const { AGENT_ROLES, AGENT_RESOLUTION_ORDER } = require('../../config/agentRoles');
+const { BUILT_IN_ROUTING_MODES, isMaxQualityMode } = require('../../config/routingModes');
 const { STAGE_KEYS } = require('../../config/stageTaxonomy');
 const { chunkText } = require('../chunker');
 const { calculateQuestionBudget } = require('../budgetCalculator');
@@ -90,6 +91,7 @@ async function resolvePipelineAgentModels({
     if (v2) {
         const decisions = {};
         const modelsByAgent = {};
+        const skipLocalAvailabilityFallback = isMaxQualityMode(routingMode);
         // Только стадии с реальным LLM; evaluation_agent исключён.
         const stageToAgent = {
             [STAGE_KEYS.embedding]:             AGENT_ROLES.evidence,
@@ -104,7 +106,7 @@ async function resolvePipelineAgentModels({
             if (d) {
                 decisions[agentRole] = d;
                 let m = d.selectedModel;
-                if (m) {
+                if (m && !skipLocalAvailabilityFallback) {
                     const avail = await quotaGuard.getAvailableModel(m);
                     if (avail) m = avail;
                     else if (d.fallbackModel) {
@@ -149,8 +151,12 @@ async function resolvePipelineAgentModels({
         decisions[agentRole] = d;
         let m = null;
         if (d.selectedModel != null) {
-            m = await quotaGuard.getAvailableModel(d.selectedModel);
-            if (!m && d.fallbackModel) m = await quotaGuard.getAvailableModel(d.fallbackModel);
+            if (isMaxQualityMode(routingMode)) {
+                m = d.selectedModel;
+            } else {
+                m = await quotaGuard.getAvailableModel(d.selectedModel);
+                if (!m && d.fallbackModel) m = await quotaGuard.getAvailableModel(d.fallbackModel);
+            }
             if (!m) m = d.selectedModel;
         }
         modelsByAgent[agentRole] = m;
@@ -164,7 +170,7 @@ async function resolveCustomModeAgentModels({
     traceId,
     documentId,
 }) {
-    const builtInModes = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
+    const builtInModes = new Set(BUILT_IN_ROUTING_MODES);
     const code = String(routingMode || '').toLowerCase().trim();
     if (!code || builtInModes.has(code)) {
         return null;
@@ -787,7 +793,10 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     });
     console.log(`[PIPELINE] Оценка бюджета API: ~${estimatedBudget.llmCalls} LLM, ~${estimatedBudget.embedCalls} Embed`);
 
-    const executionModeRes = await resolveExecutionMode(modelGenerator, embedModel, estimatedBudget);
+    const skipLocalPreflight = isMaxQualityMode(routingMode);
+    const executionModeRes = skipLocalPreflight
+        ? { mode: 'normal', reason: 'max_quality_skips_local_preflight' }
+        : await resolveExecutionMode(modelGenerator, embedModel, estimatedBudget);
     if (executionModeRes.mode === 'quota_exhausted') {
         console.warn(`[PIPELINE] ${executionModeRes.reason}`);
         if (!opts.forceOffline) {
@@ -875,7 +884,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         + `gen=${modelGenerator} blueprint=${modelBlueprint} ground=${modelQuality} embed=${embedModel}`);
 
     // ── 6. Offline branch ────────────────────────────────────────────────────
-    const llmRpdExhausted = await quotaGuard.isRpdExhaustedForModel(model);
+    const llmRpdExhausted = !skipLocalPreflight && await quotaGuard.isRpdExhaustedForModel(model);
     if (llmRpdExhausted) {
         console.warn('[PIPELINE] Дневной лимит isчерпан — offline mode');
         const result = await runOfflinePipeline({

@@ -12,6 +12,7 @@ const aiStageCatalogRepo = require('../db/repositories/aiStageCatalogRepo');
 const aiGlobalPoliciesRepo = require('../db/repositories/aiGlobalPoliciesRepo');
 const aiRoutingConfigRepo = require('../db/repositories/aiRoutingConfigRepo');
 const { STAGE_KEYS, STAGE_TO_AGENT_ROLE, STAGE_CATALOG } = require('../config/stageTaxonomy');
+const { BUILT_IN_ROUTING_MODES } = require('../config/routingModes');
 
 const MATRIX_STAGE_KEYS = [
     STAGE_KEYS.embedding,
@@ -22,7 +23,7 @@ const MATRIX_STAGE_KEYS = [
     STAGE_KEYS.backfill_generation,
 ];
 
-const VALID_PREVIEW = new Set(['auto', 'economy', 'balanced', 'quality', 'manual']);
+const VALID_PREVIEW = new Set(BUILT_IN_ROUTING_MODES);
 
 function normalizePreviewMode(raw) {
     const m = String(raw || 'auto').toLowerCase().trim();
@@ -99,7 +100,7 @@ function mapEffectivePreview(decision) {
 
 /**
  * @param {object} opts
- * @param {string} [opts.previewMode] — auto|economy|balanced|quality|manual
+ * @param {string} [opts.previewMode] — auto|economy|balanced|quality|max_quality|manual
  * @param {boolean} [opts.includeLastDecision]
  */
 async function getRoutingMatrix({ previewMode = 'auto', includeLastDecision = true } = {}) {

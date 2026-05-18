@@ -45,21 +45,22 @@ export function mapQuestion(question, idx) {
 }
 
 export function mapTestDetail(payload) {
-  const questions = Array.isArray(payload.questions) ? payload.questions : [];
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const questions = Array.isArray(safePayload.questions) ? safePayload.questions : [];
   const mappedQuestions = questions.map(mapQuestion);
   return {
-    id: payload.id,
-    title: payload.title || 'Тест',
-    topic: payload.documentName ? `Документ: ${payload.documentName}` : 'Сгенерированный тест',
+    id: safePayload.id ?? null,
+    title: safePayload.title || 'Тест',
+    topic: safePayload.documentName ? `Документ: ${safePayload.documentName}` : 'Сгенерированный тест',
     questions: mappedQuestions,
-    totalQuestions: payload.totalQuestions || mappedQuestions.length,
-    generationMetrics: payload.generationMetrics || null,
-    createdAt: payload.createdAt || null,
-    documentName: payload.documentName || null,
-    pageCount: payload.pageCount ?? null,
-    extractionQuality: payload.extractionQuality ?? null,
-    lowTextQuality: !!payload.lowTextQuality,
-    parseDiagnostics: payload.parseDiagnostics || null,
+    totalQuestions: safePayload.totalQuestions || mappedQuestions.length,
+    generationMetrics: safePayload.generationMetrics || null,
+    createdAt: safePayload.createdAt || null,
+    documentName: safePayload.documentName || null,
+    pageCount: safePayload.pageCount ?? null,
+    extractionQuality: safePayload.extractionQuality ?? null,
+    lowTextQuality: !!safePayload.lowTextQuality,
+    parseDiagnostics: safePayload.parseDiagnostics || null,
   };
 }
 
@@ -105,14 +106,15 @@ function formatAnswerForDisplay(value, question) {
 }
 
 export function mapResultSummary(payload, testDetail, userName = 'Пользователь') {
-  const maxScore = payload.maxScore || 0;
-  const score = payload.score || 0;
-  const correct = Array.isArray(payload.answers) ? payload.answers.filter((a) => a.isCorrect).length : score;
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const maxScore = safePayload.maxScore || 0;
+  const score = safePayload.score || 0;
+  const correct = Array.isArray(safePayload.answers) ? safePayload.answers.filter((a) => a.isCorrect).length : score;
   const wrong = Math.max(0, maxScore - correct);
   return {
-    resultId: payload.resultId,
+    resultId: safePayload.resultId,
     testId: testDetail?.id != null ? Number(testDetail.id) : null,
-    score: payload.percentage || 0,
+    score: safePayload.percentage || 0,
     label: 'Достигнутый балл',
     name: userName,
     quizName: testDetail?.title || 'Тест',
@@ -125,14 +127,15 @@ export function mapResultSummary(payload, testDetail, userName = 'Пользов
     strength: 'Темы с высоким процентом верных ответов',
     improve: 'Темы с ошибками и пропусками',
     breakdown: [],
-    completedAt: payload.completedAt || null,
-    raw: payload,
+    completedAt: safePayload.completedAt || null,
+    raw: safePayload,
   };
 }
 
 export function mapResultDetail(payload) {
-  const questions = Array.isArray(payload.questions) ? payload.questions : [];
-  const answers = Array.isArray(payload.answers) ? payload.answers : [];
+  const safePayload = payload && typeof payload === 'object' ? payload : {};
+  const questions = Array.isArray(safePayload.questions) ? safePayload.questions : [];
+  const answers = Array.isArray(safePayload.answers) ? safePayload.answers : [];
   const byQuestionId = new Map();
   questions.forEach((q, i) => {
     if (!q || typeof q !== 'object') return;
@@ -165,14 +168,14 @@ export function mapResultDetail(payload) {
   });
 
   return {
-    score: payload.percentage || 0,
-    grade: payload.percentage >= 90 ? 'Отлично' : payload.percentage >= 70 ? 'Хорошо' : 'Нужно повторить',
+    score: safePayload.percentage || 0,
+    grade: safePayload.percentage >= 90 ? 'Отлично' : safePayload.percentage >= 70 ? 'Хорошо' : 'Нужно повторить',
     correct: items.filter((i) => i.status === 'correct').length,
     total: items.length,
-    quiz: payload.testTitle || 'Разбор теста',
+    quiz: safePayload.testTitle || 'Разбор теста',
     questions: items,
-    testTitle: payload.testTitle || 'Тест',
-    userName: payload.userName || 'Аноним',
-    completedAt: payload.completedAt || null,
+    testTitle: safePayload.testTitle || 'Тест',
+    userName: safePayload.userName || 'Аноним',
+    completedAt: safePayload.completedAt || null,
   };
 }

@@ -7,7 +7,7 @@ const state = reactive({
   selectedModel: '',
   /** 'auto' | 'manual' — ручной выбор конкретной модели из списка */
   modelChoiceMode: 'auto',
-  /** Режим маршрутизации для запроса: auto | economy | balanced | quality | manual */
+  /** Режим маршрутизации для запроса: auto | economy | balanced | quality | max_quality | manual */
   routingModeUser: 'auto',
   /** Последний снимок GET /api/generation-routing */
   generationRouting: null,

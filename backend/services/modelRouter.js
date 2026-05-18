@@ -12,6 +12,13 @@ const aiModelRegistryService = require('./aiModelRegistryService');
 const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
 const runRepo = require('../db/repositories/runRepo');
 const { logStructured } = require('../utils/observability');
+const {
+    MAX_QUALITY_MODE,
+    BUILT_IN_ROUTING_MODES,
+    SYSTEM_ROUTING_MODES,
+    MAX_QUALITY_LLM_CHAIN,
+    isMaxQualityMode,
+} = require('../config/routingModes');
 
 const ROUTING_CFG = () => config.MODEL_ROUTING || {};
 
@@ -42,6 +49,7 @@ function isLiteModelId(modelId) {
 }
 
 function isPremiumAllowed(mode, stage, complexityNorm, documentMetadata) {
+    if (isMaxQualityMode(mode)) return true;
     if (!isHeavyStage(stage)) return false;
     const meta = documentMetadata || {};
     const pages = Number(meta.page_count) || 0;
@@ -99,6 +107,7 @@ function allowedLlmIds() {
     if (config.LLM_FAST_MODEL) set.add(config.LLM_FAST_MODEL);
     if (config.LLM_MODEL) set.add(config.LLM_MODEL);
     if (config.SUMMARY_CHEAP_MODEL) set.add(config.SUMMARY_CHEAP_MODEL);
+    for (const id of MAX_QUALITY_LLM_CHAIN) set.add(id);
     return set;
 }
 
@@ -124,7 +133,9 @@ function buildLlmCandidateOrder(mode, stage, allowPremium, flags, adminOverrides
     const disablePremium = adminOverrides?.disablePremium || flags?.premiumBudgetTight;
 
     let order = [];
-    if (mode === 'economy') {
+    if (isMaxQualityMode(mode)) {
+        order = [...MAX_QUALITY_LLM_CHAIN, pro, flash, lite];
+    } else if (mode === 'economy') {
         order = [lite, flash];
         if (allowPremium && !disablePremium) order.push(pro);
     } else if (mode === 'balanced') {
@@ -190,12 +201,14 @@ async function routeModel(input) {
 
     // embedding: только embedding model
     if (stage === 'embedding') {
-        const emb = config.EMBEDDING_MODEL || 'gemini-embedding-001';
+        const emb = isMaxQualityMode(mode)
+            ? 'gemini-embedding-2'
+            : (config.EMBEDDING_MODEL || 'gemini-embedding-001');
         const tier = 'economy';
         const preview = await isPreviewModel(emb);
         const out = {
             selectedModel: emb,
-            fallbackModel: emb,
+            fallbackModel: isMaxQualityMode(mode) ? 'gemini-embedding-001' : emb,
             reason: 'embedding_stage_only',
             costTier: tier,
             isPreview: preview,
@@ -252,15 +265,22 @@ async function routeModel(input) {
 
     const allowPremium = isPremiumAllowed(mode, stage, complexityNorm, documentMetadata) || mode === 'balanced';
 
-    let candidates = buildLlmCandidateOrder(mode, stage, allowPremium, flags, adminOverrides);
-    candidates = await filterPreviewCandidates(candidates, flags, adminOverrides);
+    const maxQuality = isMaxQualityMode(mode);
+    const routeOverrides = maxQuality
+        ? { ...adminOverrides, forcePreview: true, disablePremium: false }
+        : adminOverrides;
+
+    let candidates = buildLlmCandidateOrder(mode, stage, allowPremium, flags, routeOverrides);
+    candidates = await filterPreviewCandidates(candidates, flags, routeOverrides);
 
     let selected = null;
     let reason = 'ordered_pick';
 
     for (const id of candidates) {
         const phase = budgetPhaseForCandidate(id);
-        const { allowed } = await quotaGuard.canUseModelForStage(id, phase);
+        const { allowed } = maxQuality
+            ? { allowed: true }
+            : await quotaGuard.canUseModelForStage(id, phase);
         if (allowed) {
             selected = id;
             break;
@@ -272,7 +292,7 @@ async function routeModel(input) {
         reason = 'no_candidate_passed_budget_guard';
     }
 
-    const rpdOk = await quotaGuard.getAvailableModel(selected);
+    const rpdOk = maxQuality ? selected : await quotaGuard.getAvailableModel(selected);
     if (rpdOk && rpdOk !== selected) {
         reason = `${reason}_rpd_fallback`;
         selected = rpdOk;
@@ -477,11 +497,11 @@ function matchRoutingRuleConditions(ctx, conditions) {
 
 async function resolveEffectiveMode(requestedModeRaw) {
     const normalized = String(requestedModeRaw || '').toLowerCase().trim();
-    if (['auto', 'economy', 'balanced', 'quality', 'manual'].includes(normalized)) {
+    if (BUILT_IN_ROUTING_MODES.includes(normalized)) {
         if (normalized !== 'auto') return normalized;
         const cfg = await loadRoutingConfigCached();
         const globalMode = String(cfg?.routing_mode || '').toLowerCase().trim();
-        if (['economy', 'balanced', 'quality', 'manual'].includes(globalMode)) {
+        if (SYSTEM_ROUTING_MODES.includes(globalMode)) {
             return globalMode;
         }
         return 'auto';
@@ -492,7 +512,7 @@ async function resolveEffectiveMode(requestedModeRaw) {
         const profile = await customModeProfilesRepo.getProfileByCode(normalized);
         if (profile && !profile.is_archived && !profile.is_disabled) {
             const parent = String(profile.parent_mode || '').toLowerCase().trim();
-            if (['economy', 'balanced', 'quality', 'manual'].includes(parent)) {
+            if (SYSTEM_ROUTING_MODES.includes(parent)) {
                 return parent;
             }
             return 'auto';
@@ -502,7 +522,7 @@ async function resolveEffectiveMode(requestedModeRaw) {
     }
     const cfg = await loadRoutingConfigCached();
     const globalMode = String(cfg?.routing_mode || '').toLowerCase().trim();
-    return ['auto', 'economy', 'balanced', 'quality', 'manual'].includes(globalMode)
+    return BUILT_IN_ROUTING_MODES.includes(globalMode)
         ? globalMode
         : 'auto';
 }
@@ -551,7 +571,8 @@ function shouldInsertEscalationModel(ctx, actions) {
     const maxEasy = ROUTING_CFG().maxPagesForEasyDoc ?? 15;
     for (const w of when) {
         if (w === 'high_complexity' && ctx.complexityNorm >= th) return true;
-        if (w === 'routing_mode_quality' && String(ctx.requestedMode || '').toLowerCase() === 'quality') {
+        if (w === 'routing_mode_quality'
+            && ['quality', MAX_QUALITY_MODE].includes(String(ctx.requestedMode || '').toLowerCase())) {
             return true;
         }
         if (w === 'doc_heavy') {
@@ -600,6 +621,7 @@ function buildCandidateIdsFromRuleActions(ctx, actions) {
 async function routeModelForAgent(input) {
     const agentRole = String(input.agentRole || '').trim();
     const mode = await resolveEffectiveMode(input.requestedMode);
+    const maxQuality = isMaxQualityMode(mode);
     const documentMetadata = input.documentMetadata || {};
     const complexityNorm = normalizeComplexity(input.complexityScore);
     const adminOverrides = input.adminOverrides || {};
@@ -734,10 +756,15 @@ async function routeModelForAgent(input) {
     }
 
     if (matchedActions && Object.keys(matchedActions).length > 0) {
+        const routeOverrides = maxQuality
+            ? { ...adminOverrides, forcePreview: true, disablePremium: false }
+            : adminOverrides;
         let candidates = buildCandidateIdsFromRuleActions(routerCtx, matchedActions);
-        candidates = await filterPreviewCandidates(candidates, flags, adminOverrides);
+        if (maxQuality) candidates = dedupe([...MAX_QUALITY_LLM_CHAIN, ...candidates]);
+        candidates = await filterPreviewCandidates(candidates, flags, routeOverrides);
         if (candidates.length === 0) {
             candidates = buildCandidateIdsFromRuleActions(routerCtx, matchedActions);
+            if (maxQuality) candidates = dedupe([...MAX_QUALITY_LLM_CHAIN, ...candidates]);
         }
 
         if (candidates.length === 0) {
@@ -759,7 +786,9 @@ async function routeModelForAgent(input) {
         let reason = 'db_rule_ordered_pick';
         for (const id of candidates) {
             const phase = budgetPhaseForCandidate(id);
-            const { allowed } = await quotaGuard.canUseModelForStage(id, phase);
+            const { allowed } = maxQuality
+                ? { allowed: true }
+                : await quotaGuard.canUseModelForStage(id, phase);
             if (allowed) {
                 selected = id;
                 break;
@@ -769,7 +798,7 @@ async function routeModelForAgent(input) {
             selected = quotaGuard.getFallbackModel('standard_generation');
             reason = 'db_rule_no_candidate_passed_budget_guard';
         }
-        const rpdOk = await quotaGuard.getAvailableModel(selected);
+        const rpdOk = maxQuality ? selected : await quotaGuard.getAvailableModel(selected);
         if (rpdOk && rpdOk !== selected) {
             reason = `${reason}_rpd_fallback`;
             selected = rpdOk;
