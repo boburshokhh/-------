@@ -12,13 +12,31 @@ const aiModelRegistryService = require('./aiModelRegistryService');
 const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
 const runRepo = require('../db/repositories/runRepo');
 const { logStructured } = require('../utils/observability');
+const { STAGE_KEYS } = require('../config/stageTaxonomy');
+const { AGENT_TO_STAGE_KEY } = require('../config/agentRoles');
 const {
     MAX_QUALITY_MODE,
     BUILT_IN_ROUTING_MODES,
     SYSTEM_ROUTING_MODES,
     MAX_QUALITY_LLM_CHAIN,
+    getMaxQualityLlmChainForStage,
     isMaxQualityMode,
 } = require('../config/routingModes');
+
+const LEGACY_ROUTER_STAGE_TO_KEY = Object.freeze({
+    embedding: STAGE_KEYS.embedding,
+    blueprint: STAGE_KEYS.blueprint_generation,
+    generation: STAGE_KEYS.question_generation,
+    grounding: STAGE_KEYS.grounding_validation,
+    backfill: STAGE_KEYS.backfill_generation,
+    pipeline: STAGE_KEYS.cheap_preprocess,
+});
+
+function resolveCanonicalStageKey(stage) {
+    const s = String(stage || '').trim();
+    if (Object.values(STAGE_KEYS).includes(s)) return s;
+    return LEGACY_ROUTER_STAGE_TO_KEY[s] || STAGE_KEYS.question_generation;
+}
 
 const ROUTING_CFG = () => config.MODEL_ROUTING || {};
 
@@ -134,7 +152,7 @@ function buildLlmCandidateOrder(mode, stage, allowPremium, flags, adminOverrides
 
     let order = [];
     if (isMaxQualityMode(mode)) {
-        order = [...MAX_QUALITY_LLM_CHAIN, pro, flash, lite];
+        order = [...getMaxQualityLlmChainForStage(resolveCanonicalStageKey(stage)), pro, flash, lite];
     } else if (mode === 'economy') {
         order = [lite, flash];
         if (allowPremium && !disablePremium) order.push(pro);
@@ -760,11 +778,16 @@ async function routeModelForAgent(input) {
             ? { ...adminOverrides, forcePreview: true, disablePremium: false }
             : adminOverrides;
         let candidates = buildCandidateIdsFromRuleActions(routerCtx, matchedActions);
-        if (maxQuality) candidates = dedupe([...MAX_QUALITY_LLM_CHAIN, ...candidates]);
+        const mqStageKey = AGENT_TO_STAGE_KEY[agentRole] || STAGE_KEYS.question_generation;
+        if (maxQuality) {
+            candidates = dedupe([...getMaxQualityLlmChainForStage(mqStageKey), ...candidates]);
+        }
         candidates = await filterPreviewCandidates(candidates, flags, routeOverrides);
         if (candidates.length === 0) {
             candidates = buildCandidateIdsFromRuleActions(routerCtx, matchedActions);
-            if (maxQuality) candidates = dedupe([...MAX_QUALITY_LLM_CHAIN, ...candidates]);
+            if (maxQuality) {
+                candidates = dedupe([...getMaxQualityLlmChainForStage(mqStageKey), ...candidates]);
+            }
         }
 
         if (candidates.length === 0) {

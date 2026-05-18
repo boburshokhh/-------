@@ -100,8 +100,14 @@ const selectedModelLabel = computed(() => {
 
 const uploadLimits = computed(() => store.state.diagnostics.health?.uploadLimits || {})
 const allowedMimes = computed(() => uploadLimits.value.allowedMimes || [])
-const maxPages = computed(() => Number(uploadLimits.value.maxPages || 30))
-const maxFileSizeMb = computed(() => Number(uploadLimits.value.maxFileSizeMb || 10))
+const maxPages = computed(() => {
+  const n = Number(uploadLimits.value.maxPages)
+  return Number.isFinite(n) && n > 0 ? n : null
+})
+const maxFileSizeMb = computed(() => {
+  const n = Number(uploadLimits.value.maxFileSizeMb)
+  return Number.isFinite(n) && n > 0 ? n : null
+})
 const uploadAccept = computed(() => {
   const mimes = allowedMimes.value
   if (!mimes.length) {
@@ -114,7 +120,10 @@ const uploadLimitsText = computed(() => {
   if (allowedMimes.value.includes('application/pdf')) labels.push('PDF')
   if (allowedMimes.value.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) labels.push('DOCX')
   const formatsLabel = labels.length ? labels.join(', ') : 'PDF'
-  return `Поддерживаются ${formatsLabel}, максимум ${maxPages.value} страниц и до ${maxFileSizeMb.value} МБ`
+  const parts = [`Поддерживаются ${formatsLabel}`]
+  if (maxPages.value) parts.push(`максимум ${maxPages.value} страниц`)
+  if (maxFileSizeMb.value) parts.push(`до ${maxFileSizeMb.value} МБ`)
+  return parts.join(', ')
 })
 
 async function loadRoutingSnapshot() {

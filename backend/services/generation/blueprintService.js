@@ -5,6 +5,8 @@ const runtimeConfig = require('../runtimeConfig');
 const quotaGuard = require('../quotaGuard');
 const { parseGeminiApiError, sleepForGeminiRetry, withTimeout } = require('../geminiError');
 const { buildSummaryDigest, getMergedFactsForChunk } = require('../rag/evidenceBuilder');
+const { STAGE_KEYS } = require('../../config/stageTaxonomy');
+const { getMaxQualityLlmChainForStage } = require('../../config/routingModes');
 
 /** Компактное оглавление по section/heading чанков (без LLM). */
 function buildDocumentOutline(indexedChunks) {
@@ -292,13 +294,18 @@ async function buildThemesAndBlueprint(indexedChunks, fullText, model = null, ta
     // is faster and more reliable than 3+ more retries with exponential backoff.
     const maxAttempts = 2;
     let lastError;
+    const modelChain = opts.bypassLimits
+        ? getMaxQualityLlmChainForStage(STAGE_KEYS.blueprint_generation)
+        : [llmModel];
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    modelLoop:
+    for (const candidateModel of modelChain) {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-            await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
+            await quotaGuard.assertWithinFreeTierQuota(candidateModel, quotaOpts);
             const ai = await getAiClient();
             const genPromise = ai.models.generateContent({
-                model: llmModel,
+                model: candidateModel,
                 contents: `Ты анализируешь документацию для создания проверочного теста (формат multiple_choice).
 Твоя задача — выделить темы и СРАЗУ создать для них план вопросов (intents).
 
@@ -320,7 +327,10 @@ ${digest}
             });
 
             const response = await withTimeout(genPromise, reqTimeout, '[BLUEPRINT] buildThemesAndBlueprint generateContent');
-            await quotaGuard.recordGeminiCall(llmModel);
+            await quotaGuard.recordGeminiCall(candidateModel);
+            if (candidateModel !== llmModel) {
+                console.warn(`[BLUEPRINT] Использована модель ${candidateModel} (вместо ${llmModel})`);
+            }
 
             const parsed = extractJSON(response.text);
             const list = Array.isArray(parsed) ? parsed : (parsed.intents && Array.isArray(parsed.intents) ? parsed.intents : null);
@@ -339,15 +349,24 @@ ${digest}
             throw new Error('Пустой план вопросов');
         } catch (err) {
             lastError = err;
-            if (err.type === 'QUOTA_EXCEEDED') break;
+            if (err.type === 'QUOTA_EXCEEDED') break modelLoop;
             const g = parseGeminiApiError(err);
-            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, err);
-            console.warn(`[BLUEPRINT] buildThemesAndBlueprint попытка ${attempt}/${maxAttempts}: ${err.message}`);
-            if (g.isDailyFreeTierQuota) break;
-            if (attempt < maxAttempts) {
+            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(candidateModel, err);
+            console.warn(`[BLUEPRINT] buildThemesAndBlueprint ${candidateModel} попытка ${attempt}/${maxAttempts}: ${err.message}`);
+            if (g.isDailyFreeTierQuota) break modelLoop;
+            const retryable = g.isTransientUnavailable
+                || (g.isResourceExhausted && !g.isDailyFreeTierQuota);
+            if (retryable && attempt < maxAttempts) {
                 if (onRetry) onRetry({ attempt, maxAttempts, parsed: g, message: String(err.message || '') });
                 await sleepForGeminiRetry(g, attempt, maxAttempts, sleep);
+                continue;
             }
+            const nextIdx = modelChain.indexOf(candidateModel) + 1;
+            if (retryable && nextIdx < modelChain.length) {
+                console.warn(`[BLUEPRINT] ${candidateModel} недоступна, пробуем ${modelChain[nextIdx]}`);
+                break;
+            }
+        }
         }
     }
     throwAfterGeminiRetriesFailed('buildThemesAndBlueprint', lastError);

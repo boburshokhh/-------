@@ -164,7 +164,7 @@ async function fetchBatchSummaryLLM(chunks, modelId, quotaOpts = {}) {
 /**
  * Обрабатывает батч чанков, возвращая массив результатов summaries.
  */
-async function processSummaryBatch(chunksMap, quotaOpts = {}) {
+async function processSummaryBatch(chunksMap, quotaOpts = {}, summaryModelOverride = null) {
     const chunks = Object.values(chunksMap);
     const mode = (config.SUMMARY_MODE || 'extractive').toLowerCase();
     
@@ -205,7 +205,8 @@ async function processSummaryBatch(chunksMap, quotaOpts = {}) {
         });
     }
 
-    const modelId = mode === 'llm' ? (config.LLM_MODEL || 'gemini-2.5-flash') : (config.SUMMARY_CHEAP_MODEL || 'gemini-2.5-flash-lite');
+    const modelId = summaryModelOverride
+        || (mode === 'llm' ? (config.LLM_MODEL || 'gemini-2.5-flash') : (config.SUMMARY_CHEAP_MODEL || 'gemini-2.5-flash-lite'));
     const sourceTag = mode === 'llm' ? 'llm' : 'cheap_llm';
 
     const fallbackToExtractive = (reason, status) => {
@@ -293,6 +294,9 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
     const quotaOpts = bypassLimits ? { bypassLimits: true } : {};
     const embedOverride = opts.embedModelOverride
         || (isMaxQualityMode(opts.routingMode) ? MAX_QUALITY_EMBEDDING_CHAIN[0] : null);
+    const summaryModelOverride = isMaxQualityMode(opts.routingMode)
+        ? (config.SUMMARY_CHEAP_MODEL || 'gemini-2.5-flash')
+        : null;
 
     if (rawChunks.length === 0) {
         throw new Error('Нет чанков для индексации');
@@ -429,7 +433,7 @@ async function indexDocument(documentId, fullText, onProgress, opts = {}) {
         } else {
             const chunksMap = {};
             for (const c of batchChunks) chunksMap[c.chunk_index] = c;
-            batchResults = await processSummaryBatch(chunksMap, quotaOpts);
+            batchResults = await processSummaryBatch(chunksMap, quotaOpts, summaryModelOverride);
             if (batchResults.some(r => r.status === 'quota_skip')) quotaExhaustedGlobal = true;
         }
 

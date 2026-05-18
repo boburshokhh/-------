@@ -24,8 +24,9 @@ const {
 const {
     MAX_QUALITY_MODE,
     SYSTEM_ROUTING_MODES,
-    MAX_QUALITY_LLM_CHAIN,
     MAX_QUALITY_EMBEDDING_CHAIN,
+    getMaxQualityLlmChainForStage,
+    isMaxQualityPremiumStage,
     isMaxQualityMode,
 } = require('../config/routingModes');
 
@@ -228,15 +229,25 @@ async function selectModel(stageRequest) {
     const effectiveMode = resolveMode(stageRequest.requestedMode, policies);
     const isEmergency = isMaxQualityMode(effectiveMode) ? false : policies.emergency_downgrade;
 
+    const maxQuality = isMaxQualityMode(effectiveMode);
+
     // 2. Check manual override (highest precedence)
-    const override = findMatchingOverride(overrides, { stageKey, agentRole, documentId, runId });
+    let override = findMatchingOverride(overrides, { stageKey, agentRole, documentId, runId });
     let forcedModelId = null;
     if (override) {
-        manualOverrideId = override.id;
-        decisionSource = 'manual_override';
         const modelRow = catalog.find(m => m.id === Number(override.model_id));
-        if (modelRow && modelRow.api_model_id) {
-            forcedModelId = modelRow.api_model_id;
+        const overrideApiId = modelRow?.api_model_id || null;
+        const isGlobalPremiumPin = maxQuality
+            && String(override.scope || '').toLowerCase() === 'global'
+            && overrideApiId
+            && isPremiumId(overrideApiId)
+            && !isMaxQualityPremiumStage(stageKey);
+        if (!isGlobalPremiumPin) {
+            manualOverrideId = override.id;
+            decisionSource = 'manual_override';
+            if (overrideApiId) forcedModelId = overrideApiId;
+        } else {
+            override = null;
         }
     }
     if (!forcedModelId && adminOv.model) {
@@ -249,10 +260,20 @@ async function selectModel(stageRequest) {
     const matchedRule = stageRules.find(r => matchRuleConditions(r, {
         routingMode: effectiveMode, complexity, docMeta, executionMode,
     }));
-    const ruleActions = matchedRule?.actions || {};
+    let ruleActions = matchedRule?.actions || {};
+    if (maxQuality) {
+        const tieredChain = getMaxQualityLlmChainForStage(stageKey);
+        ruleActions = {
+            ...ruleActions,
+            primary_api_model_id: tieredChain[0] || ruleActions.primary_api_model_id,
+            fallback_api_model_ids: tieredChain.slice(1),
+            allow_premium: true,
+            allow_preview: true,
+        };
+        if (matchedRule && !forcedModelId) decisionSource = 'tiered_max_quality';
+    }
 
     // 4. Build effective policy
-    const maxQuality = isMaxQualityMode(effectiveMode);
 
     const allowPreview = maxQuality || (!policies.stable_only
         && !isEmergency
@@ -484,9 +505,13 @@ function buildCandidatePool(catalog, stageMeta, { forcedModelId, ruleActions, ef
         if (row) pool.push(row);
     }
 
-    if (ruleActions.primary_api_model_id) {
+    if (ruleActions.primary_api_model_id && !isMaxQualityMode(effectiveMode)) {
         const row = catalog.find(m => m.api_model_id === ruleActions.primary_api_model_id);
         if (row && !pool.find(p => p.id === row.id)) pool.push(row);
+    }
+    if (isMaxQualityMode(effectiveMode) && ruleActions.primary_api_model_id) {
+        const row = catalog.find(m => m.api_model_id === ruleActions.primary_api_model_id);
+        if (row) pool.unshift(row);
     }
     if (ruleActions.escalation?.to_api_model_id) {
         const row = catalog.find(m => m.api_model_id === ruleActions.escalation.to_api_model_id);
@@ -503,7 +528,9 @@ function buildCandidatePool(catalog, stageMeta, { forcedModelId, ruleActions, ef
     const isEmbedding = taskType === 'embedding';
 
     if (isMaxQualityMode(effectiveMode)) {
-        const preferred = isEmbedding ? MAX_QUALITY_EMBEDDING_CHAIN : MAX_QUALITY_LLM_CHAIN;
+        const preferred = isEmbedding
+            ? MAX_QUALITY_EMBEDDING_CHAIN
+            : getMaxQualityLlmChainForStage(stageMeta.key);
         for (const apiId of preferred) {
             const row = catalog.find(m => m.api_model_id === apiId);
             if (row && !pool.find(p => p.id === row.id)) pool.push(row);
@@ -529,9 +556,19 @@ function scoreCandidates(candidates, opts) {
 
         const tier = costTierOf(c.api_model_id);
         if (effectiveMode === MAX_QUALITY_MODE) {
-            if (tier === 'premium') score += 50;
-            else if (tier === 'standard') score += 25;
-            else score += 5;
+            if (isMaxQualityPremiumStage(stageKey)) {
+                if (tier === 'premium') score += 50;
+                else if (tier === 'standard') score += 25;
+                else score += 5;
+            } else if (stageKey === STAGE_KEYS.cheap_preprocess || stageKey === STAGE_KEYS.grounding_validation) {
+                if (tier === 'economy') score += 45;
+                else if (tier === 'standard') score += 35;
+                else score += 10;
+            } else {
+                if (tier === 'standard') score += 40;
+                else if (tier === 'premium') score += 28;
+                else score += 12;
+            }
         } else if (tier === 'economy') score += 30;
         else if (tier === 'standard') score += 20;
         else score += 5;
@@ -545,12 +582,14 @@ function scoreCandidates(candidates, opts) {
         if (effectiveMode === MAX_QUALITY_MODE) {
             const preferred = stageKey === STAGE_KEYS.embedding
                 ? MAX_QUALITY_EMBEDDING_CHAIN
-                : MAX_QUALITY_LLM_CHAIN;
+                : getMaxQualityLlmChainForStage(stageKey);
             const idx = preferred.indexOf(c.api_model_id);
             if (idx >= 0) score += 100 - idx * 10;
-            if (c.is_preview || isPreviewId(c.api_model_id)) score += 12;
-            if (String(c.api_model_id || '').includes('3.1')) score += 8;
-            if (String(c.api_model_id || '').includes('3-pro')) score += 6;
+            if (isMaxQualityPremiumStage(stageKey)) {
+                if (c.is_preview || isPreviewId(c.api_model_id)) score += 12;
+                if (String(c.api_model_id || '').includes('3.1')) score += 8;
+                if (String(c.api_model_id || '').includes('3-pro')) score += 6;
+            }
         } else if (effectiveMode === 'economy') {
             if (tier === 'economy') score += 15;
         } else if (effectiveMode === 'quality') {

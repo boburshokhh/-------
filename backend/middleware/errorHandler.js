@@ -20,11 +20,14 @@ module.exports = function errorHandler(err, req, res, next) {
     console.error(err.stack);
 
     if (err.code === 'LIMIT_FILE_SIZE') {
-        const mb = config.MAX_FILE_SIZE_MB || 10;
-        markUploadJobError(req, `Файл больше ${mb} МБ (лимит сервера)`);
+        const mb = config.MAX_FILE_SIZE_MB;
+        const detail = mb
+            ? `Максимальный размер файла — ${mb} МБ`
+            : 'Файл слишком большой для сервера';
+        markUploadJobError(req, mb ? `Файл больше ${mb} МБ (лимит сервера)` : detail);
         return res.status(413).json({
             error: 'Файл слишком большой',
-            details: `Максимальный размер файла — ${mb} МБ`
+            details: detail,
         });
     }
 

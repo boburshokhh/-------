@@ -84,7 +84,9 @@ async function getPublicGenerationRoutingSnapshot({ requestedMode = 'auto' } = {
             );
         }
     } else if (isMaxQualityMode(mode)) {
-        explanations.push('Выбран режим «max_quality»: приоритет у максимального качества, premium и preview разрешены при доступности модели.');
+        explanations.push(
+            'Режим «max_quality»: топ-модели (Gemini 3.1 Pro) на плане теста и генерации вопросов; на остальных стадиях — подходящие по задаче модели (Flash/Pro).',
+        );
     } else if (mode !== 'manual') {
         explanations.push(`Выбран режим «${mode}»: приоритет у стоимости/качества в зависимости от режима.`);
     } else {

@@ -7,10 +7,8 @@ const { validateQuestions, extractJSON } = require('../validator');
 const { getBatchSystemPrompt, GROUNDING_SYSTEM } = require('../llm/prompts');
 const { resolveChunkEvidence } = require('../rag/evidenceBuilder');
 const routingService = require('./routingService');
-const {
-    MAX_QUALITY_GROUNDING_CHAIN,
-    MAX_QUALITY_LLM_CHAIN,
-} = require('../../config/routingModes');
+const { STAGE_KEYS } = require('../../config/stageTaxonomy');
+const { getMaxQualityLlmChainForStage } = require('../../config/routingModes');
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -185,9 +183,8 @@ function buildGroundingModelChain(primary, routeOpts) {
     };
 
     if (routeOpts?.bypassLimits) {
-        for (const m of MAX_QUALITY_GROUNDING_CHAIN) add(m);
+        for (const m of getMaxQualityLlmChainForStage(STAGE_KEYS.grounding_validation)) add(m);
         add(primary);
-        for (const m of MAX_QUALITY_LLM_CHAIN) add(m);
     } else {
         add(primary);
         const fb = config.LLM_FALLBACK_CHAIN?.[primary] || [];

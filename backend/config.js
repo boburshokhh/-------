@@ -20,6 +20,15 @@ function parseRateMax(envVal, fallback) {
   return Number.isFinite(n) && n >= 1 ? n : fallback;
 }
 
+/** Положительное число или null (без лимита): 0, пустая строка, unlimited → null */
+function parseOptionalPositiveLimit(envVal, fallback = null) {
+  if (envVal === undefined) return fallback;
+  const raw = String(envVal).trim().toLowerCase();
+  if (raw === '' || raw === '0' || raw === 'unlimited' || raw === 'none' || raw === 'off') return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 module.exports = {
   PORT: parseInt(process.env.PORT, 10) || 3002,
   /** Лимит запросов к публичному API за окно (по умолчанию 100 / 15 мин). */
@@ -34,7 +43,8 @@ module.exports = {
   })(),
   UPLOAD_RATE_LIMIT_MAX: parseRateMax(process.env.UPLOAD_RATE_LIMIT_MAX, 30),
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
-  MAX_FILE_SIZE_MB: parseInt(process.env.MAX_FILE_SIZE_MB) || 10,
+  /** null — без лимита; задать MAX_FILE_SIZE_MB в .env для ограничения (МБ) */
+  MAX_FILE_SIZE_MB: parseOptionalPositiveLimit(process.env.MAX_FILE_SIZE_MB, null),
   CHUNK_TOKEN_LIMIT: parseInt(process.env.CHUNK_TOKEN_LIMIT) || 2500,
   CHUNK_OVERLAP_TOKENS: parseInt(process.env.CHUNK_OVERLAP_TOKENS) || 200,
   UPLOAD_DIR: path.join(dataDir, 'uploads'),
@@ -61,7 +71,8 @@ module.exports = {
   MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || '',
   MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY || '',
   MINIO_BUCKET: process.env.MINIO_BUCKET || 'ai-testgen-docs',
-  MAX_PAGES: 30,
+  /** null — без лимита; задать MAX_PAGES в .env для ограничения */
+  MAX_PAGES: parseOptionalPositiveLimit(process.env.MAX_PAGES, null),
   QUESTIONS_PER_CHUNK: parseInt(process.env.QUESTIONS_PER_CHUNK, 10) || 4,
   CHAR_LENGTH_PER_QUESTION: parseInt(process.env.CHAR_LENGTH_PER_QUESTION, 10) || 2000,
   LLM_MODEL: process.env.LLM_MODEL || 'gemini-2.5-flash',

@@ -92,10 +92,14 @@ const fileFilter = (req, file, cb) => {
     }
 };
 
+const multerLimits = {};
+if (config.MAX_FILE_SIZE_MB) {
+    multerLimits.fileSize = config.MAX_FILE_SIZE_MB * 1024 * 1024;
+}
 const upload = multer({
     storage,
     fileFilter,
-    limits: { fileSize: config.MAX_FILE_SIZE_MB * 1024 * 1024 },
+    limits: multerLimits,
 });
 
 router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, next) => {
@@ -178,7 +182,7 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
             console.warn(`[UPLOAD] Низкое качество извлечения текста (quality=${diagnostics.extractionQuality}, doc=${displayName})`);
         }
 
-        if (pageCount && pageCount > config.MAX_PAGES) {
+        if (config.MAX_PAGES != null && pageCount && pageCount > config.MAX_PAGES) {
             jobProgress.logJobProgress(jobId, {
                 phase: 'error',
                 stage: 'too_many_pages',

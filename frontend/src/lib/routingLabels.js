@@ -78,11 +78,11 @@ export const MODE_CARD_COPY = {
   },
   max_quality: {
     title: 'Максимум',
-    tag: 'Без экономии',
-    subtitle: 'Самые сильные доступные модели на ключевых этапах',
-    premiumShort: 'Premium и preview разрешены, если модель доступна',
-    metrics: { quality: 3, cost: 1, speed: 1 },
-    stageChips: ['Gemini 3.1 Pro', 'Blueprint + генерация', 'Grounding + backfill'],
+    tag: 'Умное качество',
+    subtitle: 'Топ-модели на плане и вопросах; Flash/Pro на вспомогательных этапах',
+    premiumShort: '3.1 Pro — blueprint и генерация; остальное по потребности стадии',
+    metrics: { quality: 3, cost: 2, speed: 2 },
+    stageChips: ['3.1 Pro: план + вопросы', 'Flash: grounding, summary', 'Pro: backfill'],
   },
   manual: {
     title: 'Ручная настройка',

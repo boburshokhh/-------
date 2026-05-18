@@ -101,7 +101,7 @@ const props = defineProps({
   /** Экземпляр File — для размера, MIME и иконки */
   file: { type: Object, default: null },
   accept: { type: String, default: '.pdf,application/pdf' },
-  limitsText: { type: String, default: 'Поддерживаются PDF, максимум 30 страниц и до 10 МБ' },
+  limitsText: { type: String, default: 'Поддерживаются PDF' },
 });
 
 const emit = defineEmits(['file-selected']);
