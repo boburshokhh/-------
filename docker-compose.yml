@@ -2,11 +2,12 @@
 #
 # Сервисы: postgres, redis, app (API), worker (BullMQ), nginx
 #
-# Запуск (из каталога «ИИ тест»):
-#   cp .env.example .env   # задать GEMINI_API_KEY, POSTGRES_PASSWORD
+# Запуск (из КОРНЯ «ИИ тест», не из backend/):
+#   ./scripts/ensure-network.sh
 #   docker compose up -d --build
 #
-# С edu_atg на одном хосте — см. docs/DEPLOY.md (общая Docker-сеть).
+# Общая сеть с edu_atg: создаётся один раз скриптом ensure-network.sh,
+# оба compose подключаются как external (без конфликта labels).
 
 name: edu_atg_ai_testgen
 
@@ -30,7 +31,7 @@ services:
     ports:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
     networks:
-      - ai_testgen
+      - default
 
   redis:
     image: redis:7-alpine
@@ -49,7 +50,7 @@ services:
       timeout: 3s
       retries: 10
     networks:
-      - ai_testgen
+      - default
 
   app:
     build:
@@ -101,7 +102,7 @@ services:
       start_period: 120s
       retries: 8
     networks:
-      ai_testgen:
+      default:
         aliases:
           - ai-testgen-app
 
@@ -145,7 +146,7 @@ services:
     volumes:
       - app_data:/data
     networks:
-      - ai_testgen
+      - default
 
   nginx:
     image: nginx:1.25-alpine
@@ -159,7 +160,7 @@ services:
       app:
         condition: service_started
     networks:
-      - ai_testgen
+      - default
 
 volumes:
   app_data:
@@ -170,6 +171,6 @@ volumes:
     name: ai-testgen-redis-data
 
 networks:
-  ai_testgen:
+  default:
+    external: true
     name: ${AI_TESTGEN_DOCKER_NETWORK:-edu_atg_ai_testgen_default}
-    driver: bridge

@@ -84,13 +84,35 @@ AI_TESTGEN_DOCKER_NETWORK=edu_atg_ai_testgen_default
 
 ## Шаг 2. Создать общую Docker-сеть (один раз)
 
-Сеть создаётся автоматически при первом `docker compose up` в каталоге `ИИ тест` (поле `name: edu_atg_ai_testgen` в compose).
+**Важно:** сеть создаётся скриптом, не compose — иначе конфликт labels с edu_atg.
+
+```bash
+cd "ИИ тест"
+chmod +x scripts/ensure-network.sh
+./scripts/ensure-network.sh
+```
 
 Проверка:
 
 ```bash
 docker network ls | grep edu_atg_ai_testgen
 ```
+
+### Ошибка: `network ... has incorrect label com.docker.compose.network set to "default"`
+
+Старая сеть создана другим проектом. Исправление на сервере:
+
+```bash
+# Остановить все контейнеры на этой сети
+docker compose -f /opt/edu_atg_ai_testgen/docker-compose.yml down 2>/dev/null || true
+cd /path/to/edu_atg && docker compose down 2>/dev/null || true
+
+docker network rm edu_atg_ai_testgen_default
+./scripts/ensure-network.sh
+docker compose up -d --build
+```
+
+Запускайте `docker compose` из **корня** `ИИ тест`, не из `backend/`.
 
 ---
 

@@ -15,6 +15,9 @@ if [[ ! -f .env ]]; then
   fi
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+"$SCRIPT_DIR/ensure-network.sh"
+
 echo "[deploy] docker compose up -d --build"
 docker compose up -d --build
 
