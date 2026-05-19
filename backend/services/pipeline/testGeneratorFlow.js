@@ -260,7 +260,7 @@ function derivePipelineComplexity(opts, indexedChunks, documentMetadata) {
     const pages = Number(meta.page_count) || 0;
     let score = 0.35;
     if (n > 25) score += 0.2;
-    if (pages > (config.MODEL_ROUTING?.maxPagesForEasyDoc ?? 15)) score += 0.15;
+    if (pages > (config.MODEL_ROUTING?.maxPagesForEasyDoc ?? config.MAX_PAGES)) score += 0.15;
     if (meta.low_text_quality) score += 0.2;
     const ext = opts.extractionQuality || meta.extraction_quality;
     if (ext === 'low' || ext === 'poor') score += 0.15;

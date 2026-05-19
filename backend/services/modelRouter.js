@@ -72,7 +72,7 @@ function isPremiumAllowed(mode, stage, complexityNorm, documentMetadata) {
     if (!isHeavyStage(stage)) return false;
     const meta = documentMetadata || {};
     const pages = Number(meta.page_count) || 0;
-    const maxEasy = ROUTING_CFG().maxPagesForEasyDoc ?? 15;
+    const maxEasy = ROUTING_CFG().maxPagesForEasyDoc ?? config.MAX_PAGES;
     const docHeavy = pages > maxEasy || !!meta.low_text_quality;
     const thAuto = ROUTING_CFG().complexityPremiumThreshold ?? 0.65;
     const thQuality = ROUTING_CFG().qualityMinComplexityForPremium ?? 0.45;
@@ -587,7 +587,7 @@ function shouldInsertEscalationModel(ctx, actions) {
     const th = esc.min_complexity_for_escalation != null
         ? Number(esc.min_complexity_for_escalation)
         : (ROUTING_CFG().complexityPremiumThreshold ?? 0.65);
-    const maxEasy = ROUTING_CFG().maxPagesForEasyDoc ?? 15;
+    const maxEasy = ROUTING_CFG().maxPagesForEasyDoc ?? config.MAX_PAGES;
     for (const w of when) {
         if (w === 'high_complexity' && ctx.complexityNorm >= th) return true;
         if (w === 'routing_mode_quality'

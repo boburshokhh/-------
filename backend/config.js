@@ -1,5 +1,10 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+const {
+    DOCUMENT_UPLOAD_MAX_PAGES,
+    DOCUMENT_UPLOAD_MAX_FILE_MB,
+    DOCUMENT_UPLOAD_MAX_FILE_BYTES,
+} = require('./utils/uploadLimits');
 
 const dataDir = process.env.DATA_DIR || __dirname;
 
@@ -43,8 +48,9 @@ module.exports = {
   })(),
   UPLOAD_RATE_LIMIT_MAX: parseRateMax(process.env.UPLOAD_RATE_LIMIT_MAX, 30),
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
-  /** null — без лимита; задать MAX_FILE_SIZE_MB в .env для ограничения (МБ) */
-  MAX_FILE_SIZE_MB: parseOptionalPositiveLimit(process.env.MAX_FILE_SIZE_MB, null),
+  /** Жёсткий потолок размера файла (МБ), см. utils/uploadLimits.js */
+  MAX_FILE_SIZE_MB: DOCUMENT_UPLOAD_MAX_FILE_MB,
+  MAX_FILE_SIZE_BYTES: DOCUMENT_UPLOAD_MAX_FILE_BYTES,
   CHUNK_TOKEN_LIMIT: parseInt(process.env.CHUNK_TOKEN_LIMIT) || 2500,
   CHUNK_OVERLAP_TOKENS: parseInt(process.env.CHUNK_OVERLAP_TOKENS) || 200,
   UPLOAD_DIR: path.join(dataDir, 'uploads'),
@@ -71,8 +77,8 @@ module.exports = {
   MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || '',
   MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY || '',
   MINIO_BUCKET: process.env.MINIO_BUCKET || 'ai-testgen-docs',
-  /** null — без лимита; задать MAX_PAGES в .env для ограничения */
-  MAX_PAGES: parseOptionalPositiveLimit(process.env.MAX_PAGES, null),
+  /** Жёсткий потолок страниц PDF, см. utils/uploadLimits.js */
+  MAX_PAGES: DOCUMENT_UPLOAD_MAX_PAGES,
   QUESTIONS_PER_CHUNK: parseInt(process.env.QUESTIONS_PER_CHUNK, 10) || 4,
   CHAR_LENGTH_PER_QUESTION: parseInt(process.env.CHAR_LENGTH_PER_QUESTION, 10) || 2000,
   LLM_MODEL: process.env.LLM_MODEL || 'gemini-2.5-flash',
@@ -175,7 +181,8 @@ module.exports = {
   ENABLE_GROUNDING: process.env.ENABLE_GROUNDING !== 'false',
   DEDUP_THRESHOLD: parseFloat(process.env.DEDUP_THRESHOLD) || 0.85,
   ENABLE_PDF_OCR: process.env.ENABLE_PDF_OCR !== 'false',
-  MAX_OCR_PAGES: parseInt(process.env.MAX_OCR_PAGES, 10) || 10,
+  /** OCR: тот же потолок, что и для загрузки (не 10 стр.) */
+  MAX_OCR_PAGES: DOCUMENT_UPLOAD_MAX_PAGES,
   MIN_TEXT_LENGTH: parseInt(process.env.MIN_TEXT_LENGTH, 10) || 50,
   EVIDENCE_MIN_CHARS: parseInt(process.env.EVIDENCE_MIN_CHARS, 10) || 80,
   CORS_ORIGINS: (process.env.CORS_ORIGINS || '')
@@ -230,7 +237,8 @@ module.exports = {
     /** Режим quality: минимальная сложность для приоритета premium на тяжёлых стадиях */
     qualityMinComplexityForPremium: parseFloat(process.env.MODEL_ROUTING_QUALITY_MIN_COMPLEXITY) || 0.45,
     /** Страниц выше этого порога — документ считается «тяжёлым» для эвристики */
-    maxPagesForEasyDoc: parseInt(process.env.MODEL_ROUTING_MAX_PAGES_EASY, 10) || 15,
+    /** Эвристика «тяжёлого» документа для роутинга — не отказ в загрузке */
+    maxPagesForEasyDoc: DOCUMENT_UPLOAD_MAX_PAGES,
     /** Стадии, на которых допустим premium при quality/auto (api stage names) */
     heavyStages: ['pipeline', 'generation', 'grounding', 'backfill', 'blueprint'],
   },

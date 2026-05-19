@@ -494,7 +494,8 @@ function shouldAllowPremium(mode, stageKey, complexity, docMeta, policies) {
     ];
     if (!heavyStages.includes(stageKey)) return false;
     const pages = Number(docMeta?.page_count) || 0;
-    const docHeavy = pages > 15 || !!docMeta?.low_text_quality;
+    const maxEasy = config.MODEL_ROUTING?.maxPagesForEasyDoc ?? config.MAX_PAGES;
+    const docHeavy = pages > maxEasy || !!docMeta?.low_text_quality;
     if (mode === 'quality') return complexity >= 0.45 || docHeavy;
     if (mode === 'auto' || mode === 'balanced') return complexity >= 0.65 || docHeavy;
     return false;
