@@ -1,24 +1,22 @@
 -- Варианты id gemini-2.0-* (в т.ч. -001) → 2.5 в тарифах и реестре
+-- ai_routing_stage_rules не имеет updated_at (см. 0013_ai_routing_tariffs.sql)
 
 UPDATE ai_routing_stage_rules
-SET primary_model_id = 'gemini-2.5-flash',
-    updated_at = now()
-WHERE primary_model_id ~ '^gemini-2\.0-flash(-|$)';
+SET primary_model_id = 'gemini-2.5-flash'
+WHERE primary_model_id ~ '^gemini-2\.0-flash(-|$)'
+  AND primary_model_id !~ 'lite';
 
 UPDATE ai_routing_stage_rules
-SET primary_model_id = 'gemini-2.5-flash-lite',
-    updated_at = now()
+SET primary_model_id = 'gemini-2.5-flash-lite'
 WHERE primary_model_id ~ '^gemini-2\.0-flash-lite';
 
 UPDATE ai_routing_stage_rules
-SET fallback_model_id = 'gemini-2.5-flash',
-    updated_at = now()
+SET fallback_model_id = 'gemini-2.5-flash'
 WHERE fallback_model_id ~ '^gemini-2\.0-flash(-|$)'
   AND fallback_model_id !~ 'lite';
 
 UPDATE ai_routing_stage_rules
-SET fallback_model_id = 'gemini-2.5-flash-lite',
-    updated_at = now()
+SET fallback_model_id = 'gemini-2.5-flash-lite'
 WHERE fallback_model_id ~ '^gemini-2\.0-flash-lite';
 
 UPDATE ai_routing_rules
