@@ -1004,7 +1004,18 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     // ── 6. Offline branch ────────────────────────────────────────────────────
     const llmRpdExhausted = !skipLocalPreflight && await quotaGuard.isRpdExhaustedForModel(model);
     if (llmRpdExhausted) {
-        console.warn('[PIPELINE] Дневной лимит isчерпан — offline mode');
+        if (!opts.forceOffline) {
+            const limits = quotaGuard.getLimitsForModel(model);
+            const err = new Error(
+                `Дневной лимит запросов к модели ${model} исчерпан`
+                + (limits ? ` (${limits.rpd} запросов/сутки, UTC).` : '.')
+                + ' Дождитесь сброса квоты, смените модель в настройках или явно согласитесь на упрощённую сборку без LLM.',
+            );
+            err.requiresOfflineConsent = true;
+            err.status = 402;
+            throw err;
+        }
+        console.warn('[PIPELINE] Дневной лимит исчерпан — offline mode (forceOffline)');
         const result = await runOfflinePipeline({
             fullText, indexedChunks, model: modelGenerator, modelBlueprint, modelsByAgent,
             targetCount, targetMin, targetMax,

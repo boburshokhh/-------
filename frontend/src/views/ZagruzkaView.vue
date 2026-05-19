@@ -257,7 +257,12 @@ async function handleUpload(file) {
   } catch (error) {
     stopPolling()
     if (error?.requiresOfflineConsent) {
-      if (confirm(error.message || 'У вас закончилась дневная квота. Перейти в оффлайн-режим (генерация только по тексту, без сложной ИИ аналитики)?')) {
+      if (confirm(
+        (error.message || 'Дневная квота LLM исчерпана.')
+        + '\n\nОффлайн-режим НЕ использует нейросеть: вопросы режутся из сырого текста PDF.'
+        + ' Если PDF плохо распознан — получится бессмысленный тест.'
+        + '\n\nПродолжить оффлайн-сборку?',
+      )) {
         file._forceOffline = true;
         handleUpload(file);
       } else {
