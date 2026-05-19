@@ -55,19 +55,21 @@ AI Test Generator — это веб-приложение для автомати
 
 ## Деплой на Ubuntu (Docker)
 
-На сервере с Ubuntu приложение удобно запускать в Docker: два контейнера (nginx + приложение) и один volume для данных.
+**Полное руководство (рекомендуется):** [docs/DEPLOY.md](docs/DEPLOY.md) — Redis, worker, общая сеть с edu_atg, поэтапное включение оптимизаций.
 
-**Требования:** Docker Engine и Docker Compose v2.
+**Быстрый старт:**
 
-1. Клонируйте репозиторий на сервер и перейдите в каталог проекта.
-2. Создайте в корне файл `.env` (обязательно укажите `GEMINI_API_KEY`; при необходимости задайте `MAX_FILE_SIZE_MB`, `ENABLE_PDF_OCR`, `MAX_OCR_PAGES`).
-3. Выполните:
-   ```bash
-   docker compose up -d --build
-   ```
-4. Откройте в браузере `http://<IP-вашего-сервера>`. Порт 80 слушает nginx, который проксирует запросы на контейнер приложения.
+```bash
+cp docs/env.example .env   # GEMINI_API_KEY, POSTGRES_PASSWORD
+docker compose up -d --build
+# или: ./scripts/deploy.sh
+```
 
-Подробнее: [docker/README.md](docker/README.md).
+Стек: `postgres` + `redis` + `app` + `worker` + `nginx` (порт 80).
+
+Шаблон переменных: [docs/env.example](docs/env.example).
+
+Подробнее (legacy): [docker/README.md](docker/README.md).
 
 ## Быстрый старт (Пользовательский сценарий)
 1. Откройте приложение в браузере.

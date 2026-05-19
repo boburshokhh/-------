@@ -1,17 +1,14 @@
-# AI Test Generator — деплой (nginx + app + PostgreSQL в Compose).
-# Образ Postgres сам создаёт БД и пользователя по POSTGRES_*.
-# MinIO при необходимости — внешний сервис на хосте (см. MINIO_* в environment app).
-# Запуск: docker compose up -d
-# Остановка: docker compose down (volume с данными Postgres сохраняется)
+# AI Test Generator — production stack
 #
-# Локальная разработка без Docker: в .env — PGHOST=localhost и свои PGUSER/PGPASSWORD.
+# Сервисы: postgres, redis, app (API), worker (BullMQ), nginx
 #
-# Важно: пользователь БД в Compose всегда ai_testgen (не из PGUSER в .env). Иначе при первом
-# запуске том создаётся с одним именем, а в .env позже ставят другое (например bobur) —
-# приложение ходит под несуществующей ролью → "password authentication failed".
+# Запуск (из каталога «ИИ тест»):
+#   cp .env.example .env   # задать GEMINI_API_KEY, POSTGRES_PASSWORD
+#   docker compose up -d --build
 #
-# Пароль БД в Compose берётся из POSTGRES_PASSWORD (не из PGPASSWORD): строка PGPASSWORD=
-# в .env даёт пустой пароль и ломает вход; POSTGRES_PASSWORD для app и postgres всегда совпадают.
+# С edu_atg на одном хосте — см. docs/DEPLOY.md (общая Docker-сеть).
+
+name: edu_atg_ai_testgen
 
 services:
   postgres:
@@ -30,19 +27,35 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
-    # Без этого Postgres доступен только из сети Compose (контейнер app). С хоста/LAN к нему не подключиться.
-    # По умолчанию 5433 на хосте, чтобы не пересекаться с системным PostgreSQL или другими проектами на :5432.
-    # DataGrip: jdbc:postgresql://IP:5433/ai_testgen  User: ai_testgen  Password: POSTGRES_PASSWORD
     ports:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
+    networks:
+      - ai_testgen
 
-  # Приложение (Node.js + OCR)
+  redis:
+    image: redis:7-alpine
+    container_name: ai-testgen-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy volatile-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ai_testgen
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
     image: ai-testgen-app:latest
-    # Образ только локальной сборки; иначе `docker compose pull` лезет на Docker Hub → pull access denied
     pull_policy: build
     container_name: ai-testgen-app
     restart: unless-stopped
@@ -51,12 +64,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3002
       DATA_DIR: /data
-      # Сброс DATABASE_URL из .env: внутри контейнера localhost ≠ сервис postgres.
-      # Внешняя БД на хосте: уберите эту строку и задайте DATABASE_URL с хостом host.docker.internal.
       DATABASE_URL: ""
       PGHOST: postgres
       PGPORT: 5432
@@ -64,6 +77,8 @@ services:
       PGUSER: ai_testgen
       PGPASSWORD: ${POSTGRES_PASSWORD:-ai_testgen_dev}
       DB_CLIENT: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-host.docker.internal}
       MINIO_PORT: ${MINIO_PORT:-9000}
@@ -75,21 +90,63 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - app_data:/data
-    # Снаружи: ${APP_HOST_PORT}:3002 (Node). Без nginx тоже можно открыть http://сервер:3002/
     ports:
       - "${APP_HOST_PORT:-3002}:3002"
     expose:
       - "3002"
-    # start_period: миграции + cold start; timeout healthcheck > суммы таймаутов в /api/health (см. server.js)
-    # Важно: прочитать тело ответа (resume), иначе при keep-alive проверка может «висеть» до timeout → unhealthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3002/api/health',(r)=>{const ok=r.statusCode===200;r.resume();r.on('end',()=>process.exit(ok?0:1));r.on('error',()=>process.exit(1));}).on('error',()=>process.exit(1));"]
       interval: 15s
       timeout: 20s
       start_period: 120s
       retries: 8
+    networks:
+      ai_testgen:
+        aliases:
+          - ai-testgen-app
 
-  # Nginx (reverse proxy, единая точка входа)
+  worker:
+    image: ai-testgen-app:latest
+    pull_policy: build
+    container_name: ai-testgen-worker
+    restart: unless-stopped
+    command: ["node", "worker.js"]
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      app:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      DATABASE_URL: ""
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${PGDATABASE:-ai_testgen}
+      PGUSER: ai_testgen
+      PGPASSWORD: ${POSTGRES_PASSWORD:-ai_testgen_dev}
+      DB_CLIENT: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-host.docker.internal}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET: ${MINIO_BUCKET:-ai-testgen-docs}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - app_data:/data
+    networks:
+      - ai_testgen
+
   nginx:
     image: nginx:1.25-alpine
     container_name: ai-testgen-nginx
@@ -98,13 +155,21 @@ services:
       - "${HOST_PORT:-80}:80"
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    # service_started: иначе при долгом старте app или сбое healthcheck весь `compose up` падает и nginx не поднимается (502 пока app не healthy — норма)
     depends_on:
       app:
         condition: service_started
+    networks:
+      - ai_testgen
 
 volumes:
   app_data:
     name: ai-testgen-data
   postgres_data:
     name: ai-testgen-postgres-data
+  redis_data:
+    name: ai-testgen-redis-data
+
+networks:
+  ai_testgen:
+    name: ${AI_TESTGEN_DOCKER_NETWORK:-edu_atg_ai_testgen_default}
+    driver: bridge

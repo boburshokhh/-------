@@ -64,11 +64,37 @@ function getQueue() {
  */
 async function enqueue(jobId, payload) {
     const queue = getQueue();
-    const job = await queue.add(jobId, payload, {
-        jobId,                  // deterministic id → BullMQ deduplicates
+    const opts = {
+        jobId,
         timeout: config.JOB_TIMEOUT_MS ?? 600000,
-    });
-    return job;
+    };
+
+    // Idempotency: повторный upload с тем же X-Job-Id не падает с duplicate error
+    try {
+        const existing = await queue.getJob(jobId);
+        if (existing) {
+            const state = await existing.getState();
+            if (state === 'completed') {
+                await existing.remove();
+            } else if (['waiting', 'delayed', 'active', 'paused'].includes(state)) {
+                console.log(`[JobQueue] Job ${jobId} already ${state}, returning existing`);
+                return existing;
+            }
+        }
+    } catch (e) {
+        console.warn(`[JobQueue] getJob check failed: ${e.message}`);
+    }
+
+    try {
+        return await queue.add(jobId, payload, opts);
+    } catch (err) {
+        const msg = String(err && err.message || err);
+        if (msg.includes('already exists') || msg.includes('JobId')) {
+            const existing = await queue.getJob(jobId);
+            if (existing) return existing;
+        }
+        throw err;
+    }
 }
 
 /**
