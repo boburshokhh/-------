@@ -1,5 +1,32 @@
 const { logStructured } = require('../utils/observability');
 const jobProgressRepo = require('../db/repositories/jobProgressRepo');
+const config = require('../config');
+
+// ── Redis Pub/Sub publisher (lazy, best-effort) ───────────────────────────────
+let _publisher = null;
+let _pubAvailable = false;
+let _pubChecked = false;
+
+function getPublisher() {
+    if (!config.SSE_ENABLED || !config.JOB_QUEUE_ENABLED) return null;
+    if (!_pubChecked) {
+        _pubChecked = true;
+        try {
+            const { newConnection } = require('../db/redisClient');
+            _publisher = newConnection(config.REDIS_DB_QUEUE ?? 0);
+            _publisher.on('connect', () => { _pubAvailable = true; });
+            _publisher.on('error', () => { _pubAvailable = false; });
+        } catch { _pubAvailable = false; }
+    }
+    return _pubAvailable ? _publisher : null;
+}
+
+function publishProgress(jobId, data) {
+    const pub = getPublisher();
+    if (!pub) return;
+    const channel = `job:${jobId}:progress`;
+    pub.publish(channel, JSON.stringify(data)).catch(() => {});
+}
 
 /**
  * In-memory прогресс длительных задач (загрузка → индекс → генерация).
@@ -305,6 +332,9 @@ function logJobProgress(jobId, payload) {
     appendHistory(jobId, row);
     console.log(`[PROGRESS] ${JSON.stringify(row)}`);
     schedulePersist(jobId);
+
+    // Publish to Redis for SSE subscribers on other API instances
+    publishProgress(jobId, { jobId, phase: row.phase, percent: row.percent, message: row.detail });
 }
 
 module.exports = {

@@ -4,6 +4,7 @@ const runtimeConfig = require('../runtimeConfig');
 const quotaGuard = require('../quotaGuard');
 const { parseGeminiApiError, sleepForGeminiRetry } = require('../geminiError');
 const { cosineSimilarity } = require('../nlp/similarity');
+const embeddingCache = require('../embeddingCache');
 
 function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
@@ -32,6 +33,11 @@ async function getQueryEmbedding(query, retries = 3, embedModelOverride = null, 
     if (embedModelOverride && String(embedModelOverride).trim() && embedModel !== String(embedModelOverride).trim()) {
         console.warn(`[RAG] Invalid embedding model "${embedModelOverride}", fallback to "${embedModel}"`);
     }
+
+    // Embedding cache lookup
+    const cached = await embeddingCache.getEmbedding(query, embedModel);
+    if (cached) return cached;
+
     const qOpts = quotaOpts && typeof quotaOpts === 'object' ? quotaOpts : {};
     let lastError;
     for (let attempt = 1; attempt <= retries; attempt++) {
@@ -43,9 +49,12 @@ async function getQueryEmbedding(query, retries = 3, embedModelOverride = null, 
                 contents: query,
             });
             await quotaGuard.recordGeminiCall(embedModel);
-            return Array.isArray(response.embeddings)
+            const vector = Array.isArray(response.embeddings)
                 ? response.embeddings[0].values
                 : response.embeddings.values || response.embedding.values;
+            // Store in cache (best-effort)
+            await embeddingCache.setEmbedding(query, embedModel, vector);
+            return vector;
         } catch (err) {
             lastError = err;
             if (err.type === 'QUOTA_EXCEEDED') break;

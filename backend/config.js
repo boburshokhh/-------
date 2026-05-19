@@ -224,4 +224,68 @@ module.exports = {
     /** Стадии, на которых допустим premium при quality/auto (api stage names) */
     heavyStages: ['pipeline', 'generation', 'grounding', 'backfill', 'blueprint'],
   },
+
+  // ── Feature flags (оптимизация pipeline) ────────────────────────────────────
+  /**
+   * Включить фоновую очередь BullMQ: POST /upload возвращает 202 + jobId,
+   * пайплайн выполняется в отдельном worker-процессе.
+   * Изменение требует перезапуска API и worker.
+   */
+  JOB_QUEUE_ENABLED: process.env.JOB_QUEUE_ENABLED === 'true',
+
+  /**
+   * Количество LLM-батчей, запускаемых параллельно в main batch loop.
+   * 1 = последовательное (текущее поведение). Рекомендуется 2–4.
+   * Quota Guard контролирует RPM-лимиты при параллельном выполнении.
+   */
+  LLM_BATCH_PARALLELISM: Math.max(1, parseInt(process.env.LLM_BATCH_PARALLELISM, 10) || 1),
+
+  /**
+   * Кэш blueprint в Redis: при повторной генерации для того же PDF
+   * blueprint-стадия пропускается (экономия одного LLM-вызова).
+   */
+  BLUEPRINT_CACHE_ENABLED: process.env.BLUEPRINT_CACHE_ENABLED === 'true',
+  BLUEPRINT_CACHE_TTL_SECONDS: parseInt(process.env.BLUEPRINT_CACHE_TTL_SECONDS, 10) || 86400,
+
+  /**
+   * Кэш embedding-векторов в Redis: идентичные тексты не вызывают
+   * повторный Gemini embedding API-запрос.
+   */
+  EMBEDDING_CACHE_ENABLED: process.env.EMBEDDING_CACHE_ENABLED === 'true',
+  EMBEDDING_CACHE_TTL_SECONDS: parseInt(process.env.EMBEDDING_CACHE_TTL_SECONDS, 10) || 604800,
+  EMBEDDING_CACHE_MAX_ENTRIES: parseInt(process.env.EMBEDDING_CACHE_MAX_ENTRIES, 10) || 50000,
+
+  /**
+   * Использовать bulk INSERT вместо одиночных вставок для intents,
+   * questions и question_sources.
+   */
+  BULK_INSERT_ENABLED: process.env.BULK_INSERT_ENABLED === 'true',
+  BULK_INSERT_MAX_ROWS: parseInt(process.env.BULK_INSERT_MAX_ROWS, 10) || 1000,
+
+  /**
+   * Включить SSE-эндпоинт GET /api/jobs/:id/stream для реалтайм-прогресса.
+   * При выключении клиенты используют polling GET /api/jobs/:id.
+   */
+  SSE_ENABLED: process.env.SSE_ENABLED === 'true',
+
+  // ── Redis (для BullMQ, blueprint cache, embedding cache, SSE Pub/Sub) ────────
+  REDIS_URL: process.env.REDIS_URL || '',
+  REDIS_HOST: process.env.REDIS_HOST || 'localhost',
+  REDIS_PORT: parseInt(process.env.REDIS_PORT, 10) || 6379,
+  REDIS_PASSWORD: process.env.REDIS_PASSWORD || '',
+  /** DB 0 — BullMQ очередь; DB 1 — blueprint cache; DB 2 — embedding cache */
+  REDIS_DB_QUEUE: parseInt(process.env.REDIS_DB_QUEUE, 10) || 0,
+  REDIS_DB_BLUEPRINT: parseInt(process.env.REDIS_DB_BLUEPRINT, 10) || 1,
+  REDIS_DB_EMBEDDING: parseInt(process.env.REDIS_DB_EMBEDDING, 10) || 2,
+
+  /** BullMQ: максимальное число попыток job до перехода в failed */
+  JOB_MAX_ATTEMPTS: parseInt(process.env.JOB_MAX_ATTEMPTS, 10) || 2,
+  /** BullMQ: таймаут выполнения одного job (мс) */
+  JOB_TIMEOUT_MS: parseInt(process.env.JOB_TIMEOUT_MS, 10) || 600000,
+  /** Таймаут ожидания Redis-слота для quota guard (мс) */
+  QUOTA_WAIT_TIMEOUT_MS: parseInt(process.env.QUOTA_WAIT_TIMEOUT_MS, 10) || 30000,
+  /** Макс. время повтора persist прогресса при недоступном Redis (мс) */
+  REDIS_RETRY_MAX_MS: parseInt(process.env.REDIS_RETRY_MAX_MS, 10) || 30000,
+  /** Версия схемы кэша: при смене промпта/модели инкрементируйте для инвалидации */
+  CACHE_SCHEMA_VERSION: process.env.CACHE_SCHEMA_VERSION || '1',
 };

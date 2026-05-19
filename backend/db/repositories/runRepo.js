@@ -1,4 +1,12 @@
 const pg = require('../pgPool');
+const config = require('../../config');
+
+/** Split array into chunks of at most `size` elements */
+function chunkArray(arr, size) {
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+    return chunks;
+}
 
 async function insertRun(data) {
     const { rows } = await pg.query(`
@@ -45,27 +53,64 @@ async function updateRunFinished(id, data) {
 
 async function insertIntents(runId, intents) {
     if (!intents || intents.length === 0) return [];
-    return pg.transaction(async (client) => {
-        const inserted = [];
-        for (let i = 0; i < intents.length; i++) {
-            const intent = intents[i];
-            const { rows } = await client.query(`
-                INSERT INTO intents (run_id, intent_index, theme, section, intent_text, difficulty, type, status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-                RETURNING id
-            `, [
-                runId, i,
-                intent.theme || null,
-                intent.section || null,
+
+    if (!config.BULK_INSERT_ENABLED) {
+        // Legacy one-by-one path
+        return pg.transaction(async (client) => {
+            const inserted = [];
+            for (let i = 0; i < intents.length; i++) {
+                const intent = intents[i];
+                const { rows } = await client.query(`
+                    INSERT INTO intents (run_id, intent_index, theme, section, intent_text, difficulty, type, status)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    RETURNING id
+                `, [
+                    runId, i,
+                    intent.theme || null, intent.section || null,
+                    intent.intent || intent.intent_text || '',
+                    intent.difficulty || null,
+                    intent.type || 'multiple_choice', 'pending',
+                ]);
+                inserted.push({ ...intent, _dbId: rows[0].id });
+            }
+            return inserted;
+        });
+    }
+
+    // Bulk INSERT path
+    const maxRows = config.BULK_INSERT_MAX_ROWS || 1000;
+    const inserted = [];
+    for (const batch of chunkArray(intents, maxRows)) {
+        const values = [];
+        const params = [];
+        let p = 1;
+        for (let i = 0; i < batch.length; i++) {
+            const intent = batch[i];
+            const globalIdx = inserted.length + i;
+            values.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+            params.push(
+                runId, globalIdx,
+                intent.theme || null, intent.section || null,
                 intent.intent || intent.intent_text || '',
                 intent.difficulty || null,
-                intent.type || 'multiple_choice',
-                'pending',
-            ]);
-            inserted.push({ ...intent, _dbId: rows[0].id });
+                intent.type || 'multiple_choice', 'pending',
+            );
         }
-        return inserted;
-    });
+        const sql = `INSERT INTO intents (run_id, intent_index, theme, section, intent_text, difficulty, type, status)
+                     VALUES ${values.join(',')} RETURNING id`;
+        try {
+            const { rows } = await pg.query(sql, params);
+            for (let i = 0; i < batch.length; i++) {
+                inserted.push({ ...batch[i], _dbId: rows[i]?.id });
+            }
+        } catch (e) {
+            console.error('[runRepo] Bulk intent INSERT failed, rolling back:', e.message);
+            const err = new Error('db_bulk_insert_failed: intents');
+            err.code = 'db_bulk_insert_failed';
+            throw err;
+        }
+    }
+    return inserted;
 }
 
 async function updateIntentStatus(intentId, status, skipReason, evidenceScore) {
@@ -93,15 +138,139 @@ async function insertQuestion(runId, questionIndex, q) {
     return rows[0];
 }
 
+/**
+ * Bulk-insert all questions for a run, then bulk-insert their sources.
+ * Falls back to one-by-one if BULK_INSERT_ENABLED=false.
+ * @param {number} runId
+ * @param {object[]} questions - array of question objects (same shape as insertQuestion)
+ * @returns {Promise<void>}
+ */
+async function insertQuestionsBulk(runId, questions) {
+    if (!questions || questions.length === 0) return;
+
+    if (!config.BULK_INSERT_ENABLED) {
+        for (let i = 0; i < questions.length; i++) {
+            const q = questions[i];
+            const qRow = await insertQuestion(runId, i, q);
+            if (q.sources && q.sources.length > 0) await insertQuestionSources(qRow.id, q.sources);
+        }
+        return;
+    }
+
+    const maxRows = config.BULK_INSERT_MAX_ROWS || 1000;
+
+    // Insert questions in bulk chunks
+    const questionIds = [];
+    for (const batch of chunkArray(questions, maxRows)) {
+        const values = [];
+        const params = [];
+        let p = 1;
+        for (let i = 0; i < batch.length; i++) {
+            const q = batch[i];
+            const globalIdx = questionIds.length + i;
+            values.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+            params.push(
+                runId, globalIdx,
+                q.type || 'multiple_choice',
+                q.question,
+                JSON.stringify(q.options),
+                q.correctIndex,
+                q.difficulty || 'understand',
+                q.explanation || '',
+                q.hint || '',
+                q.grounded !== false,
+            );
+        }
+        const sql = `INSERT INTO questions
+            (run_id, question_index, type, question, options, correct_index, difficulty, explanation, hint, grounded)
+            VALUES ${values.join(',')} RETURNING id`;
+        try {
+            const { rows } = await pg.query(sql, params);
+            for (const row of rows) questionIds.push(row.id);
+        } catch (e) {
+            console.error('[runRepo] Bulk questions INSERT failed:', e.message);
+            const err = new Error('db_bulk_insert_failed: questions');
+            err.code = 'db_bulk_insert_failed';
+            throw err;
+        }
+    }
+
+    // Insert sources for questions that have them
+    const sourcePairs = []; // { questionId, sources }
+    for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+        if (q.sources && q.sources.length > 0 && questionIds[i] != null) {
+            sourcePairs.push({ questionId: questionIds[i], sources: q.sources });
+        }
+    }
+
+    // Bulk sources: flatten all (questionId, chunkId, quote) rows
+    const allSourceRows = [];
+    for (const { questionId, sources } of sourcePairs) {
+        for (const src of sources) {
+            if (src.chunk_id != null) allSourceRows.push({ questionId, chunkId: src.chunk_id, quote: src.quote || null });
+        }
+    }
+
+    for (const batch of chunkArray(allSourceRows, maxRows)) {
+        const values = [];
+        const params = [];
+        let p = 1;
+        for (const row of batch) {
+            values.push(`($${p++},$${p++},$${p++})`);
+            params.push(row.questionId, row.chunkId, row.quote);
+        }
+        try {
+            if (values.length > 0) {
+                await pg.query(
+                    `INSERT INTO question_sources (question_id, chunk_id, quote) VALUES ${values.join(',')}`,
+                    params,
+                );
+            }
+        } catch (e) {
+            console.error('[runRepo] Bulk question_sources INSERT failed:', e.message);
+            const err = new Error('db_bulk_insert_failed: question_sources');
+            err.code = 'db_bulk_insert_failed';
+            throw err;
+        }
+    }
+}
+
 async function insertQuestionSources(questionId, sources) {
     if (!sources || sources.length === 0) return;
-    for (const src of sources) {
-        const chunkId = src.chunk_id;
-        if (chunkId == null) continue;
-        await pg.query(`
-            INSERT INTO question_sources (question_id, chunk_id, quote)
-            VALUES ($1,$2,$3)
-        `, [questionId, chunkId, src.quote || null]);
+    const valid = sources.filter(s => s.chunk_id != null);
+    if (valid.length === 0) return;
+
+    if (!config.BULK_INSERT_ENABLED || valid.length === 1) {
+        for (const src of valid) {
+            await pg.query(
+                `INSERT INTO question_sources (question_id, chunk_id, quote) VALUES ($1,$2,$3)`,
+                [questionId, src.chunk_id, src.quote || null],
+            );
+        }
+        return;
+    }
+
+    const maxRows = config.BULK_INSERT_MAX_ROWS || 1000;
+    for (const batch of chunkArray(valid, maxRows)) {
+        const values = [];
+        const params = [];
+        let p = 1;
+        for (const src of batch) {
+            values.push(`($${p++},$${p++},$${p++})`);
+            params.push(questionId, src.chunk_id, src.quote || null);
+        }
+        try {
+            await pg.query(
+                `INSERT INTO question_sources (question_id, chunk_id, quote) VALUES ${values.join(',')}`,
+                params,
+            );
+        } catch (e) {
+            console.error('[runRepo] Bulk question_sources INSERT failed:', e.message);
+            const err = new Error('db_bulk_insert_failed: question_sources');
+            err.code = 'db_bulk_insert_failed';
+            throw err;
+        }
     }
 }
 
@@ -201,6 +370,7 @@ module.exports = {
     insertIntents,
     updateIntentStatus,
     insertQuestion,
+    insertQuestionsBulk,
     insertQuestionSources,
     insertPipelineEvent,
     getRunById,

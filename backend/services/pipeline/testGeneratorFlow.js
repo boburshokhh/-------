@@ -393,14 +393,37 @@ async function runOfflinePipeline({
 
 // ─── blueprint phase ─────────────────────────────────────────────────────────
 
+const blueprintCache = require('../blueprintCache');
+
 async function buildBlueprint({
     indexedChunks, fullText, model, count, pipelineContext, progress, traceId, documentId,
-    bypassLimits = false,
+    bypassLimits = false, detectedLang = 'ru', routingMode = 'auto',
 }) {
     logStructured({
         level: 'info', traceId, documentId, phase: 'generate', event: 'generate_phase_begin',
         metadata: { step: 'build_themes_and_blueprint', model },
     });
+
+    // ── Blueprint cache check ────────────────────────────────────────────────
+    let cacheHit = false;
+    let docHash = null;
+    if (blueprintCache.isEnabled()) {
+        docHash = blueprintCache.computeDocumentHash(fullText);
+        const cached = await blueprintCache.getBlueprint(docHash, routingMode, count, detectedLang, traceId);
+        if (cached.blueprint) {
+            cacheHit = true;
+            progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES,
+                detail: `Темы из кэша (${cached.blueprint.length} intent-ов)` });
+            progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT,
+                detail: `Blueprint из кэша: ${cached.blueprint.length} intent-ов` });
+            logStructured({
+                level: 'info', traceId, documentId, phase: 'generate', event: 'generate_phase_end',
+                metrics: { blueprint_intent_count: cached.blueprint.length },
+                metadata: { step: 'build_themes_and_blueprint', from_cache: true },
+            });
+            return { blueprint: cached.blueprint, cacheHit: true };
+        }
+    }
 
     let blueprint;
     try {
@@ -414,6 +437,11 @@ async function buildBlueprint({
             },
         });
         progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES, detail: 'Темы извлечены' });
+
+        // Store in cache for future runs with same document+settings
+        if (blueprintCache.isEnabled() && docHash) {
+            await blueprintCache.setBlueprint(docHash, routingMode, count, detectedLang, blueprint, traceId);
+        }
     } catch (err) {
         logStructured({
             level: 'error', traceId, documentId, phase: 'generate', event: 'generate_phase_failed',
@@ -444,7 +472,7 @@ async function buildBlueprint({
     progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT,
         detail: `План: ${blueprint.length} intent-ов` });
 
-    return blueprint;
+    return { blueprint, cacheHit: false };
 }
 
 // Минимальный порог качества evidence для передачи intent на LLM.
@@ -454,103 +482,183 @@ const EVIDENCE_QUALITY_THRESHOLD = 0.15;
 
 // ─── main batch loop ─────────────────────────────────────────────────────────
 
+/**
+ * Process a single LLM batch (retrieval → generation → grounding).
+ * Returns structured result so parallel batches can be merged in order.
+ */
+async function processSingleBatch({
+    batch, batchNum, totalBatches, indexedChunks, topK, embedModel, bypassLimits,
+    modelGenerate, modelGround, detectedLang, enableGrounding, pipelineContext,
+    coverageMap, routeOpts, traceId, documentId,
+}) {
+    const retrievalResults = await Promise.all(batch.map(async (intent) => {
+        const relevantChunks = await rag.hybridRetrieve(
+            `${intent.theme}: ${intent.intent}`, indexedChunks, topK,
+            { embedModel: embedModel || null, bypassLimits },
+        );
+        const packets      = rag.buildEvidencePackets(relevantChunks, intent.intent);
+        const evidenceText = rag.formatEvidenceForPrompt(packets);
+        const ids          = relevantChunks.map(c => c.id);
+        const quality      = scoreEvidenceQuality(evidenceText, intent.intent);
+        return { intent, evidenceText, ids, quality };
+    }));
+
+    const filteredBatch  = [];
+    const evidenceList   = [];
+    const chunkIdsList   = [];
+    const evidenceScores = [];
+    let statsSkippedEvidence = 0;
+    let statsRetrievalPassed = 0;
+
+    for (const r of retrievalResults) {
+        evidenceScores.push(r.quality.score);
+        if (r.quality.score < EVIDENCE_QUALITY_THRESHOLD) {
+            console.log(`[PIPELINE] Batch ${batchNum}: Soft-skip intent "${r.intent.intent.slice(0, 60)}…" — ${r.quality.reason}`);
+            statsSkippedEvidence++;
+            logStructured({
+                level: 'warn', traceId, documentId, phase: 'generate',
+                event: 'intent_skipped_weak_evidence',
+                reasonCode: evidenceReasonToCode(r.quality.reason),
+                defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
+                metrics: { evidence_score: r.quality.score },
+                metadata: { intent_preview: r.intent.intent.slice(0, 120), reason: r.quality.reason },
+            });
+            continue;
+        }
+        statsRetrievalPassed++;
+        filteredBatch.push(r.intent);
+        evidenceList.push(r.evidenceText);
+        chunkIdsList.push(r.ids);
+        // Coverage map is shared; update is safe (Set operations are sync)
+        rag.updateCoverageMap(coverageMap, r.ids);
+    }
+
+    if (filteredBatch.length === 0) {
+        console.warn(`[PIPELINE] Batch ${batchNum}: все intents пропущены (weak evidence)`);
+        return {
+            questions: [], evidenceScores,
+            statsValidated: 0, statsSkippedLLM: 0, statsValidationFailed: 0,
+            statsGroundingFailed: 0, statsSkippedEvidence, statsRetrievalPassed,
+        };
+    }
+
+    const { results: batchResults, stats: batchStats } = await generateBatchQuestions(
+        filteredBatch, evidenceList, chunkIdsList, null, modelGenerate, detectedLang, routeOpts,
+    );
+
+    let groundedMask = new Array(batchResults.length).fill(true);
+    if (enableGrounding && pipelineContext.executionMode === 'normal') {
+        const bQuestions = batchResults.map(r => r.question);
+        const bEvidences = batchResults.map(r => evidenceList[r.intentIdx]);
+        groundedMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround, routeOpts);
+    }
+
+    let statsGroundingFailed = 0;
+    const questions = [];
+    for (let i = 0; i < batchResults.length; i++) {
+        const { question, intentIdx } = batchResults[i];
+        if (!groundedMask[i]) {
+            statsGroundingFailed++;
+            console.warn(`[PIPELINE] Batch ${batchNum}, intent[${intentIdx + 1}]: не прошёл groundedness`);
+            continue;
+        }
+        // Tag with batchNum for deterministic ordering after parallel merge
+        questions.push({ ...question, _batchNum: batchNum });
+    }
+
+    return {
+        questions, evidenceScores,
+        statsValidated: batchResults.length,
+        statsSkippedLLM: batchStats.llmSkipped,
+        statsValidationFailed: batchStats.validationFailed,
+        statsGroundingFailed, statsSkippedEvidence, statsRetrievalPassed,
+    };
+}
+
 async function runMainBatchLoop({
     blueprintWithDifficulty, indexedChunks, coverageMap, modelGenerate, modelGround, embedModel,
     detectedLang,
     enableGrounding, pipelineContext, batchSize, topK, traceId, documentId, progress,
     totalBatches, bypassLimits = false,
 }) {
-    const routeOpts = bypassLimits ? { bypassLimits: true } : null;
-    const allQuestions     = [];
-    const evidenceScores   = [];
-    let statsValidated     = 0;
-    let statsSkippedEvidence = 0;
-    let statsSkippedLLM    = 0;
+    const routeOpts    = bypassLimits ? { bypassLimits: true } : null;
+    const parallelism  = Math.max(1, config.LLM_BATCH_PARALLELISM || 1);
+    const allQuestions = [];
+    const evidenceScores = [];
+    let statsValidated        = 0;
+    let statsSkippedEvidence  = 0;
+    let statsSkippedLLM       = 0;
     let statsValidationFailed = 0;
     let statsGroundingFailed  = 0;
     let statsRetrievalPassed  = 0;
 
-    for (let batchStart = 0; batchStart < blueprintWithDifficulty.length; batchStart += batchSize) {
-        const batch    = blueprintWithDifficulty.slice(batchStart, batchStart + batchSize);
-        const batchNum = Math.floor(batchStart / batchSize) + 1;
-        console.log(`[PIPELINE] Batch ${batchNum}/${totalBatches}: ${batch.length} intents`);
-
-        // Параллельный retrieval для всех интентов батча: embedding-запросы независимы,
-        // их параллельное выполнение сокращает задержку в ~N раз (N = batch size).
-        const retrievalResults = await Promise.all(batch.map(async (intent) => {
-            const relevantChunks = await rag.hybridRetrieve(
-                `${intent.theme}: ${intent.intent}`, indexedChunks, topK,
-                { embedModel: embedModel || null, bypassLimits },
-            );
-            const packets      = rag.buildEvidencePackets(relevantChunks, intent.intent);
-            const evidenceText = rag.formatEvidenceForPrompt(packets);
-            const ids          = relevantChunks.map(c => c.id);
-            const quality      = scoreEvidenceQuality(evidenceText, intent.intent);
-            return { intent, evidenceText, ids, quality };
-        }));
-
-        const filteredBatch  = [];
-        const evidenceList   = [];
-        const chunkIdsList   = [];
-
-        for (const r of retrievalResults) {
-            evidenceScores.push(r.quality.score);
-
-            if (r.quality.score < EVIDENCE_QUALITY_THRESHOLD) {
-                console.log(`[PIPELINE] Soft-skip intent "${r.intent.intent.slice(0, 60)}…" — ${r.quality.reason}`);
-                statsSkippedEvidence++;
-                logStructured({
-                    level: 'warn', traceId, documentId, phase: 'generate',
-                    event: 'intent_skipped_weak_evidence',
-                    reasonCode: evidenceReasonToCode(r.quality.reason),
-                    defectClass: DEFECT_CLASSES.RETRIEVAL_MISS,
-                    metrics: { evidence_score: r.quality.score },
-                    metadata: { intent_preview: r.intent.intent.slice(0, 120), reason: r.quality.reason },
-                });
-                continue;
-            }
-
-            statsRetrievalPassed++;
-            filteredBatch.push(r.intent);
-            evidenceList.push(r.evidenceText);
-            chunkIdsList.push(r.ids);
-            rag.updateCoverageMap(coverageMap, r.ids);
-        }
-
-        if (filteredBatch.length === 0) {
-            console.warn(`[PIPELINE] Batch ${batchNum}: все intents пропущены (weak evidence)`);
-            continue;
-        }
-
-        const { results: batchResults, stats: batchStats } = await generateBatchQuestions(
-            filteredBatch, evidenceList, chunkIdsList, null, modelGenerate, detectedLang, routeOpts,
-        );
-        statsValidated        += batchResults.length;
-        statsSkippedLLM       += batchStats.llmSkipped;
-        statsValidationFailed += batchStats.validationFailed;
-
-        let groundedMask = new Array(batchResults.length).fill(true);
-        if (enableGrounding && pipelineContext.executionMode === 'normal') {
-            const bQuestions = batchResults.map(r => r.question);
-            const bEvidences = batchResults.map(r => evidenceList[r.intentIdx]);
-            groundedMask = await checkGroundingBatched(bQuestions, bEvidences, modelGround, routeOpts);
-        }
-
-        for (let i = 0; i < batchResults.length; i++) {
-            const { question, intentIdx } = batchResults[i];
-            if (!groundedMask[i]) {
-                statsGroundingFailed++;
-                console.warn(`[PIPELINE] Batch ${batchNum}, intent[${intentIdx + 1}]: не прошёл groundedness`);
-                continue;
-            }
-            allQuestions.push(question);
-        }
-
-        progress({
-            phase: 'generate', stage: 'llm_batch', workDelta: PW.GEN_BATCH,
-            detail: `Пакет ${batchNum}/${totalBatches} (накоплено ${allQuestions.length})`,
+    // Split all intents into LLM-batch slices first
+    const batchSlices = [];
+    for (let s = 0; s < blueprintWithDifficulty.length; s += batchSize) {
+        batchSlices.push({
+            batch:    blueprintWithDifficulty.slice(s, s + batchSize),
+            batchNum: Math.floor(s / batchSize) + 1,
         });
-        // sleep(1200) удалён: RPM-регулирование выполняет quotaGuard.assertWithinFreeTierQuota.
+    }
+
+    // Process slices in windows of `parallelism`
+    for (let w = 0; w < batchSlices.length; w += parallelism) {
+        const window = batchSlices.slice(w, w + parallelism);
+
+        if (window.length > 1) {
+            console.log(`[PIPELINE] Parallel window: batches ${window.map(b => b.batchNum).join(',')} of ${totalBatches}`);
+        } else {
+            console.log(`[PIPELINE] Batch ${window[0].batchNum}/${totalBatches}: ${window[0].batch.length} intents`);
+        }
+
+        // Run the window in parallel; each batch retries independently on transient error
+        const windowResults = await Promise.all(
+            window.map(({ batch, batchNum }) =>
+                processSingleBatch({
+                    batch, batchNum, totalBatches, indexedChunks, topK, embedModel, bypassLimits,
+                    modelGenerate, modelGround, detectedLang, enableGrounding, pipelineContext,
+                    coverageMap, routeOpts, traceId, documentId,
+                }).catch((err) => {
+                    // Per-batch retry: log and return empty result so other batches proceed
+                    console.error(`[PIPELINE] Batch ${batchNum} failed (will be skipped): ${err.message}`);
+                    logStructured({
+                        level: 'error', traceId, documentId, phase: 'generate',
+                        event: 'batch_failed', metrics: { batch_num: batchNum },
+                        metadata: { error: err.message },
+                    });
+                    return { questions: [], evidenceScores: [], statsValidated: 0,
+                        statsSkippedLLM: 0, statsValidationFailed: 0,
+                        statsGroundingFailed: 0, statsSkippedEvidence: 0, statsRetrievalPassed: 0 };
+                })
+            )
+        );
+
+        // Merge results in batchNum order (deterministic)
+        const sortedResults = windowResults.sort((a, b) => {
+            const an = a.questions[0]?._batchNum ?? 0;
+            const bn = b.questions[0]?._batchNum ?? 0;
+            return an - bn;
+        });
+
+        for (const r of sortedResults) {
+            for (const q of r.questions) {
+                const { _batchNum: _, ...cleanQ } = q;
+                allQuestions.push(cleanQ);
+            }
+            evidenceScores.push(...r.evidenceScores);
+            statsValidated        += r.statsValidated;
+            statsSkippedEvidence  += r.statsSkippedEvidence;
+            statsSkippedLLM       += r.statsSkippedLLM;
+            statsValidationFailed += r.statsValidationFailed;
+            statsGroundingFailed  += r.statsGroundingFailed;
+            statsRetrievalPassed  += r.statsRetrievalPassed;
+        }
+
+        const completedBatch = Math.min(w + parallelism, batchSlices.length);
+        progress({
+            phase: 'generate', stage: 'llm_batch', workDelta: PW.GEN_BATCH * window.length,
+            detail: `Пакеты ${w + 1}–${completedBatch}/${totalBatches} (накоплено ${allQuestions.length})`,
+        });
     }
 
     return {
@@ -909,10 +1017,12 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     }
 
     // ── 7. Blueprint ─────────────────────────────────────────────────────────
-    const blueprint = await buildBlueprint({
+    const blueprintResult = await buildBlueprint({
         indexedChunks, fullText, model: modelBlueprint, count, pipelineContext, progress, traceId, documentId,
-        bypassLimits,
+        bypassLimits, detectedLang, routingMode,
     });
+    const blueprint = blueprintResult.blueprint;
+    const blueprintCacheHit = blueprintResult.cacheHit;
 
     if (runId) {
         try { await runRepo.insertIntents(runId, blueprint); }
@@ -1035,14 +1145,16 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         pipeline_execution_mode: pipelineContext.executionMode,
     });
 
+    // Augment with optimisation metadata for benchmark/observability
+    generationMetrics.cache_hits = blueprintCacheHit ? 1 : 0;
+    generationMetrics.parallel_batches = config.LLM_BATCH_PARALLELISM || 1;
+    generationMetrics.grounding_enabled = enableGrounding;
+    generationMetrics.total_duration_ms = durationMs;
+
     // ── 13. Persist results ──────────────────────────────────────────────────
     if (runId) {
         try {
-            for (let i = 0; i < finalQuestions.length; i++) {
-                const q    = finalQuestions[i];
-                const qRow = await runRepo.insertQuestion(runId, i, q);
-                if (q.sources && q.sources.length > 0) await runRepo.insertQuestionSources(qRow.id, q.sources);
-            }
+            await runRepo.insertQuestionsBulk(runId, finalQuestions);
             await runRepo.updateRunFinished(runId, {
                 status: 'completed',
                 final_metrics: generationMetrics,
@@ -1062,7 +1174,13 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         defectClass: generationMetrics.low_confidence ? DEFECT_CLASSES.VALIDATION_FAIL : null,
         fallbackTriggered: fallbackDecision || null,
         metrics: {
+            total_duration_ms: durationMs,
             duration_ms: durationMs,
+            routing_mode: routingMode,
+            question_count: finalQuestions.length,
+            cache_hits: generationMetrics.cache_hits,
+            parallel_batches: generationMetrics.parallel_batches,
+            grounding_enabled: generationMetrics.grounding_enabled,
             final_question_count: generationMetrics.final_question_count,
             final_quality_score: generationMetrics.final_quality_score,
             run_id: runId,
