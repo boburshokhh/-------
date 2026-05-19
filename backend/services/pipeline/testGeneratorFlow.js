@@ -47,8 +47,6 @@ const {
     createBackfillIntents,
 } = require('../generation/generationService');
 
-const { buildOfflineMcqFromChunks } = require('../generation/fallbackStrategy');
-
 // Observability
 const {
     logStructured,
@@ -290,105 +288,16 @@ function applyFallbackDecisions(stats, ctx) {
     return null;
 }
 
-// ─── offline branch ──────────────────────────────────────────────────────────
-
-/**
- * Полностью офлайн-ветка: квота исчерпана на уровне RPD.
- * Строит blueprint из заголовков и формирует вопросы из чанков без LLM.
- */
-async function runOfflinePipeline({
-    fullText, indexedChunks, model, modelBlueprint, modelsByAgent, targetCount, targetMin, targetMax,
-    detectedLang, startTime, runId, traceId, documentId, opts, progress,
-    routingModeRequested = 'auto',
-    routingModeEffective = 'auto',
-}) {
-    progress({ phase: 'generate', stage: 'quota_offline',
-        detail: 'Квота LLM на сутки исчерпана — вопросы из текста и сохранённых выжимок' });
-
-    const themes = [{
-        topic: 'Содержание документа',
-        section: 'Документ',
-        importance: 2,
-        suggestedCount: Math.min(5, Math.max(3, Math.ceil(Math.max(1, targetCount) / 2))),
-        difficultyCandidates: ['remember', 'understand'],
-    }];
-    progress({ phase: 'generate', stage: 'themes', workDelta: PW.GEN_THEMES,
-        detail: `Тем: ${themes.length} (режим без LLM)` });
-
-    const bpModel = modelBlueprint || model;
-    const blueprint = await rag.buildQuestionBlueprint(themes, targetCount, targetCount, bpModel, {});
-    progress({ phase: 'generate', stage: 'blueprint', workDelta: PW.GEN_BLUEPRINT,
-        detail: `План: ${blueprint.length} intent-ов (без LLM)` });
-
-    if (runId) {
-        try { await runRepo.insertIntents(runId, blueprint); }
-        catch (e) { console.warn(`[PIPELINE] Could not persist intents: ${e.message}`); }
-    }
-
-    let validatedOffline = [];
-    try {
-        validatedOffline = buildOfflineMcqFromChunks(fullText, indexedChunks, targetMin, targetMax);
-    } catch (e) {
-        console.error(`[PIPELINE] Офлайн-сборка вопросов: ${e.message}`);
-    }
-
-    const finalQuestions = validatedOffline.slice(0, targetMax).map((q, i) => ({ ...q, id: i + 1 }));
-    const durationMs     = Date.now() - startTime;
-    progress({ phase: 'generate', stage: 'ready', workDelta: PW.GEN_READY,
-        detail: `Готово: ${finalQuestions.length} вопросов (без LLM)` });
-
-    const generationMetrics = buildGenerationMetrics({
-        traceId, sessionId: opts.sessionId, documentId, model, durationMs,
-        targetCount, targetMin, targetMax,
-        blueprintIntents: blueprint.length,
-        parseQualityScore: opts.extractionQuality,
-        chunkCount: indexedChunks.length,
-        chunksWithFacts: indexedChunks.filter(c => countMergedFactBullets(c, 99) > 0).length,
-        atomicFactsExtracted: indexedChunks.reduce((s, c) => s + countMergedFactBullets(c, 99), 0),
-        retrievalPassed: 0, retrievalSkipped: 0,
-        groundingAccepted: finalQuestions.length, groundingFailed: 0,
-        batchValidated: 0, llmSkipped: blueprint.length, validationFailed: 0,
-        preDedupCount: finalQuestions.length, postDedupCount: finalQuestions.length,
-        finalCount: finalQuestions.length,
-        backfillRounds: 0, backfillQuestionsAdded: 0, evidenceScores: [],
-        quotaOffline: true,
-        modelsByAgent: modelsByAgent || undefined,
-        routing_mode_requested: routingModeRequested,
-        routing_mode_effective: routingModeEffective,
-        pipeline_execution_mode: 'quota_offline',
-        degraded_reasons: ['rpd_exhausted'],
-    });
-
-    const fallbackDecision = applyFallbackDecisions({
-        retrievalPassed: 0, retrievalSkipped: 0,
-        finalCount: finalQuestions.length, blueprintIntents: blueprint.length,
-    }, { traceId, documentId });
-
-    if (runId) {
-        try {
-            for (let i = 0; i < finalQuestions.length; i++) {
-                const q    = finalQuestions[i];
-                const qRow = await runRepo.insertQuestion(runId, i, q);
-                if (q.sources && q.sources.length > 0) await runRepo.insertQuestionSources(qRow.id, q.sources);
-            }
-            await runRepo.updateRunFinished(runId, {
-                status: 'completed',
-                final_metrics: generationMetrics,
-                fallback_decisions: { decision: fallbackDecision, quota_offline: true },
-                duration_ms: durationMs,
-            });
-        } catch (e) {
-            console.warn(`[PIPELINE] Could not persist run results: ${e.message}`);
-        }
-    }
-
-    logStructured({
-        level: 'warn', traceId, sessionId: opts.sessionId, documentId, testId: null,
-        phase: 'finalize', event: 'generation_quota_offline',
-        metrics: { duration_ms: durationMs, final_question_count: finalQuestions.length, run_id: runId },
-    });
-
-    return { finalQuestions, generationMetrics, runId, offline: true };
+function throwRpdExhausted(modelId) {
+    const limits = quotaGuard.getLimitsForModel(modelId);
+    const err = new Error(
+        `Дневной лимит запросов к модели ${modelId} исчерпан`
+        + (limits ? ` (${limits.rpd} запросов/сутки, UTC).` : '.')
+        + ' Дождитесь сброса квоты (полночь UTC) или выберите другую модель в настройках.',
+    );
+    err.type = 'QUOTA_EXCEEDED';
+    err.status = 429;
+    throw err;
 }
 
 // ─── blueprint phase ─────────────────────────────────────────────────────────
@@ -917,12 +826,7 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
         : await resolveExecutionMode(modelGenerator, embedModel, estimatedBudget);
     if (executionModeRes.mode === 'quota_exhausted') {
         console.warn(`[PIPELINE] ${executionModeRes.reason}`);
-        if (!opts.forceOffline) {
-            const err = new Error(executionModeRes.reason || 'Дневной лимит квоты исчерпан.');
-            err.requiresOfflineConsent = true;
-            err.status = 402;
-            throw err;
-        }
+        throwRpdExhausted(modelGenerator);
     }
 
     logStructured({
@@ -1001,35 +905,9 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     console.log(`[PIPELINE] Цель: ${targetMin}–${targetMax} | чанков: ${indexedChunks.length} | `
         + `gen=${modelGenerator} blueprint=${modelBlueprint} ground=${modelQuality} embed=${embedModel}`);
 
-    // ── 6. Offline branch ────────────────────────────────────────────────────
     const llmRpdExhausted = !skipLocalPreflight && await quotaGuard.isRpdExhaustedForModel(model);
     if (llmRpdExhausted) {
-        if (!opts.forceOffline) {
-            const limits = quotaGuard.getLimitsForModel(model);
-            const err = new Error(
-                `Дневной лимит запросов к модели ${model} исчерпан`
-                + (limits ? ` (${limits.rpd} запросов/сутки, UTC).` : '.')
-                + ' Дождитесь сброса квоты, смените модель в настройках или явно согласитесь на упрощённую сборку без LLM.',
-            );
-            err.requiresOfflineConsent = true;
-            err.status = 402;
-            throw err;
-        }
-        console.warn('[PIPELINE] Дневной лимит исчерпан — offline mode (forceOffline)');
-        const result = await runOfflinePipeline({
-            fullText, indexedChunks, model: modelGenerator, modelBlueprint, modelsByAgent,
-            targetCount, targetMin, targetMax,
-            detectedLang, startTime, runId, traceId, documentId, opts, progress,
-            routingModeRequested: routingMode,
-            routingModeEffective,
-        });
-        const cleanName = docName.replace(/\.(pdf|docx?)$/i, '');
-        return {
-            title: `Тест по документу: ${cleanName} (без LLM — квота)`,
-            questions: result.finalQuestions,
-            generationMetrics: result.generationMetrics,
-            runId: result.runId,
-        };
+        throwRpdExhausted(model);
     }
 
     // ── 7. Blueprint ─────────────────────────────────────────────────────────
@@ -1073,18 +951,17 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     console.log(`[PIPELINE] Статистика: blueprint=${blueprintWithDifficulty.length}, ` +
         `skipped_evidence=${statsSkippedEvidence}, validated=${statsValidated}, grounded=${allQuestions.length}`);
 
-    // ── 9. Emergency fallback ────────────────────────────────────────────────
     if (allQuestions.length === 0) {
-        console.warn('[PIPELINE] Нет вопросов после main loop → emergency_fallback');
-        pipelineContext.executionMode = 'emergency_fallback';
+        console.warn('[PIPELINE] Нет вопросов после main loop');
+        pipelineContext.executionMode = 'failed';
         pipelineContext.degradedReasons.push('llm_generation_failed');
         pipelineContext.degradedStages.push('generation');
-        try {
-            const offlineQs = buildOfflineMcqFromChunks(fullText, indexedChunks, targetMin, targetMax);
-            offlineQs.forEach(q => allQuestions.push(q));
-        } catch (err) {
-            console.error('[PIPELINE] Offline MCQ error:', err.message);
-        }
+        const err = new Error(
+            'Не удалось сгенерировать ни одного вопроса. Проверьте квоту API, модель и качество текста в PDF.',
+        );
+        err.status = 502;
+        err.type = 'LLM_GENERATION_FAILED';
+        throw err;
     }
 
     // ── 10. Dedup ────────────────────────────────────────────────────────────

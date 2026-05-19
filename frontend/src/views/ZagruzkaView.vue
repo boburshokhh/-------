@@ -247,7 +247,6 @@ async function handleUpload(file) {
     jobId,
     modelId: manualModel,
     routingMode,
-    forceOffline: file._forceOffline === true,
   })
   startPolling()
   try {
@@ -256,20 +255,6 @@ async function handleUpload(file) {
     stopPolling()
   } catch (error) {
     stopPolling()
-    if (error?.requiresOfflineConsent) {
-      if (confirm(
-        (error.message || 'Дневная квота LLM исчерпана.')
-        + '\n\nОффлайн-режим НЕ использует нейросеть: вопросы режутся из сырого текста PDF.'
-        + ' Если PDF плохо распознан — получится бессмысленный тест.'
-        + '\n\nПродолжить оффлайн-сборку?',
-      )) {
-        file._forceOffline = true;
-        handleUpload(file);
-      } else {
-        store.actions.failUpload('Отменено пользователем (недостаточно квоты).');
-      }
-      return;
-    }
     store.actions.failUpload(error?.message || 'Не удалось загрузить файл')
   }
 }

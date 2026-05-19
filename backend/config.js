@@ -87,13 +87,13 @@ module.exports = {
   LOCAL_GEMINI_QUOTA_ENABLED: process.env.LOCAL_GEMINI_QUOTA_ENABLED === 'true',
   // Только Text-out модели с доступными лимитами (RPM/TPM/RPD)
   LLM_MODELS: [
-    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (15 RPM, 1M TPM, 1500 RPD)' },
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (7 RPM, 250K TPM, 20 RPD)' },
-    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (10 RPM, 250K TPM, 20 RPD)' },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (2 RPM, 32K TPM, 25 RPD)' },
-    { id: 'gemini-pro-latest', label: 'Gemini Pro Latest (2 RPM, 32K TPM, 50 RPD)' },
-    { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview (2 RPM, 32K TPM, 10 RPD)' },
-    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview (2 RPM, 32K TPM, 10 RPD)' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (4K RPM, 4M TPM)' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (1K RPM, 1M TPM, 10K RPD)' },
+    { id: 'gemini-2.0-flash', label: 'Gemini 2 Flash (2K RPM, 4M TPM)' },
+    { id: 'gemini-2.0-flash-lite', label: 'Gemini 2 Flash Lite (4K RPM, 4M TPM)' },
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (150 RPM, 2M TPM, 1K RPD)' },
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (25 RPM, 2M TPM, 250 RPD)' },
+    { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (legacy)' },
   ],
   LLM_FALLBACK_CHAIN: {
     'gemini-1.5-flash': ['gemini-2.5-flash-lite', 'gemini-2.5-flash'],
@@ -105,26 +105,26 @@ module.exports = {
     'gemini-2.5-pro': ['gemini-pro-latest', 'gemini-2.5-flash'],
   },
   /**
-   * Локальные лимиты по модели (free tier). Используются для учёта и блокировки до лимита Google.
-   * tpm — для отображения; жёстко не режем (сложно без точного usageMetadata на каждом ответе).
+   * Локальные лимиты (только при LOCAL_GEMINI_QUOTA_ENABLED=true).
+   * rpd: null — без дневного потолка (Unlimited в AI Studio); tpm — справочно, не режем.
    */
   FREE_TIER_QUOTAS: {
+    'gemini-2.5-flash-lite': { rpm: 4000, tpm: 4000000, rpd: null },
+    'gemini-2.5-flash': { rpm: 1000, tpm: 1000000, rpd: 10000 },
+    'gemini-2.0-flash': { rpm: 2000, tpm: 4000000, rpd: null },
+    'gemini-2.0-flash-lite': { rpm: 4000, tpm: 4000000, rpd: null },
+    'gemini-2.5-pro': { rpm: 150, tpm: 2000000, rpd: 1000 },
+    'gemini-3.1-pro-preview': { rpm: 25, tpm: 2000000, rpd: 250 },
+    'gemini-3-pro-preview': { rpm: 25, tpm: 2000000, rpd: 250 },
+    'gemini-pro-latest': { rpm: 150, tpm: 2000000, rpd: 1000 },
+    'gemini-3-flash-preview': { rpm: 1000, tpm: 2000000, rpd: 10000 },
     'gemini-1.5-flash': { rpm: 15, tpm: 1000000, rpd: 1500 },
-    'gemini-2.5-flash': { rpm: 7, tpm: 250000, rpd: 20 },
-    'gemini-2.5-flash-lite': { rpm: 10, tpm: 250000, rpd: 20 },
-    'gemini-2.0-flash': { rpm: 15, tpm: 1000000, rpd: 200 },
-    'gemini-2.0-flash-lite': { rpm: 30, tpm: 1000000, rpd: 200 },
-    'gemini-2.5-pro': { rpm: 2, tpm: 32000, rpd: 25 },
-    'gemini-pro-latest': { rpm: 2, tpm: 32000, rpd: 50 },
-    'gemini-3-flash-preview': { rpm: 10, tpm: 250000, rpd: 25 },
-    'gemini-embedding-2': { rpm: 100, tpm: 100000, rpd: 1500 },
-    'gemini-embedding-2-preview': { rpm: 100, tpm: 100000, rpd: 1500 },
-    'gemini-3.1-pro-preview': { rpm: 2, tpm: 32000, rpd: 10 },
-    'gemini-3-pro-preview': { rpm: 2, tpm: 32000, rpd: 10 },
-    'gemini-embedding-001': { rpm: 100, tpm: 100000, rpd: 1500 },
+    'gemini-embedding-001': { rpm: 3000, tpm: 1000000, rpd: null },
+    'gemini-embedding-2': { rpm: 3000, tpm: 1000000, rpd: null },
+    'gemini-embedding-2-preview': { rpm: 3000, tpm: 1000000, rpd: null },
   },
-  /** Если model id не в FREE_TIER_QUOTAS — консервативный дефолт */
-  FREE_TIER_QUOTA_DEFAULT: { rpm: 2, tpm: 32000, rpd: 20 },
+  /** Если model id не в FREE_TIER_QUOTAS — только RPM, без дневного лимита */
+  FREE_TIER_QUOTA_DEFAULT: { rpm: 60, tpm: 1000000, rpd: null },
   LLM_MAX_RETRIES: 3,
   /**
    * Summary generation strategy for the indexer (primary facts in summary_text).

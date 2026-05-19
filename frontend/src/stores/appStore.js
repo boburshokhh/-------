@@ -188,7 +188,6 @@ export function useAppStore() {
             pipeline_execution_mode: gm.pipeline_execution_mode,
             models_by_agent: gm.models_by_agent,
             degraded_reasons: gm.degraded_reasons,
-            quota_offline: gm.quota_offline,
           }
         : null;
       state.upload.progress = {

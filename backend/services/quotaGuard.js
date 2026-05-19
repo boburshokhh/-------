@@ -23,6 +23,11 @@ function getLimitsForModel(modelId) {
     return config.FREE_TIER_QUOTAS[modelId] || config.FREE_TIER_QUOTA_DEFAULT || null;
 }
 
+/** Дневной лимит задан явно; null/0 = Unlimited в AI Studio — локально RPD не режем. */
+function hasDailyRpdLimit(limits) {
+    return limits && Number.isFinite(limits.rpd) && limits.rpd > 0;
+}
+
 function isLocalQuotaEnforced() {
     return config.LOCAL_GEMINI_QUOTA_ENABLED === true;
 }
@@ -68,9 +73,9 @@ async function assertWithinFreeTierQuota(modelId, opts = {}) {
     // 2. Check & Update RPD (direct DB query via PG is <1ms, so cache removed)
     const usedDay = await quotaRepo.getUsage(fp, date, modelId);
 
-    if (usedDay >= limits.rpd) {
+    if (hasDailyRpdLimit(limits) && usedDay >= limits.rpd) {
         throw createQuotaError(
-            `Достигнут дневной лимит free tier для этой модели (${limits.rpd} запросов/сутки, UTC). Завтра лимит обновится, либо задайте другой API-ключ в настройках.`,
+            `Достигнут дневной лимит для этой модели (${limits.rpd} запросов/сутки, UTC). Завтра лимит обновится, либо задайте другой API-ключ в настройках.`,
             { modelId, limit: 'rpd', max: limits.rpd, used: usedDay },
         );
     }
@@ -88,7 +93,7 @@ async function isRpdExhaustedForModel(modelId, opts = {}) {
     if (opts.bypassLimits) return false;
     if (!isLocalQuotaEnforced()) return false;
     const limits = getLimitsForModel(modelId);
-    if (!limits) return false;
+    if (!limits || !hasDailyRpdLimit(limits)) return false;
     const fp = await getKeyFingerprint();
     if (!fp) return false;
     const used = await quotaRepo.getUsage(fp, utcDateString(), modelId);
@@ -162,7 +167,7 @@ async function syncFromGoogle429(modelId, err) {
     }
 
     const limits = getLimitsForModel(modelId);
-    if (!limits) return false;
+    if (!limits || !hasDailyRpdLimit(limits)) return false;
     const fp = await getKeyFingerprint();
     if (!fp) return false;
     const date = utcDateString();
@@ -170,7 +175,7 @@ async function syncFromGoogle429(modelId, err) {
     await quotaRepo.setUsageAtLeast(fp, date, modelId, limits.rpd);
 
     console.warn(
-        `[QUOTA] Синхронизация с ответом Google: дневной лимит free tier для ${modelId} (локально ≥ ${limits.rpd} запросов за UTC-сутки).`,
+        `[QUOTA] Синхронизация с ответом Google: дневной лимит для ${modelId} (локально ≥ ${limits.rpd} запросов за UTC-сутки).`,
     );
     return true;
 }

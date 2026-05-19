@@ -19,7 +19,6 @@ function createError(message, status, payload) {
   const err = new Error(message);
   err.status = status;
   err.payload = payload;
-  err.requiresOfflineConsent = payload?.requiresOfflineConsent || false;
   return err;
 }
 
@@ -36,7 +35,6 @@ function mapHttpError(status, payload) {
   if (status === 413) return payload?.details || payload?.error || 'Файл слишком большой для сервера.';
   if (status === 415) return 'Неподдерживаемый формат файла. Используйте PDF.';
   if (status === 422) return 'Документ не удалось обработать. Проверьте содержимое файла.';
-  if (status === 402) return payload?.error || 'Дневная квота исчерпана.';
   if (status === 429) return payload?.error || 'Слишком много запросов. Повторите попытку чуть позже.';
   if (status === 502) {
     return payload?.details || payload?.error || 'Временная ошибка генерации. Повторите попытку.';
@@ -102,7 +100,6 @@ export const API = {
     const formData = new FormData();
     formData.append('file', file);
     if (opts.modelId) formData.append('model', opts.modelId);
-    if (opts.forceOffline) formData.append('forceOffline', 'true');
     if (opts.routingMode) formData.append('routingMode', String(opts.routingMode));
     /** Дублируем id задачи в теле: после multer сервер сможет сопоставить job даже без заголовка. */
     if (opts.jobId) formData.append('jobId', String(opts.jobId));

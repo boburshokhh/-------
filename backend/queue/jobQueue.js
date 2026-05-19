@@ -7,7 +7,7 @@
  *
  * Jobs carry the full context needed to run the pipeline in a worker:
  *   jobId, documentId, routingMode, model, displayName,
- *   text, indexedChunks, options (forceOffline, complexityScore, etc.)
+ *   text, indexedChunks, options (complexityScore, etc.)
  *
  * The queue is only created when JOB_QUEUE_ENABLED=true (checked by callers).
  */

@@ -298,7 +298,6 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
                 pageCount: pageCount ?? null,
                 lowTextQuality: !!diagnostics.lowTextQuality,
                 extractionQuality: diagnostics.extractionQuality ?? null,
-                forceOffline: req.body.forceOffline === 'true' || req.body.forceOffline === true,
                 complexityScore: req.body.complexityScore != null ? Number(req.body.complexityScore) : undefined,
             };
 
@@ -373,7 +372,6 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
             extractionQuality: diagnostics.extractionQuality,
             traceId: jobId,
             documentId: Number(documentId),
-            forceOffline: req.body.forceOffline === 'true' || req.body.forceOffline === true,
         });
 
         const testRow = await testRepo.insertTest({

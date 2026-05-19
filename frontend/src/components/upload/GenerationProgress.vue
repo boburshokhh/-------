@@ -75,9 +75,7 @@
           </li>
           <li v-if="routingResult.pipeline_execution_mode">
             Режим пайплайна: <strong>{{ routingResult.pipeline_execution_mode }}</strong>
-            <span v-if="routingResult.pipeline_execution_mode === 'quota_offline' || routingResult.quota_offline" class="text-amber-800"> (downgrade: квота LLM)</span>
             <span v-if="routingResult.pipeline_execution_mode === 'degraded'" class="text-amber-800"> (downgrade: деградация)</span>
-            <span v-if="routingResult.pipeline_execution_mode === 'emergency_fallback'" class="text-amber-800"> (downgrade: запасной путь)</span>
           </li>
           <li v-if="routingResult.degraded_reasons?.length">
             Причины деградации: {{ routingResult.degraded_reasons.join(', ') }}

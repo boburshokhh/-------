@@ -16,7 +16,6 @@
  *   pageCount       - number|null
  *   lowTextQuality  - boolean
  *   extractionQuality - number|null
- *   forceOffline    - boolean
  *   complexityScore - number|undefined
  *
  * The upload handler already handles: parse, insertDocument.
@@ -52,7 +51,7 @@ async function processGenerationJob(job) {
     const {
         jobId, documentId, text, displayName, routingMode, model,
         pageCount, lowTextQuality, extractionQuality,
-        forceOffline, complexityScore,
+        complexityScore,
     } = job.data;
 
     const report = makeReporter(jobId);
@@ -100,7 +99,6 @@ async function processGenerationJob(job) {
             extractionQuality: extractionQuality ?? null,
             traceId: jobId,
             documentId: Number(documentId),
-            forceOffline: forceOffline === true,
         });
 
         const testRow = await testRepo.insertTest({
