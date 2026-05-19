@@ -100,6 +100,9 @@ function parseGeminiApiError(err) {
     const isTransientUnavailable = code === 503
         || st === 'UNAVAILABLE'
         || /\b503\b|UNAVAILABLE|high demand|temporarily unavailable|overload/i.test(msg);
+    const isModelNotFound = code === 404
+        || st === 'NOT_FOUND'
+        || /no longer available|not found|is not supported/i.test(msg);
 
     return {
         isResourceExhausted: Boolean(is429),
@@ -108,6 +111,8 @@ function parseGeminiApiError(err) {
         quotaId,
         /** Перегрузка / недоступность модели на стороне Google — не квота, нужны длинные паузы между повторами */
         isTransientUnavailable: Boolean(isTransientUnavailable),
+        /** Модель снята с API (например gemini-2.0-flash для новых ключей) */
+        isModelNotFound: Boolean(isModelNotFound),
     };
 }
 

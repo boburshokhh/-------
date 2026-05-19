@@ -5,6 +5,7 @@
 'use strict';
 
 const config = require('../config');
+const { resolveApiModelId } = require('../utils/modelAliases');
 const { AGENT_ROLES, AGENT_TO_ROUTER_STAGE } = require('../config/agentRoles');
 const quotaGuard = require('./quotaGuard');
 const aiModelsRepo = require('../db/repositories/aiModelsRepo');
@@ -319,11 +320,11 @@ async function routeModel(input) {
     const fallbackModel = pickNextFallback(selected, candidates) || quotaGuard.getFallbackModel(budgetPhaseForCandidate(selected));
 
     const out = {
-        selectedModel: selected,
-        fallbackModel: fallbackModel || selected,
+        selectedModel: resolveApiModelId(selected),
+        fallbackModel: resolveApiModelId(fallbackModel || selected),
         reason,
-        costTier: costTierFromModelId(selected),
-        isPreview: await isPreviewModel(selected),
+        costTier: costTierFromModelId(resolveApiModelId(selected)),
+        isPreview: await isPreviewModel(resolveApiModelId(selected)),
     };
 
     logRouterDecision(out, {
@@ -612,12 +613,12 @@ function buildCandidateIdsFromRuleActions(ctx, actions) {
         ? actions.fallback_api_model_ids
         : [];
     const out = [];
-    if (primary) out.push(String(primary).trim());
+    if (primary) out.push(resolveApiModelId(String(primary).trim()));
     if (shouldInsertEscalationModel(ctx, actions) && actions.escalation?.to_api_model_id) {
-        out.push(String(actions.escalation.to_api_model_id).trim());
+        out.push(resolveApiModelId(String(actions.escalation.to_api_model_id).trim()));
     }
     for (const f of fallbacks) {
-        if (f) out.push(String(f).trim());
+        if (f) out.push(resolveApiModelId(String(f).trim()));
     }
     return dedupe(out.filter(Boolean));
 }
@@ -719,7 +720,7 @@ async function routeModelForAgent(input) {
         routerCtx,
     });
     if (manualOverride) {
-        const mid = String(manualOverride.api_model_id || '').trim();
+        const mid = resolveApiModelId(String(manualOverride.api_model_id || '').trim());
         const phase = budgetPhaseForCandidate(mid);
         const guardCheck = await quotaGuard.canUseModelForStage(mid, phase);
         let selected = mid;

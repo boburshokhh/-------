@@ -3,6 +3,7 @@ const config = require('../../config');
 const runtimeConfig = require('../runtimeConfig');
 const quotaGuard = require('../quotaGuard');
 const { parseGeminiApiError, sleepForGeminiRetry } = require('../geminiError');
+const { resolveApiModelId, resolveApiModelChain } = require('../../utils/modelAliases');
 const { validateQuestions, extractJSON } = require('../validator');
 const { getBatchSystemPrompt, GROUNDING_SYSTEM } = require('../llm/prompts');
 const { resolveChunkEvidence } = require('../rag/evidenceBuilder');
@@ -12,6 +13,17 @@ const { getMaxQualityLlmChainForStage } = require('../../config/routingModes');
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function buildGenerationModelChain(primary) {
+    const resolved = resolveApiModelId(primary || config.LLM_MODEL);
+    const fallbacks = [
+        ...(config.LLM_FALLBACK_CHAIN?.[primary] || []),
+        ...(config.LLM_FALLBACK_CHAIN?.[resolved] || []),
+        config.LLM_MODEL,
+        config.SUMMARY_CHEAP_MODEL,
+    ];
+    return resolveApiModelChain([resolved, ...fallbacks]);
 }
 
 async function getAiClient() {
@@ -73,7 +85,7 @@ function normalizeQuestion(q, chunkIds = []) {
 
 async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retries = null, model = null, lang = 'auto', routeOpts = null) {
     retries = retries || config.LLM_MAX_RETRIES;
-    let llmModel = model || config.LLM_MODEL;
+    let routedModel = model || config.LLM_MODEL;
     let lastError;
 
     if (routeOpts && routeOpts.profile && routeOpts.stage) {
@@ -87,8 +99,8 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
                 console.log(`[GENERATOR] Stage ${routeOpts.stage} skipped by Tariff Routing.`);
                 return { results: [], stats: { llmSkipped: intents.length, validationFailed: 0 } };
             }
-            llmModel = route.resolved_model;
-            console.log(`[GENERATOR] Router resolved ${llmModel} for stage ${routeOpts.stage}`);
+            routedModel = route.resolved_model;
+            console.log(`[GENERATOR] Router resolved ${routedModel} for stage ${routeOpts.stage}`);
         } catch (e) {
             console.error(`[GENERATOR] Routing error: ${e.message}`);
             // Если FAIL_FAST, кидаем ошибку сразу
@@ -97,67 +109,74 @@ async function generateBatchQuestions(intents, evidenceList, chunkIdsList, retri
     }
 
     const quotaOpts = routeOpts?.bypassLimits ? { bypassLimits: true } : {};
+    const modelChain = buildGenerationModelChain(routedModel);
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
-            const userPrompt = buildBatchPrompt(intents, evidenceList);
-            const ai = await getAiClient();
-            const response = await ai.models.generateContent({
-                model: llmModel,
-                contents: userPrompt,
-                config: {
-                    systemInstruction: getBatchSystemPrompt(lang),
-                    temperature: 0.7,
-                    responseMimeType: 'application/json',
-                },
-            });
-            await quotaGuard.recordGeminiCall(llmModel);
+    for (const llmModel of modelChain) {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                await quotaGuard.assertWithinFreeTierQuota(llmModel, quotaOpts);
+                const userPrompt = buildBatchPrompt(intents, evidenceList);
+                const ai = await getAiClient();
+                const response = await ai.models.generateContent({
+                    model: llmModel,
+                    contents: userPrompt,
+                    config: {
+                        systemInstruction: getBatchSystemPrompt(lang),
+                        temperature: 0.7,
+                        responseMimeType: 'application/json',
+                    },
+                });
+                await quotaGuard.recordGeminiCall(llmModel);
 
-            const content = response.text;
-            if (!content) throw new Error('Пустой ответ от LLM');
+                const content = response.text;
+                if (!content) throw new Error('Пустой ответ от LLM');
 
-            let parsed = extractJSON(content);
-            if (!Array.isArray(parsed)) parsed = [parsed];
+                let parsed = extractJSON(content);
+                if (!Array.isArray(parsed)) parsed = [parsed];
 
-            const results = [];
-            let llmSkipped = 0;
-            let validationFailed = 0;
-            const limit = Math.min(parsed.length, intents.length);
+                const results = [];
+                let llmSkipped = 0;
+                let validationFailed = 0;
+                const limit = Math.min(parsed.length, intents.length);
 
-            for (let i = 0; i < limit; i++) {
-                if (parsed[i] && parsed[i].skipped === true) {
-                    console.log(`[GENERATOR] Batch: intent[${i + 1}] пропущен LLM — ${parsed[i].reason || 'недостаточный evidence'}`);
-                    llmSkipped++;
-                    continue;
+                for (let i = 0; i < limit; i++) {
+                    if (parsed[i] && parsed[i].skipped === true) {
+                        console.log(`[GENERATOR] Batch: intent[${i + 1}] пропущен LLM — ${parsed[i].reason || 'недостаточный evidence'}`);
+                        llmSkipped++;
+                        continue;
+                    }
+                    try {
+                        const normalized = normalizeQuestion(parsed[i], chunkIdsList[i] || []);
+                        const [validated] = validateQuestions([normalized]);
+                        results.push({ question: { ...validated, sources: normalized.sources }, intentIdx: i });
+                    } catch (e) {
+                        validationFailed++;
+                        console.warn(`[GENERATOR] Batch: вопрос ${i + 1}/${limit} невалиден — ${e.message}`);
+                    }
                 }
-                try {
-                    const normalized = normalizeQuestion(parsed[i], chunkIdsList[i] || []);
-                    const [validated] = validateQuestions([normalized]);
-                    results.push({ question: { ...validated, sources: normalized.sources }, intentIdx: i });
-                } catch (e) {
-                    validationFailed++;
-                    console.warn(`[GENERATOR] Batch: вопрос ${i + 1}/${limit} невалиден — ${e.message}`);
-                }
-            }
 
-            if (results.length > 0) return { results, stats: { llmSkipped, validationFailed } };
-            throw new Error('Ни один вопрос в batch не прошёл валидацию');
-        } catch (error) {
-            lastError = error;
-            if (error.type === 'QUOTA_EXCEEDED') {
-                console.warn(`[GENERATOR] Batch: лимит free tier — ${error.message}`);
-                break; // Не пробуем дальше тот же самый модель. fallback отдает router заранее!
-            }
-            const g = parseGeminiApiError(error);
-            if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, error);
-            if (attempt < retries && !g.isDailyFreeTierQuota) {
-                await sleepForGeminiRetry(g, attempt, retries, sleep);
+                if (results.length > 0) return { results, stats: { llmSkipped, validationFailed } };
+                throw new Error('Ни один вопрос в batch не прошёл валидацию');
+            } catch (error) {
+                lastError = error;
+                if (error.type === 'QUOTA_EXCEEDED') {
+                    console.warn(`[GENERATOR] Batch: лимит free tier — ${error.message}`);
+                    break;
+                }
+                const g = parseGeminiApiError(error);
+                if (g.isModelNotFound) {
+                    console.warn(`[GENERATOR] Модель ${llmModel} недоступна (404), пробуем fallback…`);
+                    break;
+                }
+                if (g.isResourceExhausted) await quotaGuard.syncFromGoogle429(llmModel, error);
+                if (attempt < retries && !g.isDailyFreeTierQuota) {
+                    await sleepForGeminiRetry(g, attempt, retries, sleep);
+                }
             }
         }
     }
 
-    console.error(`[GENERATOR] Batch пропущен: ${lastError.message}`);
+    console.error(`[GENERATOR] Batch пропущен: ${formatGeminiErr(lastError)}`);
     return { results: [], stats: { llmSkipped: 0, validationFailed: 0 } };
 }
 
@@ -175,7 +194,7 @@ function buildGroundingModelChain(primary, routeOpts) {
     const seen = new Set();
     const chain = [];
     const add = (id) => {
-        const m = String(id || '').trim();
+        const m = resolveApiModelId(id);
         if (m && !seen.has(m)) {
             seen.add(m);
             chain.push(m);
@@ -187,12 +206,12 @@ function buildGroundingModelChain(primary, routeOpts) {
         add(primary);
     } else {
         add(primary);
-        const fb = config.LLM_FALLBACK_CHAIN?.[primary] || [];
+        const fb = config.LLM_FALLBACK_CHAIN?.[primary] || config.LLM_FALLBACK_CHAIN?.[resolveApiModelId(primary)] || [];
         for (const m of fb) add(m);
         add('gemini-2.5-flash');
     }
 
-    return chain.length ? chain : [primary || config.LLM_MODEL];
+    return chain.length ? chain : [resolveApiModelId(primary) || config.LLM_MODEL];
 }
 
 async function callGroundingOnce(questions, prompt, llmModel, quotaOpts) {

@@ -19,13 +19,14 @@ const config = require('./config');
 const { QUEUE_NAME, buildConnection } = require('./queue/jobQueue');
 const { processGenerationJob } = require('./queue/processor');
 const { runMigrations } = require('./db/migrations/runner');
+const pgPool = require('./db/pgPool');
 const fileStorage = require('./services/storage/fileStorage');
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY, 10) || 1;
 
 async function start() {
     console.log(`[WORKER] Running migrations…`);
-    await runMigrations();
+    await runMigrations(pgPool);
 
     await fileStorage.init().catch((e) =>
         console.warn(`[WORKER] fileStorage.init failed (non-fatal): ${e.message}`)

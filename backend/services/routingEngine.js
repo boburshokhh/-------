@@ -16,6 +16,7 @@
  */
 
 const config = require('../config');
+const { resolveApiModelId } = require('../utils/modelAliases');
 const { logStructured } = require('../utils/observability');
 const {
     STAGE_KEYS, ALL_STAGE_KEYS, STAGE_CATALOG, COST_TIERS,
@@ -236,7 +237,7 @@ async function selectModel(stageRequest) {
     let forcedModelId = null;
     if (override) {
         const modelRow = catalog.find(m => m.id === Number(override.model_id));
-        const overrideApiId = modelRow?.api_model_id || null;
+        const overrideApiId = resolveApiModelId(modelRow?.api_model_id || null);
         const isGlobalPremiumPin = maxQuality
             && String(override.scope || '').toLowerCase() === 'global'
             && overrideApiId
@@ -251,7 +252,7 @@ async function selectModel(stageRequest) {
         }
     }
     if (!forcedModelId && adminOv.model) {
-        forcedModelId = adminOv.model;
+        forcedModelId = resolveApiModelId(adminOv.model);
         decisionSource = 'admin_override';
     }
 
@@ -265,8 +266,8 @@ async function selectModel(stageRequest) {
         const tieredChain = getMaxQualityLlmChainForStage(stageKey);
         ruleActions = {
             ...ruleActions,
-            primary_api_model_id: tieredChain[0] || ruleActions.primary_api_model_id,
-            fallback_api_model_ids: tieredChain.slice(1),
+            primary_api_model_id: resolveApiModelId(tieredChain[0] || ruleActions.primary_api_model_id),
+            fallback_api_model_ids: tieredChain.slice(1).map(resolveApiModelId),
             allow_premium: true,
             allow_preview: true,
         };
@@ -354,7 +355,9 @@ async function selectModel(stageRequest) {
         }
     }
 
-    const selectedApiModelId = selected?.api_model_id || config.LLM_MODEL || 'gemini-2.5-flash';
+    const selectedApiModelId = resolveApiModelId(
+        selected?.api_model_id || config.LLM_MODEL || 'gemini-2.5-flash',
+    );
     const selectedModelId = selected?.id || null;
 
     const decision = {
@@ -499,6 +502,20 @@ function shouldAllowPremium(mode, stageKey, complexity, docMeta, policies) {
 
 function buildCandidatePool(catalog, stageMeta, { forcedModelId, ruleActions, effectiveMode }) {
     const pool = [];
+    const actions = { ...ruleActions };
+    if (actions.primary_api_model_id) {
+        actions.primary_api_model_id = resolveApiModelId(actions.primary_api_model_id);
+    }
+    if (actions.escalation?.to_api_model_id) {
+        actions.escalation = {
+            ...actions.escalation,
+            to_api_model_id: resolveApiModelId(actions.escalation.to_api_model_id),
+        };
+    }
+    if (Array.isArray(actions.fallback_api_model_ids)) {
+        actions.fallback_api_model_ids = actions.fallback_api_model_ids.map(resolveApiModelId);
+    }
+    ruleActions = actions;
 
     if (forcedModelId) {
         const row = catalog.find(m => m.api_model_id === forcedModelId);
