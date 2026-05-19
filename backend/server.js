@@ -96,6 +96,7 @@ app.use('/api/results', apiLimiter, require('./routes/results'));
 app.use('/api/auth', apiLimiter, lazyRouter('./routes/auth'));
 app.use('/api/logs', require('./routes/logs'));
 app.use('/api/jobs', require('./routes/jobs'));
+app.use('/api/generation', apiLimiter, require('./routes/generationStatus'));
 app.use('/api/_hidden/settings', require('./routes/settings'));
 app.use('/api/admin/ai', adminApiLimiter, lazyRouter('./routes/adminAi'));
 
@@ -147,9 +148,9 @@ app.get('/api/health', async (req, res) => {
             maxFileSizeMb: config.MAX_FILE_SIZE_MB,
         },
         backgroundJobs: {
-            enabled: !!config.JOB_QUEUE_ENABLED,
+            queueEnabled: !!config.JOB_QUEUE_ENABLED,
             sseEnabled: !!config.SSE_ENABLED,
-            workerRequired: !!config.JOB_QUEUE_ENABLED,
+            singleGenerationLock: true,
         },
         geminiQuota: quota,
     });

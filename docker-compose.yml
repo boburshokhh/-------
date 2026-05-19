@@ -106,7 +106,9 @@ services:
         aliases:
           - ai-testgen-app
 
+  # Опционально: только при JOB_QUEUE_ENABLED=true — docker compose --profile queue up -d
   worker:
+    profiles: ["queue"]
     image: ai-testgen-app:latest
     pull_policy: build
     container_name: ai-testgen-worker

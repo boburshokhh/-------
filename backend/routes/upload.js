@@ -17,15 +17,7 @@ const { normalizeDisplayFilename, resolveStorageExtension } = require('../utils/
 const { logStructured } = require('../utils/observability');
 const customModeProfilesRepo = require('../db/repositories/customModeProfilesRepo');
 const { BUILT_IN_ROUTING_MODES, shouldBypassAppLimits } = require('../config/routingModes');
-
-// ── Async queue support (JOB_QUEUE_ENABLED) ──────────────────────────────────
-let _jobQueue = null;
-function getJobQueue() {
-    if (!_jobQueue) {
-        _jobQueue = require('../queue/jobQueue');
-    }
-    return _jobQueue;
-}
+const generationLock = require('../services/generationLock');
 
 const router = express.Router();
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
@@ -132,7 +124,27 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         });
     }
     const jobId = incomingJobId || uuidv4();
-    const report = (payload) => jobProgress.logJobProgress(jobId, payload);
+    let lockHeld = false;
+
+    const lockResult = await generationLock.tryAcquire(jobId, displayName);
+    if (!lockResult.acquired) {
+        const err = new Error(generationLock.buildBusyMessage(lockResult.busy));
+        err.type = 'GENERATION_BUSY';
+        err.status = 409;
+        err.busy = lockResult.busy;
+        return next(err);
+    }
+    lockHeld = true;
+
+    const report = (payload) => {
+        jobProgress.logJobProgress(jobId, payload);
+        void generationLock.touch(jobId, {
+            phase: payload?.phase,
+            stage: payload?.stage,
+            detail: payload?.detail,
+            fileName: displayName,
+        });
+    };
     const W = jobProgress.WEIGHT;
     const baseWorkAfterDb = W.PARSE_READ + W.PARSE_PARSED + W.DB_SAVING + W.DB_SAVED;
 
@@ -266,67 +278,6 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
             }
         }
 
-        // ── Async queue path (JOB_QUEUE_ENABLED=true) ────────────────────────
-        // Document is already parsed + inserted at this point; worker only needs
-        // to run indexDocument → generateTest → insertTest.
-        if (config.JOB_QUEUE_ENABLED) {
-            const jq = getJobQueue();
-            let queueAvailable = false;
-            try {
-                const { ping } = require('../db/redisClient');
-                queueAvailable = await ping(config.REDIS_DB_QUEUE ?? 0);
-            } catch { /* fall through to 503 */ }
-
-            if (!queueAvailable) {
-                logStructured({
-                    level: 'error', traceId: jobId, phase: 'upload', event: 'queue_unavailable',
-                    metadata: { error_code: 'queue_unavailable' },
-                });
-                return res.status(503).json({ error: 'Очередь задач недоступна', code: 'queue_unavailable' });
-            }
-
-            // Pass pre-parsed data so the worker skips re-parsing + re-inserting doc.
-            const jobPayload = {
-                jobId,
-                documentId: Number(documentId),
-                text,
-                displayName,
-                routingMode,
-                model,
-                pageCount: pageCount ?? null,
-                lowTextQuality: !!diagnostics.lowTextQuality,
-                extractionQuality: diagnostics.extractionQuality ?? null,
-                complexityScore: req.body.complexityScore != null ? Number(req.body.complexityScore) : undefined,
-            };
-
-            await jq.enqueue(jobId, jobPayload);
-
-            logStructured({
-                level: 'info', traceId: jobId, phase: 'upload', event: 'job_enqueued',
-                metadata: { routing_mode: routingMode, model, display_name: displayName },
-            });
-
-            report({ phase: 'queued', stage: 'enqueued', detail: 'Задача поставлена в очередь' });
-
-            return res.status(202).json({
-                success: true,
-                jobId,
-                status: 'queued',
-                message: 'Задача принята и поставлена в очередь. Используйте GET /api/jobs/:jobId для отслеживания.',
-                documentInfo: {
-                    id: Number(documentId),
-                    name: displayName,
-                    pages: pageCount,
-                    textLength: text.length,
-                    extractionQuality: diagnostics.extractionQuality,
-                    lowTextQuality: diagnostics.lowTextQuality,
-                    parseMethod: diagnostics.parseMethod || null,
-                },
-            });
-            // Temp file cleanup happens in the finally block below.
-        }
-        // ── End async queue path ──────────────────────────────────────────────
-
         console.log(`[UPLOAD] Индексация документа #${documentId} (routingMode=${routingMode})...`);
         const indexedChunks = await indexDocument(documentId, text, report, {
             baseWorkDone: baseWorkAfterDb,
@@ -428,6 +379,9 @@ router.post('/', registerUploadJobStub, upload.single('file'), async (req, res, 
         } catch { /* ignore */ }
         next(error);
     } finally {
+        if (lockHeld) {
+            await generationLock.release(jobId).catch(() => {});
+        }
         try {
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);

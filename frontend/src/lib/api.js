@@ -32,6 +32,9 @@ async function parseJson(response) {
 
 function mapHttpError(status, payload) {
   const fallback = payload?.details || payload?.error || 'Ошибка запроса';
+  if (status === 409) {
+    return payload?.error || payload?.message || 'Генерация уже выполняется для другого файла.';
+  }
   if (status === 413) return payload?.details || payload?.error || 'Файл слишком большой для сервера.';
   if (status === 415) return 'Неподдерживаемый формат файла. Используйте PDF.';
   if (status === 422) return 'Документ не удалось обработать. Проверьте содержимое файла.';
@@ -132,6 +135,10 @@ export const API = {
 
   getJobProgress(jobId) {
     return request(`/jobs/${encodeURIComponent(jobId)}`, { timeoutMs: 20000 });
+  },
+
+  getGenerationActive() {
+    return request('/generation/active', { timeoutMs: 10000 });
   },
 
   async getModels() {

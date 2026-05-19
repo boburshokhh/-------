@@ -75,17 +75,15 @@ router.get('/:jobId/stream', async (req, res) => {
     let subscriber = null;
     let redisAvailable = false;
 
-    if (config.JOB_QUEUE_ENABLED) {
-        try {
-            const { newConnection } = require('../db/redisClient');
-            subscriber = newConnection(config.REDIS_DB_QUEUE ?? 0);
-            subscriber.on('error', () => { redisAvailable = false; });
-            await subscriber.ping();
-            redisAvailable = true;
-        } catch {
-            redisAvailable = false;
-            if (subscriber) { subscriber.quit().catch(() => {}); subscriber = null; }
-        }
+    try {
+        const { newConnection } = require('../db/redisClient');
+        subscriber = newConnection(config.REDIS_DB_QUEUE ?? 0);
+        subscriber.on('error', () => { redisAvailable = false; });
+        await subscriber.ping();
+        redisAvailable = true;
+    } catch {
+        redisAvailable = false;
+        if (subscriber) { subscriber.quit().catch(() => {}); subscriber = null; }
     }
 
     if (redisAvailable && subscriber) {

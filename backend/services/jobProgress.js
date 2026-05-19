@@ -8,7 +8,7 @@ let _pubAvailable = false;
 let _pubChecked = false;
 
 function getPublisher() {
-    if (!config.SSE_ENABLED || !config.JOB_QUEUE_ENABLED) return null;
+    if (!config.SSE_ENABLED) return null;
     if (!_pubChecked) {
         _pubChecked = true;
         try {

@@ -37,6 +37,15 @@ module.exports = function errorHandler(err, req, res, next) {
         });
     }
 
+    if (err.type === 'GENERATION_BUSY') {
+        markUploadJobError(req, err.message || 'Генерация уже выполняется');
+        return res.status(409).json({
+            error: err.message || 'Генерация уже выполняется',
+            code: 'generation_busy',
+            busy: err.busy || null,
+        });
+    }
+
     if (err.type === 'INVALID_FILE_TYPE') {
         markUploadJobError(req, err.message || 'Неподдерживаемый формат');
         return res.status(415).json({

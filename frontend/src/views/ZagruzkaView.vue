@@ -259,6 +259,17 @@ async function loadHealth() {
 
 async function handleUpload(file) {
   if (!file) return
+
+  try {
+    const active = await API.getGenerationActive()
+    if (active?.busy) {
+      store.actions.failUpload(active.message || 'Сервер занят генерацией другого теста.')
+      return
+    }
+  } catch {
+    /* продолжаем — сервер проверит при upload */
+  }
+
   const jobId = createClientJobId()
   store.actions.startUpload(file, jobId)
   // POST /upload должен уйти раньше GET /jobs/:id: иначе registerUploadJobStub на сервере
@@ -275,12 +286,6 @@ async function handleUpload(file) {
   startPolling()
   try {
     const result = await uploadPromise
-    const isQueued = result?.status === 'queued'
-      || (result?.jobId && !result?.testId && result?.success !== false)
-    if (isQueued) {
-      store.actions.markUploadQueued(result)
-      return
-    }
     stopPolling()
     store.actions.finishUpload(result)
   } catch (error) {
