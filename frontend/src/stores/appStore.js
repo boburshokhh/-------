@@ -139,6 +139,25 @@ export function useAppStore() {
       state.generationModes = Array.isArray(modes) ? modes : [];
     },
 
+    /** POST /upload вернул 202 — генерация в worker, опрос GET /api/jobs/:id */
+    markUploadQueued(payload) {
+      state.upload.status = 'processing';
+      state.upload.error = '';
+      if (payload?.jobId) state.upload.jobId = String(payload.jobId);
+      state.upload.progress = {
+        phase: 'queued',
+        stage: 'enqueued',
+        percent: 0,
+        detail: payload?.message || 'Задача в очереди, генерация в фоне…',
+        updatedAt: Date.now(),
+        volumeReady: false,
+        workDone: state.upload.progress?.workDone ?? 0,
+        workTotal: state.upload.progress?.workTotal ?? null,
+        history: state.upload.progress?.history || [],
+      };
+      persistState();
+    },
+
     startUpload(file, jobId) {
       state.upload.file = file;
       state.upload.status = 'uploading';

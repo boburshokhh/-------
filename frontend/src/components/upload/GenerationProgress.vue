@@ -237,9 +237,9 @@ const currentDetail = computed(() => {
 })
 
 // ── Phase pills ────────────────────────────────────────────────────
-const PHASE_ORDER = ['upload', 'parse', 'db', 'index', 'generate', 'validate', 'done']
+const PHASE_ORDER = ['upload', 'parse', 'db', 'queued', 'index', 'generate', 'validate', 'done']
 const pillDefs = [
-  { id: 'upload',   phases: ['upload'],                     label: 'Загрузка'    },
+  { id: 'upload',   phases: ['upload', 'queued'],           label: 'Загрузка'    },
   { id: 'parse',    phases: ['parse', 'db'],                label: 'Разбор'      },
   { id: 'index',    phases: ['index'],                      label: 'Индексация'  },
   { id: 'generate', phases: ['generate', 'validate', 'dedup', 'backfill', 'finalize'], label: 'ИИ Генерация' },

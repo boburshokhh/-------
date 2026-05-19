@@ -119,6 +119,7 @@ async function processGenerationJob(job) {
         jobProgress.logJobProgress(jobId, {
             phase: 'done',
             stage: 'completed',
+            detail: `Сохранён тест: ${testData.questions.length} вопросов`,
             testId: testRow.id,
             documentId: Number(documentId),
             totalQuestions: testData.questions.length,

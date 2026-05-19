@@ -146,6 +146,11 @@ app.get('/api/health', async (req, res) => {
             maxPages: config.MAX_PAGES,
             maxFileSizeMb: config.MAX_FILE_SIZE_MB,
         },
+        backgroundJobs: {
+            enabled: !!config.JOB_QUEUE_ENABLED,
+            sseEnabled: !!config.SSE_ENABLED,
+            workerRequired: !!config.JOB_QUEUE_ENABLED,
+        },
         geminiQuota: quota,
     });
 });

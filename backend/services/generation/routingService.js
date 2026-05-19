@@ -1,6 +1,7 @@
 const aiRoutingTariffsRepo = require('../../db/repositories/aiRoutingTariffsRepo');
 const aiGlobalPoliciesRepo = require('../../db/repositories/aiGlobalPoliciesRepo');
 const quotaGuard = require('../quotaGuard');
+const { resolveApiModelId } = require('../../utils/modelAliases');
 
 /**
  * Разрешает, какую модель использовать для данной задачи (stage),
@@ -104,10 +105,10 @@ async function resolveRoute(profileCode, stageName, { estimatedTokens = 0, env =
     }
 
     return {
-        resolved_model: selectedModel,
+        resolved_model: resolveApiModelId(selectedModel),
         is_fallback_active: isFallbackActive,
         explainability_trace: trace,
-        skipStage: false
+        skipStage: false,
     };
 }
 

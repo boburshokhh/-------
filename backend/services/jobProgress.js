@@ -328,6 +328,16 @@ function logJobProgress(jobId, payload) {
         updatedAt: Date.now(),
     };
 
+    // Результат фоновой задачи (worker) — для GET /api/jobs/:id после phase=done
+    const passthrough = [
+        'testId', 'documentId', 'totalQuestions', 'title', 'generationMetrics', 'errorClass',
+    ];
+    for (const key of passthrough) {
+        if (payload[key] !== undefined && payload[key] !== null) {
+            row[key] = payload[key];
+        }
+    }
+
     setJob(jobId, row);
     appendHistory(jobId, row);
     console.log(`[PROGRESS] ${JSON.stringify(row)}`);

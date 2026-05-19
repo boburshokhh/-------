@@ -157,7 +157,18 @@ onMounted(async () => {
   ])
   store.actions.setModels(modelsPayload)
   store.actions.setGenerationModes(generationModesPayload?.modes || [])
-  if (isBusy.value && store.state.upload.jobId) {
+  const { jobId, testId, status } = store.state.upload
+  if (jobId && !testId && status !== 'done' && status !== 'error') {
+    if (status === 'idle') {
+      store.actions.setUploadProgress({
+        phase: 'queued',
+        stage: 'resumed',
+        detail: 'Возобновление отслеживания фоновой задачи…',
+        percent: 0,
+      })
+    }
+    startPolling()
+  } else if (isBusy.value && jobId) {
     startPolling()
   }
 })
@@ -199,8 +210,21 @@ async function pollProgress() {
     const progress = await API.getJobProgress(jobId)
     job404Streak = 0
     store.actions.setUploadProgress(progress)
-    if (progress.phase === 'done' || progress.phase === 'error') {
+    if (progress.phase === 'done') {
       stopPolling()
+      if (progress.testId) {
+        store.actions.finishUpload({
+          testId: progress.testId,
+          generationMetrics: progress.generationMetrics ?? null,
+        })
+      } else {
+        store.actions.failUpload('Генерация завершена, но идентификатор теста не получен. Обновите страницу или повторите загрузку.')
+      }
+      return
+    }
+    if (progress.phase === 'error') {
+      stopPolling()
+      store.actions.failUpload(progress.detail || 'Ошибка генерации')
     }
   } catch (error) {
     if (error?.code === 'FETCH_TIMEOUT') {
@@ -251,8 +275,14 @@ async function handleUpload(file) {
   startPolling()
   try {
     const result = await uploadPromise
-    store.actions.finishUpload(result)
+    const isQueued = result?.status === 'queued'
+      || (result?.jobId && !result?.testId && result?.success !== false)
+    if (isQueued) {
+      store.actions.markUploadQueued(result)
+      return
+    }
     stopPolling()
+    store.actions.finishUpload(result)
   } catch (error) {
     stopPolling()
     store.actions.failUpload(error?.message || 'Не удалось загрузить файл')
