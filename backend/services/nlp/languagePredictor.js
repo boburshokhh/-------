@@ -51,7 +51,33 @@ function detectLanguage(text) {
     return detectLanguageWithDiagnostics(text).lang;
 }
 
+/**
+ * Язык для пайплайна: фиксированный из config или эвристика по тексту.
+ * Эвристика — локальная (первые ~3000 символов), без вызовов LLM.
+ * @param {string} text
+ * @param {{ defaultLang?: string }} [opts] — 'ru' | 'en' из DEFAULT_DOCUMENT_LANGUAGE
+ */
+function resolveDocumentLanguage(text, opts = {}) {
+    const fixed = opts.defaultLang && ['ru', 'en'].includes(opts.defaultLang) ? opts.defaultLang : null;
+    if (fixed) {
+        return {
+            lang: fixed,
+            diagnostics: {
+                full_text_length: typeof text === 'string' ? text.length : 0,
+                sample_chars: 0,
+                cyrillic_count: 0,
+                latin_count: 0,
+                ru_word_hits: 0,
+                en_word_hits: 0,
+                resolved_by: 'config_default',
+            },
+        };
+    }
+    return detectLanguageWithDiagnostics(text);
+}
+
 module.exports = {
     detectLanguageWithDiagnostics,
     detectLanguage,
+    resolveDocumentLanguage,
 };

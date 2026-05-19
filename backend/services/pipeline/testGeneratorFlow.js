@@ -32,7 +32,7 @@ const customModeProfilesRepo = require('../../db/repositories/customModeProfiles
 const customModeService = require('../customModeService');
 
 // NLP
-const { detectLanguageWithDiagnostics } = require('../nlp/languagePredictor');
+const { resolveDocumentLanguage } = require('../nlp/languagePredictor');
 const { scoreEvidenceQuality, assignDifficulties } = require('../nlp/scoring');
 const { semanticDedup, levenshteinSimilarity } = require('../nlp/similarity');
 
@@ -794,9 +794,14 @@ async function runTestGeneratorFlow(fullText, docName, indexedChunks, onProgress
     const documentId = opts.documentId != null ? opts.documentId : null;
     const progress   = p => { if (typeof onProgress === 'function') onProgress(p); };
 
-    // ── 1. Language detection ────────────────────────────────────────────────
-    const { lang: detectedLang, diagnostics: langDiagnostics } = detectLanguageWithDiagnostics(fullText);
-    console.log(`[PIPELINE] Язык: ${detectedLang} (${langDiagnostics.resolved_by})`);
+    // ── 1. Language (локальная эвристика или DEFAULT_DOCUMENT_LANGUAGE=ru) ──
+    const { lang: detectedLang, diagnostics: langDiagnostics } = resolveDocumentLanguage(fullText, {
+        defaultLang: config.DEFAULT_DOCUMENT_LANGUAGE || '',
+    });
+    const langLabel = langDiagnostics.resolved_by === 'config_default'
+        ? `${detectedLang} (задан в конфиге)`
+        : `${detectedLang} (${langDiagnostics.resolved_by})`;
+    console.log(`[PIPELINE] Язык: ${langLabel}`);
     progress({ phase: 'generate', stage: 'language', workDelta: PW.GEN_LANG, detail: `Язык: ${detectedLang}` });
     logStructured({
         level: 'info', traceId, documentId, phase: 'generate', event: 'document_language_detected',

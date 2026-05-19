@@ -151,6 +151,14 @@ module.exports = {
   /** Макс. ожидание освобождения RPM-слота (мс). 90s — безопасный лимит до HTTP-таймаута клиента */
   QUOTA_RPM_WAIT_MAX_MS: parseInt(process.env.QUOTA_RPM_WAIT_MAX_MS, 10) || 90000,
   EMBEDDING_MODEL: process.env.EMBEDDING_MODEL || 'gemini-embedding-001',
+  /**
+   * Фиксированный язык документа: ru | en — пропускает эвристику (документы всегда на одном языке).
+   * Пусто или auto — локальное определение по тексту (без LLM, ~1 мс).
+   */
+  DEFAULT_DOCUMENT_LANGUAGE: (() => {
+    const v = String(process.env.DEFAULT_DOCUMENT_LANGUAGE || '').trim().toLowerCase();
+    return v === 'ru' || v === 'en' ? v : '';
+  })(),
   // RAG настройки
   TARGET_QUESTIONS_MIN: parseInt(process.env.TARGET_QUESTIONS_MIN) || 20,
   TARGET_QUESTIONS_MAX: parseInt(process.env.TARGET_QUESTIONS_MAX) || 30,
